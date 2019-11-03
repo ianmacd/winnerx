@@ -22,7 +22,7 @@
 #include <linux/power_supply.h>
 #include <linux/i2c.h>
 #include <linux/device.h>
-#include "include/sec_charging_common.h"
+#include "../sec_charging_common.h"
 
 #define I2C_ADDR_LIMITER_MAIN		(0x70 >> 1)
 #define I2C_ADDR_LIMITER_SUB		(0x72 >> 1)
