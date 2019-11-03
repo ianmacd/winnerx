@@ -34,7 +34,7 @@
 #include <linux/completion.h>
 #include <linux/wakelock.h>
 
-#include <zinitix_zt75xx_ts.h>
+#include "zinitix_zt75xx_ts.h"
 #include <linux/input/mt.h>
 
 #if defined(CONFIG_SEC_SYSFS)
