@@ -649,6 +649,19 @@ void mfc_set_min_duty(struct mfc_charger_data *charger, unsigned int duty)
 	mfc_reg_write(charger->client, MFC_TX_MIN_DUTY_SETTING_REG, data);
 }
 
+static void mfc_set_tx_oc_fod(struct mfc_charger_data *charger)
+{
+	u8 data[2] = {0,};
+
+	pr_info("%s oc_fod1 = %d mA\n", __func__, charger->pdata->oc_fod1);
+
+	data[0] = (charger->pdata->oc_fod1) & 0xff;
+	data[1] = (charger->pdata->oc_fod1 & 0xff00) >> 8;
+
+	mfc_reg_write(charger->client, MFC_TX_OC_FOD1_LIMIT_L_REG, data[0]);
+	mfc_reg_write(charger->client, MFC_TX_OC_FOD1_LIMIT_H_REG, data[1]);
+}
+
 void mfc_fod_set_hero_5v(struct mfc_charger_data *charger)
 {
 	int i = 0;
@@ -1378,6 +1391,12 @@ static void mfc_tx_handle_rx_packet(struct mfc_charger_data *charger)
 			value.intval = BATT_TX_EVENT_WIRELESS_RX_CS100;
 			psy_do_property("wireless", set, POWER_SUPPLY_EXT_PROP_WIRELESS_TX_ERR, value);
 		}
+	}  else if (cmd_data == MFC_HEADER_END_POWER_TRANSFER) {
+		if (val_data == MFC_EPT_CODE_OVER_TEMPERATURE) {
+			pr_info("%s: EPT-OT Received, TX power off\n", __func__);
+			value.intval = BATT_TX_EVENT_WIRELESS_RX_UNSAFE_TEMP;
+			psy_do_property("wireless", set, POWER_SUPPLY_EXT_PROP_WIRELESS_TX_ERR, value);
+		}		
 	}
 }
 
@@ -3049,6 +3068,13 @@ void mfc_set_tx_fod_with_gear(struct mfc_charger_data *charger)
 	}
 }
 
+static void mfc_set_tx_ping_freq_with_gear(struct mfc_charger_data *charger)
+{
+	pr_info("@Tx_Mode %s\n", __func__);
+
+	mfc_reg_write(charger->client, MFC_TX_PING_FREQ_L_REG, charger->pdata->gear_ping_freq);
+}
+
 void mfc_set_tx_fod_threshold_with_phone(struct mfc_charger_data *charger)
 {
 	pr_info("@Tx_Mode %s\n", __func__);
@@ -3083,6 +3109,7 @@ static void mfc_wpc_rx_det_work(struct work_struct *work)
 		pr_info("@Tx_Mode %s : Samsung Gear Connected\n", __func__);
 		charger->wc_rx_type = SS_GEAR;
 		mfc_set_tx_fod_with_gear(charger);
+		mfc_set_tx_ping_freq_with_gear(charger);
 	} else if (prmc_id == 0x42) {
 		pr_info("@Tx_Mode %s : Samsung Phone Connected\n", __func__);
 		charger->wc_rx_type = SS_PHONE;
@@ -3130,10 +3157,10 @@ void mfc_check_tx_gear_time(struct mfc_charger_data *charger)
 	}
 
 	if ((gear_charging_time >= 90) && charger->gear_start_time) {
-		pr_info("@Tx_Mode %s: set OC FOD1 900mA for Gear, gear_charging_time(%ld)\n", __func__, gear_charging_time);
-		/* FOD1 LIMIT 900mA */
-		mfc_reg_write(charger->client, MFC_TX_OC_FOD1_LIMIT_L_REG, 0x84);
-		mfc_reg_write(charger->client, MFC_TX_OC_FOD1_LIMIT_H_REG, 0x3);
+		pr_info("@Tx_Mode %s: set OC FOD1 %d mA for Gear, gear_charging_time(%ld)\n",
+			__func__, charger->pdata->oc_fod1, gear_charging_time);
+		mfc_set_tx_oc_fod(charger);
+
 		charger->gear_start_time = 0;
 	}
 }
@@ -4750,6 +4777,20 @@ static int mfc_chg_parse_dt(struct device *dev,
 		if (ret < 0) {
 			pr_info("%s: fail to read wc_hv_rpp.\n", __func__);
 			pdata->wc_hv_rpp = 0x40;
+		}
+
+		ret = of_property_read_u32(np, "battery,oc_fod1",
+						&pdata->oc_fod1);
+		if (ret < 0) {
+			pr_info("%s: fail to read oc_fod1\n", __func__);
+			pdata->oc_fod1 = 900; /* IC default */
+		}
+
+		ret = of_property_read_u32(np, "battery,gear_ping_freq",
+						&pdata->gear_ping_freq);
+		if (ret < 0) {
+			pr_info("%s: fail to read gear_ping_freq\n", __func__);
+			pdata->gear_ping_freq = 0x96; /* IC default */
 		}
 
 		/* wpc_det */

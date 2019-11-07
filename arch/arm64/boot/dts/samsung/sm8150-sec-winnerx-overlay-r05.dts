@@ -9318,6 +9318,8 @@
 				battery,fod_dream_cv_data = <0x96 0x53 0x8e 0x49 0x96 0xffffffec 0x96 0x39 0xa5 0xffffffdc 0x9c 0x31>;
 				battery,wc_cover_rpp = <0x44>;
 				battery,phone_fod_threshold = <0x3b>;
+				battery,oc_fod1 = <0x44c>;
+				battery,gear_ping_freq = <0xcd>;
 			};
 		};
 	};
@@ -9560,9 +9562,9 @@
 				battery,siop_hv_wireless_charging_limit_current = <0x352>;
 				battery,siop_store_hv_wireless_input_limit_current = <0x1c2>;
 				battery,wireless_otg_input_current = <0x384>;
-				battery,ttf_hv_charge_current = <0xbb8>;
-				battery,ttf_hv_12v_wireless_charge_current = <0x992>;
-				battery,ttf_hv_wireless_charge_current = <0x497>;
+				battery,ttf_hv_charge_current = <0x992>;
+				battery,ttf_hv_12v_wireless_charge_current = <0x60e>;
+				battery,ttf_hv_wireless_charge_current = <0x546>;
 				battery,ttf_wireless_charge_current = <0x3ca>;
 				battery,rp_current_rp1 = <0x1f4>;
 				battery,rp_current_rp2 = <0x5dc>;

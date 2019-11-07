@@ -3642,7 +3642,11 @@ static int sde_plane_sspp_atomic_check(struct drm_plane *plane,
 		SDE_ERROR_PLANE(psde,
 				"plane doesn't have scaler/csc for yuv\n");
 		ret = -EINVAL;
-
+	/* check existing attached crtc */
+	} else if (sde_plane_enabled(plane->state) &&
+		plane->state->crtc != state->crtc) {
+		SDE_ERROR_PLANE(psde, "pipe doesn't support crtc switch\n");
+		ret = -EINVAL;
 	/* check src bounds */
 	} else if (rstate->out_fb_width > MAX_IMG_WIDTH ||
 		rstate->out_fb_height > MAX_IMG_HEIGHT ||
