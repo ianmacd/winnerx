@@ -5410,7 +5410,9 @@ static void spay_enable(void *device_data)
 	input_info(true, &ts->client->dev, "%s: %s, %02X\n",
 			__func__, sec->cmd_param[0] ? "on" : "off", ts->lowpower_mode);
 
+	mutex_lock(&ts->modechange);
 	sec_ts_chk_tsp_ic_status(ts, SEC_TS_STATE_CHK_POS_SYSFS);
+	mutex_unlock(&ts->modechange);
 
 	snprintf(buff, sizeof(buff), "OK");
 	sec->cmd_state = SEC_CMD_STATUS_OK;
@@ -5569,7 +5571,9 @@ static void aod_enable(void *device_data)
 	input_info(true, &ts->client->dev, "%s: %s, %02X\n",
 			__func__, sec->cmd_param[0] ? "on" : "off", ts->lowpower_mode);
 
+	mutex_lock(&ts->modechange);
 	sec_ts_chk_tsp_ic_status(ts, SEC_TS_STATE_CHK_POS_SYSFS);
+	mutex_unlock(&ts->modechange);
 
 	snprintf(buff, sizeof(buff), "OK");
 	sec->cmd_state = SEC_CMD_STATUS_OK;
@@ -5608,7 +5612,9 @@ static void aot_enable(void *device_data)
 	input_info(true, &ts->client->dev, "%s: %s, %02X\n",
 			__func__, sec->cmd_param[0] ? "on" : "off", ts->lowpower_mode);
 
+	mutex_lock(&ts->modechange);
 	sec_ts_chk_tsp_ic_status(ts, SEC_TS_STATE_CHK_POS_SYSFS);
+	mutex_unlock(&ts->modechange);
 
 	snprintf(buff, sizeof(buff), "%s", "OK");
 	sec->cmd_state = SEC_CMD_STATUS_OK;
@@ -6399,8 +6405,11 @@ static void set_rear_selfie_mode(void *device_data)
 		ts->rear_selfie_mode = sec->cmd_param[0];
 		snprintf(buff, sizeof(buff), "OK");
 
-		if (!ts->rear_selfie_mode)
+		if (!ts->rear_selfie_mode) {
+			mutex_lock(&ts->modechange);
 			sec_ts_chk_tsp_ic_status(ts, SEC_TS_STATE_CHK_POS_SYSFS);
+			mutex_unlock(&ts->modechange);
+		}
 	}
 
 	sec_cmd_set_cmd_result(sec, buff, strnlen(buff, sizeof(buff)));

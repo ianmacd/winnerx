@@ -107,6 +107,9 @@ struct max77705_usbc_platform_data {
 	u8 pd_status0;
 	u8 pd_status1;
 
+	/* opcode register information */
+	u8 op_ctrl1_w;
+
 	int watchdog_count;
 	int por_count;
 
@@ -234,6 +237,9 @@ struct max77705_usbc_platform_data {
 	int detach_done_wait;
 	int set_altmode;
 	int set_altmode_error;
+	
+	bool recover_opcode_list[OPCODE_NONE];
+	int need_recover;
 };
 
 /* Function Status from s2mm005 definition */

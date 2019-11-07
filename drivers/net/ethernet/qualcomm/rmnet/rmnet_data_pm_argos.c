@@ -10,7 +10,7 @@
  *  option) any later version.
  *
  */
- 
+
 #include <linux/string.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
@@ -78,16 +78,19 @@ extern void ipa3_set_napi_chained_rx(bool enable);
 
 /* gro count variation */
 extern u32 config_flushcount;
+static bool gro_avoided;
+
 #define RMNET_GRO_CNT_LVL1_MBPS 100
 #define RMNET_GRO_CNT_LVL2_MBPS 300
 #define RMNET_GRO_LVL1_CNT 2
 #define RMNET_GRO_LVL2_CNT 5
 #define RMNET_GRO_MAX_CNT 0
 
-#define get_gro_cnt(speed) (speed < RMNET_GRO_CNT_LVL1_MBPS ?	\
-			    RMNET_GRO_LVL1_CNT :		\
+#define get_gro_cnt(speed) (gro_avoided ? 1 :			\
+			    (speed < RMNET_GRO_CNT_LVL1_MBPS ?	\
+				RMNET_GRO_LVL1_CNT :		\
 			    (speed < RMNET_GRO_CNT_LVL2_MBPS ?	\
-			     RMNET_GRO_LVL2_CNT : RMNET_GRO_MAX_CNT))
+				RMNET_GRO_LVL2_CNT : RMNET_GRO_MAX_CNT)))
 
 
 #ifdef CONFIG_RPS
@@ -271,17 +274,50 @@ static struct notifier_block rmnet_data_nb = {
 	.notifier_call = rmnet_data_pm_argos_cb,
 };
 
+#define SOFTAP_NAME "swlan0"
+static int rmnet_data_pm_softap_exception(struct notifier_block *nb,
+					  unsigned long event, void *ptr)
+{
+	struct net_device *dev = netdev_notifier_info_to_dev(ptr);
+
+	if (!strncmp(dev->name, SOFTAP_NAME, 6)) {
+		if (event == NETDEV_UP) {
+			pr_err("%s() gro avoided\n", __func__);
+			gro_avoided = true;
+			rmnet_data_pm_set_gro_cnt(0);
+		} else if (event == NETDEV_DOWN) {
+			pr_err("%s() gro allowed\n", __func__);
+			gro_avoided = false;
+			/* don't need to set here */
+			/* it will follow next argos notif */
+		}
+	}
+
+	return NOTIFY_DONE;
+}
+
+static struct notifier_block rmnet_data_event_nb = {
+	.notifier_call = rmnet_data_pm_softap_exception,
+};
+
 static int __init rmnet_data_pm_argos_init(void)
 {
 	int ret = sec_argos_register_notifier(&rmnet_data_nb, ARGOS_IPA_LABEL);
 	if (ret) {
 		pr_err("Fail to register rmnet_data pm argos notifier block\n");
 	}
+
+	ret = register_netdevice_notifier(&rmnet_data_event_nb);
+	if (ret) {
+		pr_err("Fail to register rmnetdata pm argos netdev notifier\n");
+		sec_argos_unregister_notifier(&rmnet_data_nb, ARGOS_IPA_LABEL);
+	}
 	return ret;
 }
 
 static void __exit rmnet_data_pm_argos_exit(void)
 {
+	unregister_netdevice_notifier(&rmnet_data_event_nb);
 	sec_argos_unregister_notifier(&rmnet_data_nb, ARGOS_IPA_LABEL);
 }
 

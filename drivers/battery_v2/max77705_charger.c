@@ -2185,8 +2185,8 @@ static irqreturn_t max77705_bypass_irq(int irq, void *data)
 			val.intval = 0;
 			psy_do_property("otg", set, POWER_SUPPLY_PROP_ONLINE, val);
 		} else if (charger->uno_on) {
-			val.intval = 0;
-			psy_do_property("wireless", set, POWER_SUPPLY_EXT_PROP_WIRELESS_TX_ENABLE, val);
+			val.intval = BATT_TX_EVENT_WIRELESS_TX_OCP;
+			psy_do_property("wireless", set, POWER_SUPPLY_EXT_PROP_WIRELESS_TX_ERR, val);
 		}
 	}
 	return IRQ_HANDLED;

@@ -1007,7 +1007,9 @@ struct mfc_charger_platform_data {
 	int mst_switch_delay;
 	int wc_cover_rpp;
 	int wc_hv_rpp;
+	u32 oc_fod1;
 	u32 phone_fod_threshold;
+	u32 gear_ping_freq;
 };
 
 #define mfc_charger_platform_data_t \
