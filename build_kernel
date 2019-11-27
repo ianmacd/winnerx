@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/bash -x
 
 export ARCH=arm64
 
@@ -14,6 +14,14 @@ CLANG_TRIPLE=aarch64-linux-gnu-
 
 KERNEL_MAKE_ENV="DTC_EXT=$(pwd)/tools/dtc CONFIG_BUILD_ARM64_DT_OVERLAY=y"
 
-make -C $(pwd) $KERNEL_MAKE_ENV CROSS_COMPILE=$BUILD_CROSS_COMPILE REAL_CC=$KERNEL_LLVM_BIN CLANG_TRIPLE=$CLANG_TRIPLE CFP_CC=$KERNEL_LLVM_BIN winnerx_eur_open_caliban_defconfig
+# If not cleaning the tree between builds, the following command will be
+# required on 2nd and subsequent builds to prevent a huge slowdown of the
+# build.
+#
+# find techpack -type f -name \*.o | xargs rm -f
 
-make -j$(nproc) -C $(pwd) $KERNEL_MAKE_ENV CROSS_COMPILE=$BUILD_CROSS_COMPILE REAL_CC=$KERNEL_LLVM_BIN CLANG_TRIPLE=$CLANG_TRIPLE CFP_CC=$KERNEL_LLVM_BIN
+make mrproper
+
+make $KERNEL_MAKE_ENV CROSS_COMPILE=$BUILD_CROSS_COMPILE REAL_CC=$KERNEL_LLVM_BIN CLANG_TRIPLE=$CLANG_TRIPLE CFP_CC=$KERNEL_LLVM_BIN winnerx_eur_open_caliban_defconfig
+
+make -j$(nproc) $KERNEL_MAKE_ENV CROSS_COMPILE=$BUILD_CROSS_COMPILE REAL_CC=$KERNEL_LLVM_BIN CLANG_TRIPLE=$CLANG_TRIPLE CFP_CC=$KERNEL_LLVM_BIN
