@@ -116,7 +116,7 @@ static ssize_t sec_cmd_store(struct device *dev,
 		return -EINVAL;
 	}
 
-	if (strlen(buf) >= SEC_CMD_STR_LEN) {
+	if (strnlen(buf, SEC_CMD_STR_LEN) >= SEC_CMD_STR_LEN) {
 		pr_err("%s: %s %s: cmd length(strlen(buf)) is over (%d,%s)!!\n",
 				dev_name(data->fac_dev), SECLOG, __func__, (int)strlen(buf), buf);
 		return -EINVAL;
@@ -353,7 +353,7 @@ static ssize_t sec_cmd_store(struct device *dev, struct device_attribute *devatt
 		return -EINVAL;
 	}
 
-	if (strlen(buf) >= SEC_CMD_STR_LEN) {
+	if (strnlen(buf, SEC_CMD_STR_LEN) >= SEC_CMD_STR_LEN) {
 		pr_err("%s: %s %s: cmd length(strlen(buf)) is over (%d,%s)!!\n",
 				dev_name(data->fac_dev), SECLOG, __func__, (int)strlen(buf), buf);
 		return -EINVAL;
