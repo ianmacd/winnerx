@@ -154,6 +154,8 @@ struct secdp_misc {
 	bool reboot;    /* set true when rebooted or shutdown */
 	int  hdcp_retry; /* count if dp link is unstable during hdcp */
 
+	enum mon_aspect_ratio_t prefer_ratio;
+
 	struct mutex		notifier_lock;
 	struct wake_lock	wlock;
 };
@@ -186,7 +188,6 @@ struct secdp_attention_node {
 	struct list_head list;
 };
 
-bool secdp_check_supported_resolution(struct drm_display_mode *mode);
 bool secdp_check_if_lpm_mode(void);
 
 int secdp_ccic_noti_register_ex(struct secdp_misc *sec, bool retry);

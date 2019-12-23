@@ -1970,11 +1970,14 @@ int cam_sensor_util_power_down(struct cam_sensor_power_ctrl_t *ctrl,
 					if (pd->config_val > 0) {
 						CAM_INFO(CAM_SENSOR, "[RET_DBG] skip disable regulator, set sensor power %s, %ld",
 							soc_info->rgltr_name[ps->seq_val], pd->config_val);
-						ret = regulator_set_voltage(
-							soc_info->rgltr[ps->seq_val], pd->config_val, soc_info->rgltr_max_volt[ps->seq_val]);
-						if (ret) {
-							CAM_ERR(CAM_UTIL, "%s set voltage failed",
-								soc_info->rgltr_name[ps->seq_val]);
+						if (soc_info->rgltr[ps->seq_val] != NULL)
+						{
+							ret = regulator_set_voltage(
+								soc_info->rgltr[ps->seq_val], pd->config_val, soc_info->rgltr_max_volt[ps->seq_val]);
+							if (ret) {
+								CAM_ERR(CAM_UTIL, "%s set voltage failed",
+									soc_info->rgltr_name[ps->seq_val]);
+							}
 						}
 						continue;
 					}

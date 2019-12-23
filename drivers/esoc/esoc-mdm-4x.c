@@ -17,8 +17,6 @@
 #include <soc/qcom/sysmon.h>
 #include "esoc-mdm.h"
 
-#include <soc/qcom/subsystem_restart.h>
-
 enum gpio_update_config {
 	GPIO_UPDATE_BOOTING_CONFIG = 1,
 	GPIO_UPDATE_RUNNING_CONFIG,
@@ -504,10 +502,6 @@ static irqreturn_t mdm_errfatal(int irq, void *dev_id)
 	struct esoc_clink *esoc;
 	struct device *dev;
 
-	if (silent_ssr) {
-		pr_warn("modem ssr is going, Ignoring %s\n", __func__);
-		return IRQ_HANDLED;
-	}	
 	if (!mdm)
 		goto no_mdm_irq;
 	dev = mdm->dev;
@@ -554,10 +548,6 @@ static irqreturn_t mdm_status_change(int irq, void *dev_id)
 	if (value == 0 && mdm->ready) {
 		esoc_mdm_log("Unexpected reset of external modem\n");
 		dev_err(dev, "unexpected reset external modem\n");
-		if (silent_ssr) {
-			pr_warn("modem ssr is going, Ignoring %s\n", __func__);
-			return IRQ_HANDLED;
-		}
 		subsys_set_crash_status(esoc->subsys_dev, true);
 		esoc_clink_evt_notify(ESOC_UNEXPECTED_RESET, esoc);
 	} else if (value == 1) {

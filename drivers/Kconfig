@@ -243,8 +243,6 @@ source "drivers/adsp_factory/Kconfig"
 
 source "drivers/motor/Kconfig"
 
-source "drivers/gud/Kconfig"
-
 source "drivers/fingerprint/Kconfig"
 
 source "drivers/five/Kconfig"
