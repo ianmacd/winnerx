@@ -55,7 +55,7 @@ module_param(disable_restart_work, uint, 0644);
 static int enable_debug;
 module_param(enable_debug, int, 0644);
 
-bool silent_ssr;
+static bool silent_ssr;
 static bool ap_force_stop;
 #define STOP_REASON_0_BIT 0x10
 #define STOP_REASON_1_BIT 0x20
@@ -1218,9 +1218,6 @@ static void subsystem_restart_wq_func(struct work_struct *work)
 	pr_info("[%s:%d]: Restart sequence for %s completed.\n",
 			current->comm, current->pid, desc->name);
 
-	if (!strncmp(desc->name, "modem", 5) && silent_ssr) 
-		silent_ssr = 0;
-
 err:
 	/* Reset subsys count */
 	if (ret)
@@ -1347,7 +1344,7 @@ int subsystem_restart_dev(struct subsys_device *dev)
 		qcom_smem_state_update_bits(dev->desc->state,
 				BIT(dev->desc->force_stop_bit), 0);
 		subsys_set_reset_reason(name, 0);
-
+		silent_ssr = 0;
 		ap_force_stop = 0;
 	}
 

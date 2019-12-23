@@ -24,6 +24,7 @@
 #include <linux/ip.h>
 #include <linux/ipv6.h>
 #include <linux/netlog.h>
+#include <linux/rtc.h>
 
 #define NLMSG_FLOW_ACTIVATE 1
 #define NLMSG_FLOW_DEACTIVATE 2
@@ -183,6 +184,8 @@ static void qmi_rmnet_update_flow_map(struct rmnet_flow_map *itm,
 int qmi_rmnet_flow_control(struct net_device *dev, u32 tcm_handle, int enable)
 {
 	struct netdev_queue *q;
+	struct timespec ts;
+	struct rtc_time tm;
 
 	if (unlikely(tcm_handle >= dev->num_tx_queues))
 		return 0;
@@ -191,10 +194,12 @@ int qmi_rmnet_flow_control(struct net_device *dev, u32 tcm_handle, int enable)
 	if (unlikely(!q))
 		return 0;
 
-	/*
-	net_log("flow_control() : dev=%s q=%d %s", dev->name,
-				tcm_handle, enable ? "enable" : "disable");
-	*/
+	getnstimeofday(&ts);
+	rtc_time_to_tm(ts.tv_sec, &tm);
+	net_log("%d-%02d-%02d %02d:%02d:%02d.%06lu, %s[%d] %s_queue\n", 
+				tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
+				tm.tm_hour, tm.tm_min, tm.tm_sec, ts.tv_nsec/1000,
+				dev->name, tcm_handle, enable ? "wake" : "stop");
 
 	if (enable)
 		netif_tx_wake_queue(q);

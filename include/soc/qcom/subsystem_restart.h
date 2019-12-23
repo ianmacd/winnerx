@@ -150,8 +150,6 @@ struct notif_data {
 	struct platform_device *pdev;
 };
 
-extern bool silent_ssr;
-
 #if defined(CONFIG_MSM_SUBSYSTEM_RESTART)
 
 extern int subsys_get_restart_level(struct subsys_device *dev);

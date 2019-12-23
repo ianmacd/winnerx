@@ -29,8 +29,8 @@
  * Check if a given string is the ending substring of another.
  */
 bool endsWith(const char *host, const char *rule) {
-    unsigned int hostLen = strlen(host);
-    unsigned int ruleLen = strlen(rule);
+    size_t hostLen = strlen(host);
+    size_t ruleLen = strlen(rule);
     if (hostLen >= ruleLen) {
         unsigned int offSet = hostLen - ruleLen;
         return strncmp(host + offSet , rule, ruleLen) == 0;
@@ -43,8 +43,8 @@ bool endsWith(const char *host, const char *rule) {
  * Check if a given string is the beginning substring of another.
  */
 bool beginsWith(const char *host, const char *rule) {
-    unsigned int hostLen = strlen(host);
-    unsigned int ruleLen = strlen(rule);
+    size_t hostLen = strlen(host);
+    size_t ruleLen = strlen(rule);
     if (hostLen >= ruleLen) {
         return strncmp(host, rule, ruleLen) == 0;
     } else {
@@ -56,7 +56,7 @@ bool beginsWith(const char *host, const char *rule) {
  * Check if the given host matches the provided white/black list rules.
  */
 bool matchHost(const char *rule, const char *host) {
-    unsigned int ruleLen = strlen(rule);
+    size_t ruleLen = strlen(rule);
     if (ruleLen == 1 && rule[0] == WILDCARD) { // rule is *, means all hosts
         return true;
     }
@@ -93,10 +93,7 @@ bool matchHost(const char *rule, const char *host) {
 static int domainfilter_check(const struct xt_mtchk_param *par)
 {
     struct xt_domainfilter_match_info *info = par->matchinfo;
-    printk(KERN_INFO "domainfilter - entered domainfilter_check");
-
     if (!(info->flags & (XT_DOMAINFILTER_WHITE|XT_DOMAINFILTER_BLACK))) {
-        printk(KERN_INFO "domainfilter - no valid flag provided");
         return -EINVAL;
     }
     return 0;
@@ -107,20 +104,14 @@ domainfilter_mt(const struct sk_buff *skb, struct xt_action_param *par)
 {
     const struct xt_domainfilter_match_info *info = par->matchinfo;
     struct sock *sk = skb_to_full_sk(skb);
-    printk(KERN_INFO "domainfilter - entered domainfilter_check");
 
     if (sk == NULL) {
-        printk(KERN_INFO "sk provided is null");
         return false;
     }
 
     // check domain name match
-    if (sk->domain_name != NULL && sk->domain_name[0] != '\0') {
-        bool match = matchHost(info->domain_name, sk->domain_name);
-        printk(KERN_INFO "domainfilter - host %s  rule %s match %d", sk->domain_name, info->domain_name, match);
-        return match;
-    } else {
-        printk(KERN_INFO "domainfilter - no domain provided");
+    if (sk->domain_name[0] != '\0') {
+        return matchHost(info->domain_name, sk->domain_name);
     }
 
     // didn't match
@@ -141,7 +132,6 @@ static struct xt_match domainfilter_mt_reg __read_mostly = {
 
 static int __init domainfilter_mt_init(void)
 {
-    printk(KERN_INFO "domainfilter_mt_init entered");
     return xt_register_match(&domainfilter_mt_reg);
 }
 
