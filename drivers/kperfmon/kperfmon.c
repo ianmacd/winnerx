@@ -364,16 +364,24 @@ ssize_t kperfmon_read(struct file *filp, char __user *data, size_t count, loff_t
 															readlogpacket.itemes.context_length,
 															readlogpacket.itemes.context_buffer);
 
-	if(buffer.debugger) {
+	if(length > count) {
+		length = count;
+	}
+
+	if(buffer.debugger && count > DEBUGGER_SIZE) {
 		char debugger[DEBUGGER_SIZE] = "______________________________";
 		
 		snprintf(debugger, DEBUGGER_SIZE, "S:%010lu_E:%010lu_____", start, end);
-		//memcpy(data, debugger, length);
+
+		if(length + DEBUGGER_SIZE > count) {
+			length = count - DEBUGGER_SIZE;
+		}
+
 		if (copy_to_user(data, debugger, strnlen(debugger,DEBUGGER_SIZE))) {
 			printk(KERN_INFO "kperfmon_read(copy_to_user(data, readbuffer, length) retuned > 0)\n");
 			return 0;
 		}
-		//memcpy(data + DEBUGGER_SIZE, readbuffer, length);
+
 		if (copy_to_user(data + DEBUGGER_SIZE, readbuffer, length)) {
 			printk(KERN_INFO "kperfmon_read(copy_to_user(data + DEBUGGER_SIZE, readbuffer, length) retuned > 0)\n");
 			return 0;
@@ -381,14 +389,13 @@ ssize_t kperfmon_read(struct file *filp, char __user *data, size_t count, loff_t
 
 		length += DEBUGGER_SIZE;
 	} else {
-		//memcpy(data, readbuffer, length);
 		if (copy_to_user(data, readbuffer, length)) {
 			printk(KERN_INFO "kperfmon_read(copy_to_user(data, readbuffer, length) retuned > 0)\n");
 			return 0;
 		}			
 	}
 
-	//printk(KERN_INFO "kperfmon_read(long : %d)\n", (int)(sizeof(long)));
+	//printk(KERN_INFO "kperfmon_read(count : %d)\n", count);
 	
 	return length;
 #endif
