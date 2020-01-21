@@ -166,6 +166,12 @@ static ssize_t ss_xlog_dump_read(struct file *file, char __user *buff,
 
 	if (__ss_dump_xlog_calc_range()) {
 		len = ss_xlog_dump_entry(xlog_buf, SS_XLOG_BUF_MAX);
+
+		if (len < 0 || len > count) {
+			pr_err("len is more than user buffer size");
+			return 0;
+		}
+
 		if (copy_to_user(buff, xlog_buf, len))
 			return -EFAULT;
 		*ppos += len;
