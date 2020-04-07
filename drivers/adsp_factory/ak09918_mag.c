@@ -20,7 +20,7 @@
 #define CHIP_ID "AK09918"
 
 #define MAG_ST_TRY_CNT 3
-#if defined(CONFIG_SEC_WINNERLTE_PROJECT) || defined(CONFIG_SEC_WINNERX_PROJECT)
+#if defined(CONFIG_SEC_WINNERLTE_PROJECT) || defined(CONFIG_SEC_WINNERX_PROJECT) || defined(CONFIG_SEC_ZODIAC_PROJECT)
 #define ABS(x) (((x)>0)?(x):-(x))
 #define ABS_ADC_SUB_FAIL (-99999)
 #define AKM_ST_FAIL (-1)
@@ -103,15 +103,16 @@ static ssize_t mag_raw_data_store(struct device *dev,
 	return size;
 }
 
-static ssize_t mag_selttest_show(struct device *dev,
+static ssize_t mag_selftest_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
 	struct adsp_data *data = dev_get_drvdata(dev);
 	uint8_t cnt = 0;
 	int retry = 0, i;
-#if defined(CONFIG_SEC_WINNERLTE_PROJECT) || defined(CONFIG_SEC_WINNERX_PROJECT)
+#if defined(CONFIG_SEC_WINNERLTE_PROJECT) || defined(CONFIG_SEC_WINNERX_PROJECT) || defined(CONFIG_SEC_ZODIAC_PROJECT)
 	int abs_adc_sum = 0, abs_adc_x = 0, abs_adc_y = 0, abs_adc_z = 0;
 #endif
+	int st_status = 0;
 
 RETRY_MAG_SELFTEST:
 	pr_info("[FACTORY] %s - start", __func__);
@@ -147,14 +148,18 @@ RETRY_MAG_SELFTEST:
 		return snprintf(buf, PAGE_SIZE, "-1,0,0,0,0,0,0,0,0,0\n");
 	}
 
-	pr_info("[FACTORY] status=%d, sf_status=%d, sf_x=%d, sf_y=%d, sf_z=%d\n dac=%d, adc=%d, adc_x=%d, adc_y=%d, adc_z=%d\n",
-		data->msg_buf[MSG_MAG][0], data->msg_buf[MSG_MAG][1],
+	if (data->msg_buf[MSG_MAG][1] != 0) {
+		pr_info("[FACTORY] %s - msg_buf[1] 0x%x", __func__, data->msg_buf[MSG_MAG][1]);
+		st_status = -1;
+	}
+	pr_info("[FACTORY] status=%d, st_status=%d, st_x=%d, st_y=%d, st_z=%d\n dac=%d, adc=%d, adc_x=%d, adc_y=%d, adc_z=%d\n",
+		data->msg_buf[MSG_MAG][0], st_status,
 		data->msg_buf[MSG_MAG][2], data->msg_buf[MSG_MAG][3],
 		data->msg_buf[MSG_MAG][4], data->msg_buf[MSG_MAG][5],
 		data->msg_buf[MSG_MAG][6], data->msg_buf[MSG_MAG][7],
 		data->msg_buf[MSG_MAG][8], data->msg_buf[MSG_MAG][9]);
 
-#if defined(CONFIG_SEC_WINNERLTE_PROJECT) || defined(CONFIG_SEC_WINNERX_PROJECT)
+#if defined(CONFIG_SEC_WINNERLTE_PROJECT) || defined(CONFIG_SEC_WINNERX_PROJECT) || defined(CONFIG_SEC_ZODIAC_PROJECT)
 	abs_adc_x = ABS(data->msg_buf[MSG_MAG][7]);
 	abs_adc_y = ABS(data->msg_buf[MSG_MAG][8]);
 	abs_adc_z = ABS(data->msg_buf[MSG_MAG][9]);
@@ -175,7 +180,7 @@ RETRY_MAG_SELFTEST:
 	msleep(20);
 	adsp_unicast(NULL, 0, MSG_MAG_CAL, 0, MSG_TYPE_FACTORY_DISABLE);
 	return snprintf(buf, PAGE_SIZE,	"%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\n",
-		data->msg_buf[MSG_MAG][0], data->msg_buf[MSG_MAG][1],
+		data->msg_buf[MSG_MAG][0], st_status,
 		data->msg_buf[MSG_MAG][2], data->msg_buf[MSG_MAG][3],
 		data->msg_buf[MSG_MAG][4], data->msg_buf[MSG_MAG][5],
 		data->msg_buf[MSG_MAG][6], data->msg_buf[MSG_MAG][7],
@@ -185,50 +190,32 @@ RETRY_MAG_SELFTEST:
 static ssize_t mag_dhr_sensor_info_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
-#if 0
 	struct adsp_data *data = dev_get_drvdata(dev);
-	struct msg_data message;
 	uint8_t cnt = 0;
 
-	message.msg_type = MSG_MAG;
-	data->calib_ready_flag &= ~(1 << MSG_MAG);
-	adsp_unicast(&message, sizeof(message),
-		MSG_TYPE_GET_CALIB_DATA, 0, 0);
-
-	while (!(data->calib_ready_flag & 1 << MSG_MAG) &&
+	adsp_unicast(NULL, 0, MSG_MAG, 0, MSG_TYPE_GET_DHR_INFO);
+	while (!(data->ready_flag[MSG_TYPE_GET_DHR_INFO] & 1 << MSG_MAG) &&
 		cnt++ < TIMEOUT_CNT)
-		msleep(20);
+		usleep_range(500, 550);
 
-	data->calib_ready_flag &= ~(1 << MSG_MAG);
+	data->ready_flag[MSG_TYPE_GET_DHR_INFO] &= ~(1 << MSG_MAG);
 
-	if (cnt >= TIMEOUT_CNT)
+	if (cnt >= TIMEOUT_CNT) {
 		pr_err("[FACTORY] %s: Timeout!!!\n", __func__);
+	} else {
+		pr_info("[FACTORY] %s - [00h-03h] %02x,%02x,%02x,%02x [10h-16h,18h] %02x,%02x,%02x,%02x,%02x,%02x,%02x,%02x [30h-32h] %02x,%02x,%02x\n",
+			__func__,
+			data->msg_buf[MSG_MAG][0], data->msg_buf[MSG_MAG][1],
+			data->msg_buf[MSG_MAG][2], data->msg_buf[MSG_MAG][3],
+			data->msg_buf[MSG_MAG][4], data->msg_buf[MSG_MAG][5],
+			data->msg_buf[MSG_MAG][6], data->msg_buf[MSG_MAG][7],
+			data->msg_buf[MSG_MAG][8], data->msg_buf[MSG_MAG][9],
+			data->msg_buf[MSG_MAG][10], data->msg_buf[MSG_MAG][11],
+			data->msg_buf[MSG_MAG][12], data->msg_buf[MSG_MAG][13],
+			data->msg_buf[MSG_MAG][14]);
+	}
 
-	pr_info("[FACTORY] %s\n", __func__);
-	pr_info("[FACTORY] 0x%08x 0x%08x 0x%08x 0x%08x 0x%08x 0x%08x 0x%08x 0x%08x 0x%08x\n",
-		data->sensor_calib_data[MSG_MAG].si_mat[0],
-		data->sensor_calib_data[MSG_MAG].si_mat[1],
-		data->sensor_calib_data[MSG_MAG].si_mat[2],
-		data->sensor_calib_data[MSG_MAG].si_mat[3],
-		data->sensor_calib_data[MSG_MAG].si_mat[4],
-		data->sensor_calib_data[MSG_MAG].si_mat[5],
-		data->sensor_calib_data[MSG_MAG].si_mat[6],
-		data->sensor_calib_data[MSG_MAG].si_mat[7],
-		data->sensor_calib_data[MSG_MAG].si_mat[8]);
-
-	return snprintf(buf, PAGE_SIZE,
-		"\"SI_PARAMETER\":\"0x%08x 0x%08x 0x%08x 0x%08x 0x%08x 0x%08x 0x%08x 0x%08x 0x%08x\"\n",
-		data->sensor_calib_data[MSG_MAG].si_mat[0],
-		data->sensor_calib_data[MSG_MAG].si_mat[1],
-		data->sensor_calib_data[MSG_MAG].si_mat[2],
-		data->sensor_calib_data[MSG_MAG].si_mat[3],
-		data->sensor_calib_data[MSG_MAG].si_mat[4],
-		data->sensor_calib_data[MSG_MAG].si_mat[5],
-		data->sensor_calib_data[MSG_MAG].si_mat[6],
-		data->sensor_calib_data[MSG_MAG].si_mat[7],
-		data->sensor_calib_data[MSG_MAG].si_mat[8]);
-#endif
-	return 0;
+	return snprintf(buf, PAGE_SIZE, "%s\n", "Done");
 }
 
 static DEVICE_ATTR(name, 0444, mag_name_show, NULL);
@@ -237,10 +224,14 @@ static DEVICE_ATTR(raw_data, 0664, mag_raw_data_show, mag_raw_data_store);
 static DEVICE_ATTR(adc, 0444, mag_raw_data_show, NULL);
 static DEVICE_ATTR(dac, 0444, mag_check_cntl, NULL);
 static DEVICE_ATTR(chk_registers, 0444, mag_check_registers, NULL);
-static DEVICE_ATTR(selftest, 0440, mag_selttest_show, NULL);
+static DEVICE_ATTR(selftest, 0440, mag_selftest_show, NULL);
 static DEVICE_ATTR(asa, 0444, mag_get_asa, NULL);
 static DEVICE_ATTR(status, 0444, mag_get_status, NULL);
+#ifdef CONFIG_SEC_FACTORY
+static DEVICE_ATTR(dhr_sensor_info, 0444, mag_dhr_sensor_info_show, NULL);
+#else
 static DEVICE_ATTR(dhr_sensor_info, 0440, mag_dhr_sensor_info_show, NULL);
+#endif
 
 static struct device_attribute *mag_attrs[] = {
 	&dev_attr_name,

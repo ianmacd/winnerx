@@ -24,7 +24,7 @@
  *
  * <<Broadcom-WL-IPTag/Open:>>
  *
- * $Id: linux_osl.c 806092 2019-02-21 08:19:13Z $
+ * $Id: linux_osl.c 815919 2019-04-22 09:06:50Z $
  */
 
 #define LINUX_PORT
@@ -668,7 +668,7 @@ osl_pci_bus(osl_t *osh)
 {
 	ASSERT(osh && (osh->magic == OS_HANDLE_MAGIC) && osh->pdev);
 
-#if defined(__ARM_ARCH_7A__) && LINUX_VERSION_CODE > KERNEL_VERSION(2, 6, 35)
+#if defined(__ARM_ARCH_7A__)
 	return pci_domain_nr(((struct pci_dev *)osh->pdev)->bus);
 #else
 	return ((struct pci_dev *)osh->pdev)->bus->number;
@@ -681,7 +681,7 @@ osl_pci_slot(osl_t *osh)
 {
 	ASSERT(osh && (osh->magic == OS_HANDLE_MAGIC) && osh->pdev);
 
-#if defined(__ARM_ARCH_7A__) && LINUX_VERSION_CODE > KERNEL_VERSION(2, 6, 35)
+#if defined(__ARM_ARCH_7A__)
 	return PCI_SLOT(((struct pci_dev *)osh->pdev)->devfn) + 1;
 #else
 	return PCI_SLOT(((struct pci_dev *)osh->pdev)->devfn);
@@ -988,14 +988,12 @@ osl_virt_to_phys(void *va)
 	return (void *)(uintptr)virt_to_phys(va);
 }
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 36)
 #include <asm/cacheflush.h>
 void BCMFASTPATH
 osl_dma_flush(osl_t *osh, void *va, uint size, int direction, void *p, hnddma_seg_map_t *dmah)
 {
 	return;
 }
-#endif /* LINUX_VERSION_CODE >= 2.6.36 */
 
 dmaaddr_t BCMFASTPATH
 osl_dma_map(osl_t *osh, void *va, uint size, int direction, void *p, hnddma_seg_map_t *dmah)
@@ -1032,13 +1030,8 @@ osl_dma_map(osl_t *osh, void *va, uint size, int direction, void *p, hnddma_seg_
 	map_addr = pci_map_single(osh->pdev, va, size, dir);
 #endif	/* ! STB_SOC_WIFI */
 
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 27))
 	ret = pci_dma_mapping_error(osh->pdev, map_addr);
-#elif (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 5))
-	ret = pci_dma_mapping_error(map_addr);
-#else
-	ret = 0;
-#endif // endif
+
 	if (ret) {
 		printk("%s: Failed to map memory\n", __FUNCTION__);
 		PHYSADDRLOSET(ret_addr, 0);
@@ -1173,12 +1166,10 @@ osl_delay(uint usec)
 void
 osl_sleep(uint ms)
 {
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 36)
 	if (ms < 20)
 		usleep_range(ms*1000, ms*1000 + 1000);
 	else
-#endif // endif
-	msleep(ms);
+		msleep(ms);
 }
 
 uint64
@@ -1198,9 +1189,7 @@ osl_localtime_ns(void)
 {
 	uint64 ts_nsec = 0;
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 36)
 	ts_nsec = local_clock();
-#endif /* LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 36) */
 
 	return ts_nsec;
 }
@@ -1211,12 +1200,25 @@ osl_get_localtime(uint64 *sec, uint64 *usec)
 	uint64 ts_nsec = 0;
 	unsigned long rem_nsec = 0;
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 36)
 	ts_nsec = local_clock();
 	rem_nsec = do_div(ts_nsec, NSEC_PER_SEC);
-#endif /* LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 36) */
 	*sec = (uint64)ts_nsec;
 	*usec = (uint64)(rem_nsec / MSEC_PER_SEC);
+}
+
+uint64
+osl_systztime_us(void)
+{
+	struct timeval tv;
+	uint64 tzusec;
+
+	do_gettimeofday(&tv);
+	/* apply timezone */
+	tzusec = (uint64)((tv.tv_sec - (sys_tz.tz_minuteswest * 60)) *
+		USEC_PER_SEC);
+	tzusec += tv.tv_usec;
+
+	return tzusec;
 }
 
 /*

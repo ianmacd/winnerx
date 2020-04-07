@@ -18,7 +18,6 @@
 
 #ifdef CONFIG_SEC_DEBUG
 #include <linux/sec_debug.h>
-#include <linux/sec_debug_summary.h>
 #endif
 
 #include <trace/events/irq.h>

@@ -56,12 +56,36 @@ static struct cam_hw_param_collector cam_hwparam_collector;
 
 char tof_freq[10] = "\n";
 
-#if defined(CONFIG_SEC_WINNERLTE_PROJECT) || defined(CONFIG_SEC_WINNERX_PROJECT) || defined(CONFIG_SEC_D2XQ_PROJECT)
-extern unsigned int sec_hw_rev(void);
+#if defined(CONFIG_SEC_WINNERLTE_PROJECT) || defined(CONFIG_SEC_WINNERX_PROJECT) || defined(CONFIG_SEC_D2XQ_PROJECT)\
+	|| defined(CONFIG_SEC_D2Q_PROJECT) || defined(CONFIG_SEC_D1Q_PROJECT) || defined(CONFIG_SEC_ZODIAC_PROJECT)\
+	|| defined(CONFIG_SEC_D2XQ2_PROJECT) || defined(CONFIG_SEC_BLOOMQ_PROJECT)
+static unsigned int system_rev __read_mostly;
+
+static int __init sec_hw_rev_setup(char *p)
+{
+	int ret;
+
+	ret = kstrtouint(p, 0, &system_rev);
+	if (unlikely(ret < 0)) {
+		pr_warn("androidboot.revision is malformed (%s)\n", p);
+		return -EINVAL;
+	}
+
+	pr_info("androidboot.revision %x\n", system_rev);
+
+	return 0;
+}
+early_param("androidboot.revision", sec_hw_rev_setup);
+
+static unsigned int sec_hw_rev(void)
+{
+	return system_rev;
+}
 #endif
 #if defined(CONFIG_SEC_WINNERLTE_PROJECT)
 #define CRITERION_REV	(8)
-#elif defined(CONFIG_SEC_WINNERX_PROJECT) || defined(CONFIG_SEC_D2XQ_PROJECT)
+#elif defined(CONFIG_SEC_WINNERX_PROJECT) || defined(CONFIG_SEC_D2XQ_PROJECT) || defined(CONFIG_SEC_D2Q_PROJECT)\
+	 || defined(CONFIG_SEC_D1Q_PROJECT) || defined(CONFIG_SEC_ZODIAC_PROJECT) || defined(CONFIG_SEC_D2XQ2_PROJECT) || defined(CONFIG_SEC_BLOOMQ_PROJECT)
 #define CRITERION_REV	(0)
 #endif
 
@@ -287,6 +311,13 @@ static int32_t cam_sensor_i2c_pkt_parse(struct cam_sensor_ctrl_t *s_ctrl,
 		}
 		break;
 	}
+
+	case CAM_SENSOR_PACKET_OPCODE_SENSOR_MODE: {
+		CAM_INFO(CAM_SENSOR, "[dynamic_mipi] SENSOR_MODE : %d", csl_packet->header.request_id);
+		s_ctrl->sensor_mode = csl_packet->header.request_id;
+		break;
+	}
+
 	case CAM_SENSOR_PACKET_OPCODE_SENSOR_NOP: {
 		if ((s_ctrl->sensor_state == CAM_SENSOR_INIT) ||
 			(s_ctrl->sensor_state == CAM_SENSOR_ACQUIRE)) {
@@ -360,14 +391,18 @@ void cam_sensor_write_normal_init(struct camera_io_master *io_master_info)
 {
 	int32_t rc = 0;
 	struct cam_sensor_i2c_reg_setting  i2c_reg_settings;
-#if defined(CONFIG_SEC_WINNERLTE_PROJECT) || defined(CONFIG_SEC_WINNERX_PROJECT) || defined(CONFIG_SEC_D2XQ_PROJECT)
+#if defined(CONFIG_SEC_WINNERLTE_PROJECT) || defined(CONFIG_SEC_WINNERX_PROJECT) || defined(CONFIG_SEC_D2XQ_PROJECT)\
+	|| defined(CONFIG_SEC_D2Q_PROJECT) || defined(CONFIG_SEC_D1Q_PROJECT) || defined(CONFIG_SEC_ZODIAC_PROJECT)\
+	|| defined(CONFIG_SEC_D2XQ2_PROJECT) || defined(CONFIG_SEC_BLOOMQ_PROJECT)
 	unsigned int rev = sec_hw_rev();
 	CAM_INFO(CAM_SENSOR, "[RET_DBG] board rev : %d", rev);
 #endif
 
 	CAM_INFO(CAM_SENSOR, "[RET_DBG] cam_sensor_write_normal_init");
 
-#if defined(CONFIG_SEC_WINNERLTE_PROJECT) || defined(CONFIG_SEC_WINNERX_PROJECT) || defined(CONFIG_SEC_D2XQ_PROJECT)
+#if defined(CONFIG_SEC_WINNERLTE_PROJECT) || defined(CONFIG_SEC_WINNERX_PROJECT) || defined(CONFIG_SEC_D2XQ_PROJECT)\
+	|| defined(CONFIG_SEC_D2Q_PROJECT) || defined(CONFIG_SEC_D1Q_PROJECT) || defined(CONFIG_SEC_ZODIAC_PROJECT)\
+	|| defined(CONFIG_SEC_D2XQ2_PROJECT) || defined(CONFIG_SEC_BLOOMQ_PROJECT)
 	if (rev >= CRITERION_REV)
 	{
 		CAM_INFO(CAM_SENSOR, "[RET_DBG] winner flip setting");
@@ -704,12 +739,27 @@ int32_t cam_check_stream_on(
 {
 	int32_t ret = 0;
 
+#if defined(CONFIG_CAMERA_FRS_DRAM_TEST)
+	if (rear_frs_test_mode >= 1) {
+		CAM_ERR(CAM_SENSOR, "[FRS_DBG] No DYNAMIC_MIPI, rear_frs_test_mode : %ld", rear_frs_test_mode);
+		return ret;
+	}
+#endif
+
 	if (i2c_list->i2c_settings.reg_setting[0].reg_addr == STREAM_ON_ADDR
 		&& i2c_list->i2c_settings.reg_setting[0].reg_data != 0x0
 		&& (s_ctrl->sensordata->slave_info.sensor_id == FRONT_SENSOR_ID_IMX374
 		|| s_ctrl->sensordata->slave_info.sensor_id == FRONT_SENSOR_ID_S5K4HA)) {
 		ret = 1;
 	}
+#if !defined(CONFIG_SEC_ZODIAC_PROJECT)
+	else if (i2c_list->i2c_settings.reg_setting[2].reg_addr == STREAM_ON_ADDR
+			&& (i2c_list->i2c_settings.reg_setting[2].reg_data == 0x103
+			|| i2c_list->i2c_settings.reg_setting[2].reg_data == 0x100)
+			&& s_ctrl->sensordata->slave_info.sensor_id == SENSOR_ID_SAK2L4) {
+		ret = 1;
+	}
+#endif
 #if defined(CONFIG_SEC_BEYONDXQ_PROJECT)
 	else if (i2c_list->i2c_settings.reg_setting[0].reg_addr == STREAM_ON_ADDR_IMX316
 		&& i2c_list->i2c_settings.reg_setting[0].reg_data != 0x0
@@ -718,6 +768,12 @@ int32_t cam_check_stream_on(
 		ret = 1;
 	}
 #endif
+	else if (i2c_list->i2c_settings.reg_setting[0].reg_addr == STREAM_ON_ADDR_IMX516
+		&& i2c_list->i2c_settings.reg_setting[0].reg_data != 0x0
+		&& s_ctrl->sensordata->slave_info.sensor_id == SENSOR_ID_IMX516) {
+		ret = 1;
+	}
+
 	return ret;
 }
 #endif
@@ -734,7 +790,7 @@ static int32_t cam_sensor_i2c_modes_util(
 	struct i2c_settings_list mipi_i2c_list;
 #endif
 
-#if defined(CONFIG_SEC_WINNERLTE_PROJECT) || defined(CONFIG_SEC_WINNERX_PROJECT)
+#if defined(CONFIG_SEC_WINNERLTE_PROJECT) || defined(CONFIG_SEC_WINNERX_PROJECT) || defined(CONFIG_SEC_ZODIAC_PROJECT)
 	unsigned int rev = sec_hw_rev();
 #endif
 
@@ -767,7 +823,7 @@ static int32_t cam_sensor_i2c_modes_util(
 			}
 
 			if (rear_frs_test_mode >= 1) {
-				CAM_ERR(CAM_SENSOR, "[FRS_DBG] temporarly RETENTION_INIT(%ld)", rear_frs_test_mode);
+				CAM_ERR(CAM_SENSOR, "[FRS_DBG] RETENTION_INIT SET(%ld)", rear_frs_test_mode);
 				sensor_retention_mode = RETENTION_INIT;	//force setting
 			}
 			else {
@@ -786,11 +842,35 @@ static int32_t cam_sensor_i2c_modes_util(
 
 	if (i2c_list->op_code == CAM_SENSOR_I2C_WRITE_RANDOM) {
 #if defined(CONFIG_CAMERA_DYNAMIC_MIPI)
+#if defined(CONFIG_CAMERA_FRS_DRAM_TEST)
+		if (rear_frs_test_mode == 0) {
+#endif
+		if (cam_check_stream_on(s_ctrl, i2c_list)){
+			cam_mipi_init_setting(s_ctrl);
+			cam_mipi_update_info(s_ctrl);
+			cam_mipi_get_clock_string(s_ctrl);
+		}
+#if defined(CONFIG_CAMERA_FRS_DRAM_TEST)
+		}
+#endif
+
 		if (cam_check_stream_on(s_ctrl, i2c_list)
 			&& s_ctrl->mipi_clock_index_new != INVALID_MIPI_INDEX
 			&& s_ctrl->i2c_data.streamon_settings.is_settings_valid) {
 			CAM_INFO(CAM_SENSOR, "[dynamic_mipi] Write MIPI setting before Stream On setting. mipi_index : %d",
 				s_ctrl->mipi_clock_index_new);
+
+#if defined(CONFIG_SAMSUNG_FRONT_TOF) || defined(CONFIG_SAMSUNG_REAR_TOF)
+			if (s_ctrl->sensordata->slave_info.sensor_id == TOF_SENSOR_ID_IMX516) {
+				uint32_t mode = 0;
+				rc = camera_io_dev_read(&s_ctrl->io_master_info, 0x080C,
+					&mode, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+				CAM_INFO(CAM_SENSOR, "[dynamic_mipi] IMX516 mode : %d", mode); // 0 : VGA, 1: QVGA, 2 : QQVGA
+				if (mode == 1) {
+					s_ctrl->mipi_clock_index_new += 3;
+				}
+			}
+#endif
 
 			cur_mipi_sensor_mode = &(s_ctrl->mipi_info[0]);
 			memset(&mipi_i2c_list, 0, sizeof(mipi_i2c_list));
@@ -813,7 +893,7 @@ static int32_t cam_sensor_i2c_modes_util(
 		}
 #endif
 
-#if defined(CONFIG_SEC_WINNERLTE_PROJECT) || defined(CONFIG_SEC_WINNERX_PROJECT)
+#if defined(CONFIG_SEC_WINNERLTE_PROJECT) || defined(CONFIG_SEC_WINNERX_PROJECT) || defined(CONFIG_SEC_ZODIAC_PROJECT)
 		if (i2c_list->i2c_settings.size >= 3)
 		{
 			if (rev >= CRITERION_REV
@@ -1164,7 +1244,7 @@ int cam_sensor_match_id(struct cam_sensor_ctrl_t *s_ctrl)
 		CAMERA_SENSOR_I2C_TYPE_WORD);
 
 #if defined(CONFIG_SAMSUNG_FRONT_TOF) || defined(CONFIG_SAMSUNG_REAR_TOF)
-        if(slave_info->sensor_id == TOF_SENSOR_ID_IMX316)
+        if(slave_info->sensor_id == TOF_SENSOR_ID_IMX316 || slave_info->sensor_id == TOF_SENSOR_ID_IMX516)
         {
             chipid >>= 4;
         }
@@ -1188,11 +1268,13 @@ int32_t cam_sensor_driver_cmd(struct cam_sensor_ctrl_t *s_ctrl,
 	struct cam_sensor_power_ctrl_t *power_info =
 		&s_ctrl->sensordata->power_info;
 
-#if 1//For factory module test
+#if !defined(CONFIG_SEC_GTS5L_PROJECT) && !defined(CONFIG_SEC_GTS5LWIFI_PROJECT) && !defined(CONFIG_SEC_GTS6X_PROJECT) && \
+	!defined(CONFIG_SEC_GTS6L_PROJECT) && !defined(CONFIG_SEC_GTS6LWIFI_PROJECT) && !defined(CONFIG_SEC_R3Q_PROJECT) //For factory module test
 	uint32_t version_id = 0;
 	uint16_t sensor_id = 0;
 	uint16_t expected_version_id = 0;
 #endif
+
 #if defined(CONFIG_USE_CAMERA_HW_BIG_DATA)
 	struct cam_hw_param *hw_param = NULL;
 #endif
@@ -1268,7 +1350,10 @@ int32_t cam_sensor_driver_cmd(struct cam_sensor_ctrl_t *s_ctrl,
 			goto free_power_settings;
 		}
 
-#if !defined(CONFIG_SEC_WINNERLTE_PROJECT) && !defined(CONFIG_SEC_WINNERX_PROJECT) && !defined(CONFIG_SEC_BEYONDXQ_PROJECT) && !defined(CONFIG_SEC_D2XQ_PROJECT)
+#if !defined(CONFIG_SEC_WINNERLTE_PROJECT) && !defined(CONFIG_SEC_WINNERX_PROJECT) && !defined(CONFIG_SEC_ZODIAC_PROJECT)\
+	&& !defined(CONFIG_SEC_BEYONDXQ_PROJECT) && !defined(CONFIG_SEC_GTS5L_PROJECT) && !defined(CONFIG_SEC_GTS6L_PROJECT) && !defined(CONFIG_SEC_GTS6X_PROJECT)\
+	&& !defined(CONFIG_SEC_GTS5LWIFI_PROJECT)	&& !defined(CONFIG_SEC_GTS6LWIFI_PROJECT) && !defined(CONFIG_SEC_R3Q_PROJECT)\
+	&& !defined(CONFIG_SEC_BLOOMQ_PROJECT)
 		//For factory module test
 		if (s_ctrl->soc_info.index == 3) { // check 3P8 or 3P9
 			sensor_id = s_ctrl->sensordata->slave_info.sensor_id;
@@ -1282,7 +1367,7 @@ int32_t cam_sensor_driver_cmd(struct cam_sensor_ctrl_t *s_ctrl,
 				CAM_ERR(CAM_SENSOR, "Read version id fail %d", rc);
 				// Force 3p8 sensor probe success even if no module
 				if (sensor_id == 0x3109) {
-					cam_sensor_power_down(s_ctrl);
+					rc = cam_sensor_power_down(s_ctrl);
 					goto release_mutex;
 				}
 			} else {
@@ -1306,6 +1391,8 @@ int32_t cam_sensor_driver_cmd(struct cam_sensor_ctrl_t *s_ctrl,
 		}
 #endif
 
+#if !defined(CONFIG_SEC_R3Q_PROJECT) && !defined(CONFIG_SEC_GTS5L_PROJECT) && !defined(CONFIG_SEC_GTS6X_PROJECT) && !defined(CONFIG_SEC_GTS5LWIFI_PROJECT) && \
+	!defined(CONFIG_SEC_GTS6L_PROJECT) && !defined(CONFIG_SEC_GTS6LWIFI_PROJECT)
 		if (s_ctrl->soc_info.index == 0) { // check Rear sak2l4sx
 			sensor_id = s_ctrl->sensordata->slave_info.sensor_id;
 			expected_version_id = s_ctrl->sensordata->slave_info.version_id;
@@ -1317,10 +1404,18 @@ int32_t cam_sensor_driver_cmd(struct cam_sensor_ctrl_t *s_ctrl,
 			if (rc < 0) {
 				CAM_ERR(CAM_SENSOR, "Read version id fail %d", rc);
 				// Force 3Stack sensor probe success even if no module
-				if (expected_version_id == 0xA001) {
-					cam_sensor_power_down(s_ctrl);
+#if defined(CONFIG_SEC_D2XQ_PROJECT) || defined(CONFIG_SEC_D2Q_PROJECT) || defined(CONFIG_SEC_D1Q_PROJECT)\
+	|| defined(CONFIG_SEC_D2XQ2_PROJECT)
+				if (expected_version_id == 0xA102) {
+					rc = cam_sensor_power_down(s_ctrl);
 					goto release_mutex;
 				}
+#else
+				if (expected_version_id == 0xA001) {
+					rc = cam_sensor_power_down(s_ctrl);
+					goto release_mutex;
+				}
+#endif
 			} else {
 				CAM_INFO(CAM_SENSOR,
 					"Read version id 0x%x,expected_version_id 0x%x", version_id, expected_version_id);
@@ -1328,6 +1423,11 @@ int32_t cam_sensor_driver_cmd(struct cam_sensor_ctrl_t *s_ctrl,
 						CAM_INFO(CAM_SENSOR, "Found 2Stack Sensor");
 					else if (0XA002 == expected_version_id && (version_id == 0XA002 || version_id == 0XA102))
 						CAM_INFO(CAM_SENSOR, "Found 3Stack Sensor");
+#if defined(CONFIG_SEC_D2XQ_PROJECT) || defined(CONFIG_SEC_D2Q_PROJECT) || defined(CONFIG_SEC_D1Q_PROJECT)\
+	|| defined(CONFIG_SEC_D2XQ2_PROJECT)
+					else if (version_id == expected_version_id)
+						CAM_INFO(CAM_SENSOR, "Found 3Stack Sensor");
+#endif
 					else {
 						CAM_INFO(CAM_SENSOR, "Not matched");
 						rc = -EINVAL;
@@ -1336,21 +1436,9 @@ int32_t cam_sensor_driver_cmd(struct cam_sensor_ctrl_t *s_ctrl,
 				}
 			}
 		}
-
-
+#endif
 		/* Match sensor ID */
 		rc = cam_sensor_match_id(s_ctrl);
-
-#if defined(CONFIG_CAMERA_DYNAMIC_MIPI)
-		if (s_ctrl->sensordata->slave_info.sensor_id == FRONT_SENSOR_ID_IMX374
-			|| s_ctrl->sensordata->slave_info.sensor_id == FRONT_SENSOR_ID_S5K4HA
-#if defined(CONFIG_SEC_BEYONDXQ_PROJECT)
-			|| (s_ctrl->sensordata->slave_info.sensor_id == SENSOR_ID_IMX316 && s_ctrl->soc_info.index == 7 /*Front TOF*/)
-#endif
-			) {
-			cam_mipi_init_setting(s_ctrl);
-		}
-#endif
 
 #if defined(CONFIG_SENSOR_RETENTION)
 		if (rc == 0
@@ -1362,11 +1450,27 @@ int32_t cam_sensor_driver_cmd(struct cam_sensor_ctrl_t *s_ctrl,
 			usleep_range(5000, 6000);
 		}
 #endif
-#if 0
-		if (rc < 0) {
+
+/* Temporary change to make IMX516 and IMX316 both TOF sensor work */
+#if defined(CONFIG_SEC_D2XQ_PROJECT) || defined(CONFIG_SEC_D2Q_PROJECT) || defined(CONFIG_SEC_D2XQ2_PROJECT)
+		if (rc < 0 && s_ctrl->sensordata->slave_info.sensor_id == TOF_SENSOR_ID_IMX316) {
 			cam_sensor_power_down(s_ctrl);
 			msleep(20);
 			goto free_power_settings;
+		}
+#endif
+
+/* For factory module test */
+#if defined(CONFIG_SEC_D2XQ_PROJECT) || defined(CONFIG_SEC_D2Q_PROJECT) || defined(CONFIG_SEC_D1Q_PROJECT)\
+	|| defined(CONFIG_SEC_D2XQ2_PROJECT)
+		if (rc < 0) {
+			CAM_INFO(CAM_SENSOR,
+				"Probe failed - slot:%d,slave_addr:0x%x,sensor_id:0x%x",
+				s_ctrl->soc_info.index,
+				s_ctrl->sensordata->slave_info.sensor_slave_addr,
+				s_ctrl->sensordata->slave_info.sensor_id);
+			rc = cam_sensor_power_down(s_ctrl);
+			goto release_mutex;
 		}
 #endif
 
@@ -1477,11 +1581,19 @@ int32_t cam_sensor_driver_cmd(struct cam_sensor_ctrl_t *s_ctrl,
 		}
 #endif
 
-		CAM_INFO(CAM_SENSOR,
-			"Probe success,slot:%d,slave_addr:0x%x,sensor_id:0x%x",
-			s_ctrl->soc_info.index,
-			s_ctrl->sensordata->slave_info.sensor_slave_addr,
-			s_ctrl->sensordata->slave_info.sensor_id);
+		if (rc < 0) {
+			CAM_INFO(CAM_SENSOR,
+				"Probe failed - slot:%d,slave_addr:0x%x,sensor_id:0x%x",
+				s_ctrl->soc_info.index,
+				s_ctrl->sensordata->slave_info.sensor_slave_addr,
+				s_ctrl->sensordata->slave_info.sensor_id);
+		} else {
+			CAM_INFO(CAM_SENSOR,
+				"Probe success - slot:%d,slave_addr:0x%x,sensor_id:0x%x",
+				s_ctrl->soc_info.index,
+				s_ctrl->sensordata->slave_info.sensor_slave_addr,
+				s_ctrl->sensordata->slave_info.sensor_id);
+		}
 
 #if 0 //EARLY_RETENTION
 		if (s_ctrl->sensordata->slave_info.sensor_id == 0x20c4) { //wide cam
@@ -1538,6 +1650,8 @@ int32_t cam_sensor_driver_cmd(struct cam_sensor_ctrl_t *s_ctrl,
 		bridge_params.media_entity_flag = 0;
 		bridge_params.priv = s_ctrl;
 
+		bridge_params.dev_id = CAM_SENSOR;
+
 		sensor_acq_dev.device_handle =
 			cam_create_device_hdl(&bridge_params);
 		s_ctrl->bridge_intf.device_hdl = sensor_acq_dev.device_handle;
@@ -1551,7 +1665,8 @@ int32_t cam_sensor_driver_cmd(struct cam_sensor_ctrl_t *s_ctrl,
 #endif
 
 #if defined(CONFIG_SAMSUNG_REAR_TOF) || defined(CONFIG_SAMSUNG_FRONT_TOF)
-		if(s_ctrl->sensordata->slave_info.sensor_id == 0x316)
+		if (s_ctrl->sensordata->slave_info.sensor_id == 0x316 ||
+			s_ctrl->sensordata->slave_info.sensor_id == 0x516)
 		{
 			g_s_ctrl_tof = s_ctrl;
 			check_pd_ready = 0;
@@ -1679,18 +1794,6 @@ int32_t cam_sensor_driver_cmd(struct cam_sensor_ctrl_t *s_ctrl,
 			goto release_mutex;
 		}
 
-#if defined(CONFIG_CAMERA_DYNAMIC_MIPI)
-		if (s_ctrl->sensordata->slave_info.sensor_id == FRONT_SENSOR_ID_IMX374
-			|| s_ctrl->sensordata->slave_info.sensor_id == FRONT_SENSOR_ID_S5K4HA
-#if defined(CONFIG_SEC_BEYONDXQ_PROJECT)
-			|| (s_ctrl->sensordata->slave_info.sensor_id == SENSOR_ID_IMX316 && s_ctrl->soc_info.index == 7 /*Front TOF*/)
-#endif
-			) {
-			cam_mipi_update_info(s_ctrl);
-			cam_mipi_get_clock_string(s_ctrl);
-		}
-#endif
-
 		if (s_ctrl->i2c_data.streamon_settings.is_settings_valid &&
 			(s_ctrl->i2c_data.streamon_settings.request_id == 0)) {
 			rc = cam_sensor_apply_settings(s_ctrl, 0,
@@ -1701,15 +1804,19 @@ int32_t cam_sensor_driver_cmd(struct cam_sensor_ctrl_t *s_ctrl,
 				goto release_mutex;
 			}
 		}
-
+#if !defined(CONFIG_SEC_D1Q_PROJECT)
 #if defined(CONFIG_SAMSUNG_REAR_TOF) || defined(CONFIG_SAMSUNG_FRONT_TOF)
-		if (s_ctrl->sensordata->slave_info.sensor_id == TOF_SENSOR_ID_IMX316 &&
+		if ((s_ctrl->sensordata->slave_info.sensor_id == TOF_SENSOR_ID_IMX316 ||
+			s_ctrl->sensordata->slave_info.sensor_id == TOF_SENSOR_ID_IMX516) &&
 			s_ctrl->sensordata->power_info.gpio_num_info &&
 			s_ctrl->sensordata->power_info.gpio_num_info->valid[SENSOR_CUSTOM_GPIO2] == 1) {
 			gpio_set_value_cansleep(
 				s_ctrl->sensordata->power_info.gpio_num_info->gpio_num[SENSOR_CUSTOM_GPIO2],
 				GPIOF_OUT_INIT_HIGH);
+
+			CAM_INFO(CAM_SENSOR,"TOF BB enabled");
 		}
+#endif
 #endif
 		s_ctrl->sensor_state = CAM_SENSOR_START;
 		CAM_INFO(CAM_SENSOR,
@@ -1727,18 +1834,9 @@ int32_t cam_sensor_driver_cmd(struct cam_sensor_ctrl_t *s_ctrl,
 			goto release_mutex;
 		}
 
-#if defined(CONFIG_SAMSUNG_REAR_TOF) || defined(CONFIG_SAMSUNG_FRONT_TOF)
-		if (s_ctrl->sensordata->slave_info.sensor_id == TOF_SENSOR_ID_IMX316 &&
-			s_ctrl->sensordata->power_info.gpio_num_info &&
-			s_ctrl->sensordata->power_info.gpio_num_info->valid[SENSOR_CUSTOM_GPIO2] == 1) {
-			gpio_set_value_cansleep(
-				s_ctrl->sensordata->power_info.gpio_num_info->gpio_num[SENSOR_CUSTOM_GPIO2],
-				GPIOF_OUT_INIT_LOW);
-		}
-#endif
-
 #if defined(CONFIG_SEC_BEYONDXQ_PROJECT)
-		if (s_ctrl->sensordata->slave_info.sensor_id == SENSOR_ID_IMX316 && s_ctrl->soc_info.index == 7 /*Front TOF*/) {
+		if ((s_ctrl->sensordata->slave_info.sensor_id == SENSOR_ID_IMX316 && s_ctrl->soc_info.index == 7) /*Front TOF*/
+			|| s_ctrl->sensordata->slave_info.sensor_id == SENSOR_ID_IMX516) {
 			scnprintf(tof_freq, sizeof(tof_freq), "0");
 			CAM_INFO(CAM_SENSOR, "[TOF_FREQ_DBG] tof_freq : %s", tof_freq);
 		}
@@ -2061,6 +2159,7 @@ int cam_sensor_power_up(struct cam_sensor_ctrl_t *s_ctrl)
 	} else {
 		CAM_INFO(CAM_SENSOR, "CCI INIT SUCCESSFUL");
 	}
+
 	CAM_INFO(CAM_SENSOR, "[DBG] cam_sensor_power_up X");
 
 	return rc;
@@ -2225,17 +2324,18 @@ int cam_sensor_power_down(struct cam_sensor_ctrl_t *s_ctrl)
 
 	CAM_INFO(CAM_SENSOR, "ABOUT TO POWER DOWN at slot:%d", soc_info->index);
 
+#if defined(CONFIG_SAMSUNG_FORCE_DISABLE_REGULATOR)
+	rc = cam_sensor_util_power_down(power_info, soc_info, FALSE);
+#else
+	rc = cam_sensor_util_power_down(power_info, soc_info);
+#endif
+
 #if defined(CONFIG_SENSOR_RETENTION)
 	if (s_ctrl->sensordata->slave_info.sensor_id == RETENTION_SENSOR_ID) {
-		rc = cam_sensor_util_power_down(power_info, soc_info, 1);
 		if (sensor_retention_mode == RETENTION_READY_TO_ON) {
 			sensor_retention_mode = RETENTION_ON;
 		}
-	} else {
-		rc = cam_sensor_util_power_down(power_info, soc_info, 0);
 	}
-#else
-	rc = cam_sensor_util_power_down(power_info, soc_info, 0);
 #endif
 	if (rc < 0) {
 		CAM_ERR(CAM_SENSOR, "power down the core is failed:%d", rc);
@@ -2254,11 +2354,13 @@ int cam_sensor_power_down(struct cam_sensor_ctrl_t *s_ctrl)
 		}
 	}
 
+
 	if (camera_io_release(&(s_ctrl->io_master_info))) {
 		CAM_WARN(CAM_SENSOR, "cci_release failed");
 	} else {
 		CAM_INFO(CAM_SENSOR, "CCI RELEASE SUCCESFUL");
 	}
+
 
 	CAM_INFO(CAM_SENSOR, "[DBG] cam_sensor_power_down X");
 
@@ -2433,7 +2535,6 @@ int32_t cam_sensor_flush_request(struct cam_req_mgr_flush_request *flush_req)
 		return -EINVAL;
 	}
 
-	mutex_lock(&(s_ctrl->cam_sensor_mutex));
 	if (flush_req->type == CAM_REQ_MGR_FLUSH_TYPE_ALL) {
 		s_ctrl->last_flush_req = flush_req->req_id;
 		CAM_DBG(CAM_SENSOR, "last reqest to flush is %lld",

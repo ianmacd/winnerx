@@ -28,9 +28,8 @@
 
 #include <asm/sections.h>
 
-#ifdef CONFIG_SEC_DEBUG_SUMMARY
+#ifdef CONFIG_SEC_DEBUG
 #include <linux/sec_debug.h>
-#include <linux/sec_debug_summary.h>
 #endif
 
 #ifdef CONFIG_KALLSYMS_ALL

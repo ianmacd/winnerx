@@ -24,7 +24,7 @@
  *
  * <<Broadcom-WL-IPTag/Open:>>
  *
- * $Id: dhd_pcie_linux.c 806696 2019-02-25 07:43:07Z $
+ * $Id: dhd_pcie_linux.c 818971 2019-05-09 16:46:39Z $
  */
 
 /* include files */
@@ -229,9 +229,6 @@ static struct pci_driver dhdpcie_driver = {
 	id_table:	dhdpcie_pci_devid,
 	probe:		dhdpcie_pci_probe,
 	remove:		dhdpcie_pci_remove,
-#if (LINUX_VERSION_CODE < KERNEL_VERSION(2, 6, 0))
-	save_state:	NULL,
-#endif // endif
 #if defined(DHD_PCIE_RUNTIMEPM) || defined(DHD_PCIE_NATIVE_RUNTIMEPM)
 	.driver.pm = &dhd_pcie_pm_ops,
 #else
@@ -724,6 +721,7 @@ static int dhdpcie_pci_suspend(struct pci_dev * pdev, pm_message_t state)
 	dhdpcie_info_t *pch = pci_get_drvdata(pdev);
 	dhd_bus_t *bus = NULL;
 	unsigned long flags;
+	uint32 i = 0;
 
 	if (pch) {
 		bus = pch->bus;
@@ -734,13 +732,29 @@ static int dhdpcie_pci_suspend(struct pci_dev * pdev, pm_message_t state)
 
 	BCM_REFERENCE(state);
 
-	DHD_GENERAL_LOCK(bus->dhd, flags);
 	if (!DHD_BUS_BUSY_CHECK_IDLE(bus->dhd)) {
 		DHD_ERROR(("%s: Bus not IDLE!! dhd_bus_busy_state = 0x%x\n",
 			__FUNCTION__, bus->dhd->dhd_bus_busy_state));
-		DHD_GENERAL_UNLOCK(bus->dhd, flags);
-		return -EBUSY;
+
+		OSL_DELAY(1000);
+		/* retry till the transaction is complete */
+		while (i < 100) {
+			OSL_DELAY(1000);
+			i++;
+			if (DHD_BUS_BUSY_CHECK_IDLE(bus->dhd)) {
+				DHD_ERROR(("%s: Bus enter IDLE!! after %d ms\n",
+					__FUNCTION__, i));
+				break;
+			}
+		}
+		if (!DHD_BUS_BUSY_CHECK_IDLE(bus->dhd)) {
+			DHD_ERROR(("%s: Bus not IDLE!! Failed after %d ms, "
+				"dhd_bus_busy_state = 0x%x\n",
+				__FUNCTION__, i, bus->dhd->dhd_bus_busy_state));
+			return -EBUSY;
+		}
 	}
+	DHD_GENERAL_LOCK(bus->dhd, flags);
 	DHD_BUS_BUSY_SET_SUSPEND_IN_PROGRESS(bus->dhd);
 	DHD_GENERAL_UNLOCK(bus->dhd, flags);
 
@@ -971,9 +985,7 @@ static int dhdpcie_suspend_dev(struct pci_dev *dev)
 	pch->state = pci_store_saved_state(dev);
 #endif /* OEM_ANDROID && LINUX_VERSION_CODE >= KERNEL_VERSION(3, 0, 0) */
 	pci_enable_wake(dev, PCI_D0, TRUE);
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 31))
 	if (pci_is_enabled(dev))
-#endif // endif
 		pci_disable_device(dev);
 
 	ret = pci_set_power_state(dev, PCI_D3hot);
@@ -1388,7 +1400,6 @@ int dhdpcie_pci_suspend_resume(dhd_bus_t *bus, bool state)
 #endif // endif
 		}
 		dhdpcie_config_save_restore_coherent(bus, state);
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 27))
 #if defined(DHD_HANG_SEND_UP_TEST)
 		if (bus->is_linkdown ||
 			bus->dhd->req_hang_type == HANG_REASON_PCIE_RC_LINK_UP_FAIL) {
@@ -1398,12 +1409,10 @@ int dhdpcie_pci_suspend_resume(dhd_bus_t *bus, bool state)
 			bus->dhd->hang_reason = HANG_REASON_PCIE_RC_LINK_UP_FAIL;
 			dhd_os_send_hang_message(bus->dhd);
 		}
-#endif // endif
 	}
 	return rc;
 }
 
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 0))
 static int dhdpcie_device_scan(struct device *dev, void *data)
 {
 	struct pci_dev *pcidev;
@@ -1428,19 +1437,12 @@ static int dhdpcie_device_scan(struct device *dev, void *data)
 
 	return 0;
 }
-#endif /* LINUX_VERSION >= 2.6.0 */
 
 int
 dhdpcie_bus_register(void)
 {
 	int error = 0;
 
-#if (LINUX_VERSION_CODE < KERNEL_VERSION(2, 6, 0))
-	if (!(error = pci_module_init(&dhdpcie_driver)))
-		return 0;
-
-	DHD_ERROR(("%s: pci_module_init failed 0x%x\n", __FUNCTION__, error));
-#else
 	if (!(error = pci_register_driver(&dhdpcie_driver))) {
 		bus_for_each_dev(dhdpcie_driver.driver.bus, NULL, &error, dhdpcie_device_scan);
 		if (!error) {
@@ -1454,7 +1456,6 @@ dhdpcie_bus_register(void)
 		pci_unregister_driver(&dhdpcie_driver);
 		error = BCME_ERROR;
 	}
-#endif /* LINUX_VERSION < 2.6.0 */
 
 	return error;
 }
@@ -1560,9 +1561,8 @@ dhdpcie_pci_remove(struct pci_dev *pdev)
 
 		dhdpcie_bus_release(bus);
 	}
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 31))
+
 	if (pci_is_enabled(pdev))
-#endif // endif
 		pci_disable_device(pdev);
 #ifdef BCMPCIE_OOB_HOST_WAKE
 	/* pcie os info detach */
@@ -2234,14 +2234,9 @@ dhdpcie_enable_irq(dhd_bus_t *bus)
 int
 dhdpcie_irq_disabled(dhd_bus_t *bus)
 {
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 28))
 	struct irq_desc *desc = irq_to_desc(bus->dev->irq);
 	/* depth will be zero, if enabled */
 	return desc->depth;
-#else
-	/* return ERROR by default as there is no support for lower versions */
-	return BCME_ERROR;
-#endif /* LINUX_VERSION_CODE >= KERNEL_VERSION(3, 0, 0) */
 }
 
 int
@@ -2344,9 +2339,7 @@ dhdpcie_disable_device(dhd_bus_t *bus)
 		return BCME_ERROR;
 	}
 
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 31))
 	if (pci_is_enabled(bus->dev))
-#endif // endif
 		pci_disable_device(bus->dev);
 
 	return 0;
@@ -2974,7 +2967,6 @@ dhd_print_kirqstats(dhd_pub_t *dhd, unsigned int irq_num)
 	struct bcmstrbuf strbuf;
 	char tmp_buf[KIRQ_PRINT_BUF_LEN];
 
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 28))
 	desc = irq_to_desc(irq_num);
 	if (!desc) {
 		DHD_ERROR(("%s : irqdesc is not found \n", __FUNCTION__));
@@ -3007,7 +2999,6 @@ dhd_print_kirqstats(dhd_pub_t *dhd, unsigned int irq_num)
 
 	DHD_ERROR(("%s\n", strbuf.origbuf));
 	raw_spin_unlock_irqrestore(&desc->lock, flags);
-#endif /* LINUX VERSION > 2.6.28 */
 }
 
 void

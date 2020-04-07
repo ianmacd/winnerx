@@ -15,6 +15,9 @@
 #include "cam_ois_core.h"
 #include "cam_eeprom_dev.h"
 #include "cam_actuator_core.h"
+#if defined(CONFIG_LEDS_PMIC_QPNP)
+#include "cam_flash_core.h"
+#endif
 #if defined(CONFIG_SAMSUNG_APERTURE)
 #include "cam_aperture_core.h"
 #endif
@@ -23,6 +26,9 @@
 #endif
 #if defined(CONFIG_SAMSUNG_OIS_MCU_STM32)
 #include "cam_ois_mcu_stm32g.h"
+#endif
+#if defined(CONFIG_SAMSUNG_OIS_RUMBA_S4)
+#include "cam_ois_rumba_s4.h"
 #endif
 
 #if defined(CONFIG_USE_CAMERA_HW_BIG_DATA)
@@ -36,6 +42,10 @@
 
 #if 0 //EARLY_RETENTION
 extern int32_t cam_sensor_early_retention(void);
+#endif
+
+#if defined(CONFIG_SAMSUNG_OIS_RUMBA_S4)
+uint32_t isOisPoweredUp = 0;
 #endif
 
 #if defined(CONFIG_CAMERA_SSM_I2C_ENV)
@@ -57,7 +67,15 @@ extern struct cam_sensor_ctrl_t *g_s_ctrl_tof;
 extern int check_pd_ready;
 #endif
 
+#if defined(CONFIG_LEDS_PMIC_QPNP)
+extern ssize_t flash_power_store(struct device *dev, struct device_attribute *attr,
+	const char *buf, size_t size);
+#endif
+
 extern char tof_freq[10];
+#if defined(CONFIG_CAMERA_DYNAMIC_MIPI)
+extern char band_info[20];
+#endif
 
 extern struct kset *devices_kset;
 struct class *camera_class;
@@ -177,7 +195,11 @@ static ssize_t rear_type_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
 	int rc = 0;
+#if defined(CONFIG_SEC_GTS5L_PROJECT) || defined(CONFIG_SEC_GTS5LWIFI_PROJECT) || defined(CONFIG_SEC_GTS6L_PROJECT) ||  defined(CONFIG_SEC_GTS6X_PROJECT) || defined(CONFIG_SEC_GTS6LWIFI_PROJECT)
+	char cam_type_lsi[] = "SLSI_S5K3M5\n";
+#else
 	char cam_type_lsi[] = "SLSI_SAK2L4SX\n";
+#endif
 	char cam_type_sony[] = "SONY_IMX345\n";
 
 	if (cam_fw_ver[4] == 'L')
@@ -193,7 +215,11 @@ static ssize_t front_camera_type_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
 	int rc = 0;
+#if defined(CONFIG_SEC_GTS5L_PROJECT) || defined(CONFIG_SEC_GTS5LWIFI_PROJECT) || defined(CONFIG_SEC_GTS6L_PROJECT) || defined(CONFIG_SEC_GTS6X_PROJECT) || defined(CONFIG_SEC_GTS6LWIFI_PROJECT)
+	char cam_type[] = "SLSI_S5K4HA\n";
+#else
 	char cam_type[] = "SONY_IMX374\n";
+#endif
 
 	rc = scnprintf(buf, PAGE_SIZE, "%s", cam_type);
 	if (rc)
@@ -456,7 +482,30 @@ static ssize_t rear_isp_core_check_store(struct device *dev,
 }
 
 #define FROM_REAR_AF_CAL_SIZE	 10
-int rear_af_cal[FROM_REAR_AF_CAL_SIZE + 1] = {0,};
+#if 1
+char rear_af_cal_str[MAX_AF_CAL_STR_SIZE] = "";
+static ssize_t rear_afcal_show(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	int rc = 0;
+
+#if defined(CONFIG_SAMSUNG_REAR_TRIPLE)
+	pr_info("rear3_af_cal_str : 10 %s\n", rear_af_cal_str);
+	rc = scnprintf(buf, PAGE_SIZE, "10 %s", rear_af_cal_str);
+	if (rc)
+		return rc;
+#else
+	pr_info("rear3_af_cal_str : 1 %s\n", rear_af_cal_str);
+	rc = scnprintf(buf, PAGE_SIZE, "1 %s", rear_af_cal_str);
+	if (rc)
+		return rc;
+#endif
+
+	return 0;
+}
+#else
+//int rear_af_cal[FROM_REAR_AF_CAL_SIZE + 1] = {0,};
+char rear_af_cal_str[MAX_AF_CAL_STR_SIZE] = "";
 static ssize_t rear_afcal_show(struct device *dev,
 			struct device_attribute *attr, char *buf)
 {
@@ -534,9 +583,10 @@ static ssize_t rear_afcal_show(struct device *dev,
 	return sprintf(buf, "1 %d %d\n", rear_af_cal[0], rear_af_cal[9]);
 #endif
 }
+#endif
 
-char rear_paf_cal_data_far[REAR_PAF_CAL_INFO_SIZE] = {0,};
-char rear_paf_cal_data_mid[REAR_PAF_CAL_INFO_SIZE] = {0,};
+char rear_paf_cal_data_far[PAF_2PD_CAL_INFO_SIZE] = {0,};
+char rear_paf_cal_data_mid[PAF_2PD_CAL_INFO_SIZE] = {0,};
 
 static ssize_t rear_paf_offset_mid_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
@@ -578,8 +628,8 @@ static ssize_t rear_paf_cal_check_show(struct device *dev,
 	return 0;
 }
 
-char rear_f2_paf_cal_data_far[REAR_PAF_CAL_INFO_SIZE] = {0,};
-char rear_f2_paf_cal_data_mid[REAR_PAF_CAL_INFO_SIZE] = {0,};
+char rear_f2_paf_cal_data_far[PAF_2PD_CAL_INFO_SIZE] = {0,};
+char rear_f2_paf_cal_data_mid[PAF_2PD_CAL_INFO_SIZE] = {0,};
 static ssize_t rear_f2_paf_offset_mid_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
@@ -676,6 +726,9 @@ static ssize_t front_camera_afcal_show(struct device *dev,
 
 	pr_info("[FW_DBG] front_af_cal_pan: %d, front_af_cal_macro: %d\n", front_af_cal_pan, front_af_cal_macro);
 	rc = scnprintf(buf, PAGE_SIZE, "1 %d %d\n", front_af_cal_macro, front_af_cal_pan);
+#ifdef CONFIG_SEC_BLOOMQ_PROJECT
+	rc = scnprintf(buf, PAGE_SIZE, "1 %c %c\n", 'N', 'N');
+#endif
 	if (rc)
 		return rc;
 	return 0;
@@ -1130,6 +1183,21 @@ static ssize_t front3_camera_moduleid_show(struct device *dev,
 }
 #endif
 
+#if defined(CONFIG_SEC_R3Q_PROJECT)
+char supported_camera_ids[] = {
+        0,   //REAR_0,
+        1,   //FRONT_1
+	50,  // REAR_UW
+        52,  // REAR_DEPTH
+};
+#elif defined(CONFIG_SEC_BLOOMQ_PROJECT)
+char supported_camera_ids[] = {
+    0,   //REAR_0,
+    3,
+    23,
+    50,
+};
+#else
 char supported_camera_ids[] = {
 	0,  //REAR_0
 	1,  //FRONT_1
@@ -1144,12 +1212,6 @@ char supported_camera_ids[] = {
 #endif
 #if defined(CONFIG_SAMSUNG_REAR_DUAL) || defined(CONFIG_SAMSUNG_REAR_TRIPLE)
 	23, //DUAL_REAR_PORTRAIT, SW and W
-#endif
-#if defined(CONFIG_SAMSUNG_REAR_TOF)
-	40, //REAR_TOF_DEPTH
-#endif
-#if defined(CONFIG_SAMSUNG_FRONT_TOF)
-	41, //FRONT_TOF_DEPTH
 #endif
 #if defined(CONFIG_SAMSUNG_REAR_DUAL) || defined(CONFIG_SAMSUNG_REAR_TRIPLE)
 	50, //REAR_2ND
@@ -1172,7 +1234,8 @@ char supported_camera_ids[] = {
 #if defined(CONFIG_SAMSUNG_SECURE_CAMERA)
 	90,  //IRIS
 #endif
-	};
+};
+#endif
 
 static ssize_t supported_camera_ids_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
@@ -1466,6 +1529,314 @@ static ssize_t ssrm_camera_info_store(struct device *dev,
 	return size;
 }
 
+#if defined(CONFIG_SAMSUNG_OIS_RUMBA_S4)
+extern struct cam_ois_ctrl_t *g_o_ctrl;
+extern struct cam_actuator_ctrl_t *g_a_ctrls[2];
+uint32_t ois_autotest_threshold = 150;
+static ssize_t ois_autotest_show(struct device *dev,
+					 struct device_attribute *attr, char *buf)
+{
+	bool ret = false;
+	int result = 0;
+	bool x1_result = true, y1_result = true;
+	int cnt = 0;
+	struct cam_ois_sinewave_t sinewave[1];
+	pr_info("%s: E\n", __func__);
+
+	if(!isOisPoweredUp)	//If ois is not powered up then dont execute this test
+		return 256;	
+	
+	if (g_a_ctrls[0] != NULL)
+		cam_actuator_power_up(g_a_ctrls[0]);
+	cam_actuator_move_for_ois_test(g_a_ctrls[0]);
+	ret = cam_ois_sine_wavecheck(g_o_ctrl, ois_autotest_threshold, sinewave, &result, 1);
+	if (ret)
+		x1_result = y1_result = true;
+	else {
+		if (result & 0x01) {
+			// Module#1 X Axis Fail
+			x1_result = false;
+		}
+		if (result & 0x02) {
+			// Module#1 Y Axis Fail
+			y1_result = false;
+		}
+	}
+
+	cnt = scnprintf(buf, PAGE_SIZE, "%s, %d, %s, %d",
+		(x1_result ? "pass" : "fail"), (x1_result ? 0 : sinewave[0].sin_x),
+		(y1_result ? "pass" : "fail"), (y1_result ? 0 : sinewave[0].sin_y));
+	pr_info("%s: result : %s\n", __func__, buf);
+
+	if (g_a_ctrls[0] != NULL)
+		cam_actuator_power_down(g_a_ctrls[0]);
+
+	pr_info("%s: X\n", __func__);
+
+	if (cnt)
+		return cnt;
+	return 0;
+}
+
+static ssize_t ois_autotest_store(struct device *dev,
+					  struct device_attribute *attr, const char *buf, size_t size)
+{
+	uint32_t value = 0;
+
+	if (buf == NULL || kstrtouint(buf, 10, &value))
+		return -1;
+	ois_autotest_threshold = value;
+	return size;
+}
+
+static ssize_t ois_power_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t size)
+{
+	if (g_o_ctrl == NULL){
+	    pr_err("%s: OIS Ctrl Pointer is NULL", __func__);
+	    return size;
+	}
+	if (g_o_ctrl->io_master_info.cci_client == NULL){
+	    pr_err("%s: OIS CCI client Pointer is NULL", __func__);
+	    return size;
+	}
+	mutex_lock(&(g_o_ctrl->ois_mutex));
+	if (g_o_ctrl->cam_ois_state != CAM_OIS_INIT) {
+		pr_err("%s: Not in right state to control OIS power %d",
+			__func__, g_o_ctrl->cam_ois_state);
+		goto error;
+	}
+	switch (buf[0]) {
+	case '0':
+		cam_ois_power_down(g_o_ctrl);
+		isOisPoweredUp = 0;
+		pr_info("%s: power down", __func__);
+		break;
+	case '1':
+		cam_ois_power_up(g_o_ctrl);
+		isOisPoweredUp = 1;
+		msleep(200);
+		pr_info("%s: power up", __func__);
+		break;
+
+	default:
+		break;
+	}
+
+error:
+	mutex_unlock(&(g_o_ctrl->ois_mutex));
+	return size;
+}
+
+static ssize_t gyro_calibration_show(struct device *dev,
+			struct device_attribute *attr, char *buf)
+{
+	int result = 0;
+	long raw_data_x = 0, raw_data_y = 0;
+
+	if (g_o_ctrl == NULL) {
+		CAM_ERR(CAM_OIS, "g_o_ctrl ptr is NULL");
+		return 0;
+	}
+
+	result = cam_ois_gyro_sensor_calibration(g_o_ctrl, &raw_data_x, &raw_data_y);
+
+	if (raw_data_x < 0 && raw_data_y < 0) {
+		return scnprintf(buf, PAGE_SIZE, "%d,-%ld.%03ld,-%ld.%03ld\n", result, abs(raw_data_x / 1000),
+			abs(raw_data_x % 1000), abs(raw_data_y / 1000), abs(raw_data_y % 1000));
+	} else if (raw_data_x < 0) {
+		return scnprintf(buf, PAGE_SIZE, "%d,-%ld.%03ld,%ld.%03ld\n", result, abs(raw_data_x / 1000),
+			abs(raw_data_x % 1000), raw_data_y / 1000, raw_data_y % 1000);
+	} else if (raw_data_y < 0) {
+		return scnprintf(buf, PAGE_SIZE, "%d,%ld.%03ld,-%ld.%03ld\n", result, raw_data_x / 1000,
+			raw_data_x % 1000, abs(raw_data_y / 1000), abs(raw_data_y % 1000));
+	} else {
+		return scnprintf(buf, PAGE_SIZE, "%d,%ld.%03ld,%ld.%03ld\n", result, raw_data_x / 1000,
+			raw_data_x % 1000, raw_data_y / 1000, raw_data_y % 1000);
+	}
+}
+
+static ssize_t gyro_selftest_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	int result_total = 0;
+	bool result_offset = 0, result_selftest = 0;
+	uint32_t selftest_ret = 0;
+	long raw_data_x = 0, raw_data_y = 0;
+
+	cam_ois_offset_test(g_o_ctrl, &raw_data_x, &raw_data_y, 1);
+	msleep(50);
+	selftest_ret = cam_ois_self_test(g_o_ctrl);
+
+	if (selftest_ret == 0x0)
+		result_selftest = true;
+	else
+		result_selftest = false;
+
+	if (abs(raw_data_x) > 30000 || abs(raw_data_y) > 30000)
+		result_offset = false;
+	else
+		result_offset = true;
+
+	if (result_offset && result_selftest)
+		result_total = 0;
+	else if (!result_offset && !result_selftest)
+		result_total = 3;
+	else if (!result_offset)
+		result_total = 1;
+	else if (!result_selftest)
+		result_total = 2;
+
+	pr_info("%s: Result : 0 (success), 1 (offset fail), 2 (selftest fail) , 3 (both fail)\n", __func__);
+	sprintf(buf, "Result : %d, result x = %ld.%03ld, result y = %ld.%03ld\n",
+		result_total, raw_data_x / 1000, (long int)abs(raw_data_x % 1000),
+		raw_data_y / 1000, (long int)abs(raw_data_y % 1000));
+	pr_info("%s", buf);
+
+	if (raw_data_x < 0 && raw_data_y < 0) {
+		return sprintf(buf, "%d,-%ld.%03ld,-%ld.%03ld\n", result_total,
+			(long int)abs(raw_data_x / 1000), (long int)abs(raw_data_x % 1000),
+			(long int)abs(raw_data_y / 1000), (long int)abs(raw_data_y % 1000));
+	} else if (raw_data_x < 0) {
+		return sprintf(buf, "%d,-%ld.%03ld,%ld.%03ld\n", result_total,
+			(long int)abs(raw_data_x / 1000), (long int)abs(raw_data_x % 1000),
+			raw_data_y / 1000, raw_data_y % 1000);
+	} else if (raw_data_y < 0) {
+		return sprintf(buf, "%d,%ld.%03ld,-%ld.%03ld\n", result_total,
+			raw_data_x / 1000, raw_data_x % 1000,
+			(long int)abs(raw_data_y / 1000), (long int)abs(raw_data_y % 1000));
+	} else {
+		return sprintf(buf, "%d,%ld.%03ld,%ld.%03ld\n",
+			result_total, raw_data_x / 1000, raw_data_x % 1000,
+			raw_data_y / 1000, raw_data_y % 1000);
+	}
+}
+
+static ssize_t gyro_rawdata_test_show(struct device *dev,
+			struct device_attribute *attr, char *buf)
+{
+	long raw_data_x = 0, raw_data_y = 0;
+
+	cam_ois_get_offset_data(g_o_ctrl, &raw_data_x, &raw_data_y);
+
+	pr_info("%s: raw data x = %ld.%03ld, raw data y = %ld.%03ld\n", __func__,
+		raw_data_x / 1000, raw_data_x % 1000,
+		raw_data_y / 1000, raw_data_y % 1000);
+
+	if (raw_data_x < 0 && raw_data_y < 0) {
+		return sprintf(buf, "-%ld.%03ld,-%ld.%03ld\n",
+			(long int)abs(raw_data_x / 1000), (long int)abs(raw_data_x % 1000),
+			(long int)abs(raw_data_y / 1000), (long int)abs(raw_data_y % 1000));
+	} else if (raw_data_x < 0) {
+		return sprintf(buf, "-%ld.%03ld,%ld.%03ld\n",
+			(long int)abs(raw_data_x / 1000), (long int)abs(raw_data_x % 1000),
+			raw_data_y / 1000, raw_data_y % 1000);
+	} else if (raw_data_y < 0) {
+		return sprintf(buf, "%ld.%03ld,-%ld.%03ld\n",
+			raw_data_x / 1000, raw_data_x % 1000,
+			(long int)abs(raw_data_y / 1000), (long int)abs(raw_data_y % 1000));
+	} else {
+		return sprintf(buf, "%ld.%03ld,%ld.%03ld\n",
+			raw_data_x / 1000, raw_data_x % 1000,
+			raw_data_y / 1000, raw_data_y % 1000);
+	}
+}
+
+char ois_fw_full[SYSFS_FW_VER_SIZE] = "NULL NULL\n";
+static ssize_t ois_fw_full_show(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	int rc = 0;
+
+	pr_info("[FW_DBG] OIS_fw_ver : %s\n", ois_fw_full);
+	rc = scnprintf(buf, PAGE_SIZE, "%s", ois_fw_full);
+	if (rc)
+		return rc;
+	return 0;
+}
+
+static ssize_t ois_fw_full_store(struct device *dev,
+	struct device_attribute *attr, const char *buf, size_t size)
+{
+	pr_info("[FW_DBG] buf : %s\n", buf);
+	scnprintf(ois_fw_full, sizeof(ois_fw_full), "%s", buf);
+
+	return size;
+}
+
+char ois_debug[40] = "NULL NULL NULL\n";
+static ssize_t ois_exif_show(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	int rc = 0;
+
+	pr_info("[FW_DBG] ois_debug : %s\n", ois_debug);
+	rc = scnprintf(buf, PAGE_SIZE, "%s", ois_debug);
+	if (rc)
+		return rc;
+	return 0;
+}
+
+static ssize_t ois_exif_store(struct device *dev,
+	struct device_attribute *attr, const char *buf, size_t size)
+{
+	pr_info("[FW_DBG] buf: %s\n", buf);
+	scnprintf(ois_debug, sizeof(ois_debug), "%s", buf);
+
+	return size;
+}
+
+extern uint8_t ois_wide_xygg[OIS_XYGG_SIZE];
+extern uint8_t ois_wide_cal_mark;
+int ois_gain_rear_result = 2; //0:normal, 1: No cal, 2: rear cal fail
+static ssize_t ois_gain_rear_show(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	int rc = 0;
+	uint32_t xgg = 0, ygg = 0;
+
+	pr_info("[FW_DBG] ois_gain_rear_result : %d\n",
+		ois_gain_rear_result);
+	if (ois_gain_rear_result == 0) {
+		memcpy(&xgg, &ois_wide_xygg[0], 4);
+		memcpy(&ygg, &ois_wide_xygg[4], 4);
+		rc = scnprintf(buf, PAGE_SIZE, "%d,0x%x,0x%x",
+			ois_gain_rear_result, xgg, ygg);
+	} else {
+		rc = scnprintf(buf, PAGE_SIZE, "%d",
+			ois_gain_rear_result);
+	}
+	if (rc)
+		return rc;
+	return 0;
+}
+
+
+extern uint8_t ois_wide_xysr[OIS_XYSR_SIZE];
+int ois_sr_rear_result = 2; //0:normal, 1: No cal, 2: rear cal fail
+static ssize_t ois_supperssion_ratio_rear_show(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	int rc = 0;
+	uint32_t xsr = 0, ysr = 0;
+
+	pr_info("[FW_DBG] ois_sr_rear_result : %d\n",
+		ois_sr_rear_result);
+	if (ois_sr_rear_result == 0) {
+		memcpy(&xsr, &ois_wide_xysr[0], 2);
+		memcpy(&ysr, &ois_wide_xysr[2], 2);
+		rc = scnprintf(buf, PAGE_SIZE, "%d,%u.%02u,%u.%02u",
+			ois_sr_rear_result, (xsr / 100), (xsr % 100), (ysr / 100), (ysr % 100));
+	} else {
+		rc = scnprintf(buf, PAGE_SIZE, "%d",
+			ois_sr_rear_result);
+	}
+
+	if (rc)
+		return rc;
+	return 0;
+}
+
+#endif //defined(CONFIG_SAMSUNG_OIS_RUMBA_S4)
+
 #if defined(CONFIG_SAMSUNG_REAR_TRIPLE)
 char cam3_fw_ver[SYSFS_FW_VER_SIZE] = "NULL NULL\n";//multi module
 static ssize_t rear3_firmware_show(struct device *dev,
@@ -1511,6 +1882,20 @@ static ssize_t rear3_firmware_full_store(struct device *dev,
 	return size;
 }
 
+#if 1
+char rear3_af_cal_str[MAX_AF_CAL_STR_SIZE] = "";
+static ssize_t rear3_afcal_show(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	int rc = 0;
+
+	pr_info("rear3_af_cal_str : 10 %s\n", rear3_af_cal_str);
+	rc = scnprintf(buf, PAGE_SIZE, "10 %s", rear3_af_cal_str);
+	if (rc)
+		return rc;
+	return 0;
+}
+#else
 int rear3_af_cal[FROM_REAR_AF_CAL_SIZE + 1] = {0,};
 static ssize_t rear3_afcal_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
@@ -1585,6 +1970,7 @@ static ssize_t rear3_afcal_show(struct device *dev,
 
 	return strlen(buf);
 }
+#endif
 
 char rear3_cam_info[150] = "NULL\n";	//camera_info
 static ssize_t rear3_camera_info_show(struct device *dev,
@@ -1612,7 +1998,14 @@ static ssize_t rear3_type_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
 	int rc = 0;
+#if defined(CONFIG_SEC_GTS5L_PROJECT) || defined(CONFIG_SEC_GTS5LWIFI_PROJECT) || defined(CONFIG_SEC_GTS6X_PROJECT) || defined(CONFIG_SEC_GTS6L_PROJECT) || defined(CONFIG_SEC_GTS6LWIFI_PROJECT)
+	char cam_type[] = "NULL\n";
+#elif defined(CONFIG_SEC_D2XQ_PROJECT) || defined(CONFIG_SEC_D2Q_PROJECT) || defined(CONFIG_SEC_D1Q_PROJECT)\
+	|| defined(CONFIG_SEC_D2XQ2_PROJECT)
+	char cam_type[] = "SLSI_S5K3M5\n";
+#else
 	char cam_type[] = "SLSI_S5K3M3\n";
+#endif
 
 	rc = scnprintf(buf, PAGE_SIZE, "%s", cam_type);
 	if (rc)
@@ -1656,8 +2049,8 @@ static ssize_t rear3_sensorid_exif_store(struct device *dev,
 	return size;
 }
 
-#define FROM_REAR3_DUAL_CAL_SIZE 2048
-uint8_t rear3_dual_cal[FROM_REAR3_DUAL_CAL_SIZE + 1] = "\0";
+#define FROM_REAR_DUAL_CAL_SIZE 2048
+uint8_t rear3_dual_cal[FROM_REAR_DUAL_CAL_SIZE + 1] = "\0";
 static ssize_t rear3_dual_cal_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
@@ -1666,10 +2059,10 @@ static ssize_t rear3_dual_cal_show(struct device *dev,
 
 	pr_info("[FW_DBG] rear3_dual_cal : %s\n", rear3_dual_cal);
 
-	if (FROM_REAR3_DUAL_CAL_SIZE > SYSFS_MAX_READ_SIZE)
+	if (FROM_REAR_DUAL_CAL_SIZE > SYSFS_MAX_READ_SIZE)
 		copy_size = SYSFS_MAX_READ_SIZE;
 	else
-		copy_size = FROM_REAR3_DUAL_CAL_SIZE;
+		copy_size = FROM_REAR_DUAL_CAL_SIZE;
 
 	ret = memcpy(buf, rear3_dual_cal, copy_size);
 
@@ -1681,7 +2074,7 @@ static ssize_t rear3_dual_cal_show(struct device *dev,
 }
 
 
-uint32_t rear3_dual_cal_size = FROM_REAR3_DUAL_CAL_SIZE;
+uint32_t rear3_dual_cal_size = FROM_REAR_DUAL_CAL_SIZE;
 static ssize_t rear3_dual_cal_size_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
@@ -1694,6 +2087,25 @@ static ssize_t rear3_dual_cal_size_show(struct device *dev,
 	return 0;
 }
 
+#if 1
+DualTilt_t rear3_dual;
+static ssize_t rear3_tilt_show(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	int rc = 0;
+
+	pr_info("[FW_DBG] rear3 dual tilt x = %d, y = %d, z = %d, sx = %d, sy = %d, range = %d, max_err = %d, avg_err = %d, dll_ver = %d project_cal_type=%s\n",
+		rear3_dual.x, rear3_dual.y, rear3_dual.z, rear3_dual.sx, rear3_dual.sy,
+		rear3_dual.range, rear3_dual.max_err, rear3_dual.avg_err, rear3_dual.dll_ver, rear3_dual.project_cal_type);
+
+	rc = scnprintf(buf, PAGE_SIZE, "1 %d %d %d %d %d %d %d %d %d %s\n", rear3_dual.x, rear3_dual.y,
+			rear3_dual.z, rear3_dual.sx, rear3_dual.sy, rear3_dual.range,
+			rear3_dual.max_err, rear3_dual.avg_err, rear3_dual.dll_ver, rear3_dual.project_cal_type);
+	if (rc)
+		return rc;
+	return 0;
+}
+#else
 int rear3_dual_tilt_x;
 int rear3_dual_tilt_y;
 int rear3_dual_tilt_z;
@@ -1719,6 +2131,7 @@ static ssize_t rear3_tilt_show(struct device *dev,
 		return rc;
 	return 0;
 }
+#endif
 
 uint8_t rear3_module_id[FROM_MODULE_ID_SIZE + 1] = "\0";
 #if 0
@@ -1940,7 +2353,8 @@ static ssize_t rear2_firmware_full_store(struct device *dev,
 	return size;
 }
 
-uint8_t rear2_dual_cal[FROM_REAR2_DUAL_CAL_SIZE + 1] = "\0";
+#if !defined(CONFIG_SEC_GTS5L_PROJECT) && !defined(CONFIG_SEC_GTS6L_PROJECT) && !defined(CONFIG_SEC_GTS6X_PROJECT) && !defined(CONFIG_SEC_GTS6LWIFI_PROJECT) && (defined(CONFIG_SAMSUNG_REAR_DUAL) || defined(CONFIG_SAMSUNG_REAR_TRIPLE))
+uint8_t rear2_dual_cal[FROM_REAR_DUAL_CAL_SIZE + 1] = "\0";
 static ssize_t rear2_dual_cal_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
@@ -1949,10 +2363,10 @@ static ssize_t rear2_dual_cal_show(struct device *dev,
 
 	pr_info("[FW_DBG] rear2_dual_cal : %s\n", rear2_dual_cal);
 
-	if (FROM_REAR2_DUAL_CAL_SIZE > SYSFS_MAX_READ_SIZE)
+	if (FROM_REAR_DUAL_CAL_SIZE > SYSFS_MAX_READ_SIZE)
 		copy_size = SYSFS_MAX_READ_SIZE;
 	else
-		copy_size = FROM_REAR2_DUAL_CAL_SIZE;
+		copy_size = FROM_REAR_DUAL_CAL_SIZE;
 
 	ret = memcpy(buf, rear2_dual_cal, copy_size);
 
@@ -1963,8 +2377,7 @@ static ssize_t rear2_dual_cal_show(struct device *dev,
 
 }
 
-
-uint32_t rear2_dual_cal_size = FROM_REAR2_DUAL_CAL_SIZE;
+uint32_t rear2_dual_cal_size = FROM_REAR_DUAL_CAL_SIZE;
 static ssize_t rear2_dual_cal_size_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
@@ -1977,7 +2390,25 @@ static ssize_t rear2_dual_cal_size_show(struct device *dev,
 	return 0;
 }
 
+#if 1
+DualTilt_t rear2_dual;
+static ssize_t rear2_tilt_show(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	int rc = 0;
 
+	pr_info("[FW_DBG] rear2 dual tilt x = %d, y = %d, z = %d, sx = %d, sy = %d, range = %d, max_err = %d, avg_err = %d, dll_ver = %d project_cal_type=%s\n",
+		rear2_dual.x, rear2_dual.y, rear2_dual.z, rear2_dual.sx, rear2_dual.sy,
+		rear2_dual.range, rear2_dual.max_err, rear2_dual.avg_err, rear2_dual.dll_ver, rear2_dual.project_cal_type);
+
+	rc = scnprintf(buf, PAGE_SIZE, "1 %d %d %d %d %d %d %d %d %d %s\n", rear2_dual.x, rear2_dual.y,
+			rear2_dual.z, rear2_dual.sx, rear2_dual.sy, rear2_dual.range,
+			rear2_dual.max_err, rear2_dual.avg_err, rear2_dual.dll_ver, rear2_dual.project_cal_type);
+	if (rc)
+		return rc;
+	return 0;
+}
+#else
 int rear2_dual_tilt_x;
 int rear2_dual_tilt_y;
 int rear2_dual_tilt_z;
@@ -2003,12 +2434,18 @@ static ssize_t rear2_tilt_show(struct device *dev,
 		return rc;
 	return 0;
 }
+#endif
+#endif
 
 static ssize_t rear2_type_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
 	int rc = 0;
+#if defined(CONFIG_SEC_GTS5L_PROJECT) || defined(CONFIG_SEC_GTS5LWIFI_PROJECT) || defined(CONFIG_SEC_GTS6L_PROJECT) || defined(CONFIG_SEC_GTS6X_PROJECT) || defined(CONFIG_SEC_GTS6LWIFI_PROJECT)
+	char cam_type[] = "SLSI_S5K5E9\n";
+#else
 	char cam_type[] = "SLSI_S5K3P9\n";
+#endif
 
 	rc = scnprintf(buf, PAGE_SIZE, "%s", cam_type);
 	if (rc)
@@ -2035,8 +2472,12 @@ static ssize_t ois_autotest_show(struct device *dev,
 
 	pr_info("%s: E\n", __func__);
 
-	if (g_a_ctrls[0] != NULL)
-		cam_actuator_power_up(g_a_ctrls[0]);
+	if (g_a_ctrls[0] == NULL || g_o_ctrl == NULL) {
+		CAM_ERR(CAM_OIS, "g_o_ctrl or g_a_ctrls ptr is NULL");
+		return 0;
+	}
+
+	cam_actuator_power_up(g_a_ctrls[0]);
 	msleep(100);
 
 	cam_actuator_move_for_ois_test(g_a_ctrls[0]);
@@ -2060,8 +2501,7 @@ static ssize_t ois_autotest_show(struct device *dev,
 		(y1_result ? "pass" : "fail"), (y1_result ? 0 : sinewave[0].sin_y));
 	pr_info("%s: result : %s\n", __func__, buf);
 
-	if (g_a_ctrls[0] != NULL)
-		cam_actuator_power_down(g_a_ctrls[0]);
+	cam_actuator_power_down(g_a_ctrls[0]);
 
 	pr_info("%s: X\n", __func__);
 
@@ -2093,12 +2533,15 @@ static ssize_t ois_autotest_2nd_show(struct device *dev,
 
 	pr_info("%s: E\n", __func__);
 
+	if (g_a_ctrls[0] == NULL || g_a_ctrls[1] == NULL || g_o_ctrl == NULL) {
+		CAM_ERR(CAM_OIS, "g_o_ctrl or g_a_ctrls ptr is NULL");
+		return 0;
+	}
+
 	for (i = 0; i < 2; i++) {
-		if (g_a_ctrls[i] != NULL) {
-			cam_actuator_power_up(g_a_ctrls[i]);
-			msleep(5);
-			cam_actuator_move_for_ois_test(g_a_ctrls[i]);
-		}
+		cam_actuator_power_up(g_a_ctrls[i]);
+		msleep(5);
+		cam_actuator_move_for_ois_test(g_a_ctrls[i]);
 	}
 	msleep(100);
 
@@ -2132,8 +2575,7 @@ static ssize_t ois_autotest_2nd_show(struct device *dev,
 	pr_info("%s: result : %s\n", __func__, buf);
 
 	for (i = 0; i < 2; i++) {
-		if (g_a_ctrls[i] != NULL)
-			cam_actuator_power_down(g_a_ctrls[i]);
+		cam_actuator_power_down(g_a_ctrls[i]);
 	}
 	pr_info("%s: X\n", __func__);
 
@@ -2155,8 +2597,10 @@ static ssize_t ois_autotest_2nd_store(struct device *dev,
 static ssize_t ois_power_store(struct device *dev,
 	struct device_attribute *attr, const char *buf, size_t size)
 {
-	if (g_o_ctrl == NULL || g_o_ctrl->io_master_info.client == NULL)
+	if (g_o_ctrl == NULL || g_o_ctrl->io_master_info.client == NULL) {
+		CAM_ERR(CAM_OIS, "g_o_ctrl ptr or g_o_ctrl->io_master_info.client is NULL");
 		return size;
+	}
 
 	mutex_lock(&(g_o_ctrl->ois_mutex));
 	if (g_o_ctrl->cam_ois_state != CAM_OIS_INIT) {
@@ -2192,6 +2636,11 @@ static ssize_t gyro_calibration_show(struct device *dev,
 	int result = 0;
 	long raw_data_x = 0, raw_data_y = 0;
 
+	if (g_o_ctrl == NULL) {
+		CAM_ERR(CAM_OIS, "g_o_ctrl ptr is NULL");
+		return 0;
+	}
+
 	result = cam_ois_gyro_sensor_calibration(g_o_ctrl, &raw_data_x, &raw_data_y);
 
 	if (raw_data_x < 0 && raw_data_y < 0) {
@@ -2219,6 +2668,11 @@ static ssize_t gyro_selftest_show(struct device *dev, struct device_attribute *a
 	uint32_t selftest_ret = 0;
 	long raw_data_x = 0, raw_data_y = 0;
 	int OIS_GYRO_OFFSET_SPEC = 10000;
+
+	if (g_o_ctrl == NULL) {
+		CAM_ERR(CAM_OIS, "g_o_ctrl ptr is NULL");
+		return 0;
+	}
 
 	result = cam_ois_offset_test(g_o_ctrl, &raw_data_x, &raw_data_y, 1);
 	msleep(50);
@@ -2281,6 +2735,11 @@ static ssize_t gyro_rawdata_test_show(struct device *dev,
 {
 	int rc = 0;
 	long raw_data_x = 0, raw_data_y = 0;
+
+	if (g_o_ctrl == NULL) {
+		CAM_ERR(CAM_OIS, "g_o_ctrl ptr is NULL");
+		return 0;
+	}
 
 	raw_init_x = 0;
 	raw_init_y = 0;
@@ -2469,8 +2928,10 @@ static ssize_t ois_reset_check(struct device *dev,
 {
 	int rc = 0;
 
-	if (g_o_ctrl == NULL)
+	if (g_o_ctrl == NULL) {
+		CAM_ERR(CAM_OIS, "g_o_ctrl ptr is NULL");
 		return 0;
+	}
 
 	pr_info("ois reset_check : %d\n", g_o_ctrl->ois_mode);
 	rc = scnprintf(buf, PAGE_SIZE, "%d", g_o_ctrl->ois_mode);
@@ -2641,9 +3102,9 @@ static ssize_t rear_camera_hw_param_store(struct device *dev,
 }
 #if defined(CONFIG_SAMSUNG_FRONT_DUAL)
 
-#define FROM_FRONT2_DUAL_CAL_SIZE 1024
+//#define FROM_FRONT2_DUAL_CAL_SIZE 1024
 
-uint8_t front2_dual_cal[FROM_FRONT2_DUAL_CAL_SIZE + 1] = "\0";
+uint8_t front2_dual_cal[FROM_FRONT_DUAL_CAL_SIZE + 1] = "\0";
 static ssize_t front2_dual_cal_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
@@ -2652,10 +3113,10 @@ static ssize_t front2_dual_cal_show(struct device *dev,
 
 	pr_info("[FW_DBG] front2_dual_cal : %s\n", front2_dual_cal);
 
-	if (FROM_FRONT2_DUAL_CAL_SIZE > SYSFS_MAX_READ_SIZE)
+	if (FROM_FRONT_DUAL_CAL_SIZE > SYSFS_MAX_READ_SIZE)
 		copy_size = SYSFS_MAX_READ_SIZE;
 	else
-		copy_size = FROM_FRONT2_DUAL_CAL_SIZE;
+		copy_size = FROM_FRONT_DUAL_CAL_SIZE;
 
 	ret = memcpy(buf, front2_dual_cal, copy_size);
 
@@ -2667,7 +3128,7 @@ static ssize_t front2_dual_cal_show(struct device *dev,
 }
 
 
-uint32_t front2_dual_cal_size = FROM_FRONT2_DUAL_CAL_SIZE;
+uint32_t front2_dual_cal_size = FROM_FRONT_DUAL_CAL_SIZE;
 static ssize_t front2_dual_cal_size_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
@@ -2680,6 +3141,25 @@ static ssize_t front2_dual_cal_size_show(struct device *dev,
 	return 0;
 }
 
+#if 1
+DualTilt_t front2_dual;
+static ssize_t front2_tilt_show(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	int rc = 0;
+
+	pr_info("[FW_DBG] front2 dual tilt x = %d, y = %d, z = %d, sx = %d, sy = %d, range = %d, max_err = %d, avg_err = %d, dll_ver = %d\n",
+		front2_dual.x, front2_dual.y, front2_dual.z, front2_dual.sx, front2_dual.sy,
+		front2_dual.range, front2_dual.max_err, front2_dual.avg_err, front2_dual.dll_ver);
+
+	rc = scnprintf(buf, PAGE_SIZE, "1 %d %d %d %d %d %d %d %d %d\n", front2_dual.x, front2_dual.y,
+			front2_dual.z, front2_dual.sx, front2_dual.sy, front2_dual.range,
+			front2_dual.max_err, front2_dual.avg_err, front2_dual.dll_ver);
+	if (rc)
+		return rc;
+	return 0;
+}
+#else
 int front2_dual_tilt_x;
 int front2_dual_tilt_y;
 int front2_dual_tilt_z;
@@ -2705,7 +3185,7 @@ static ssize_t front2_tilt_show(struct device *dev,
 		return rc;
 	return 0;
 }
-
+#endif
 
 #endif
 static ssize_t front_camera_hw_param_show(struct device *dev,
@@ -3298,16 +3778,16 @@ static ssize_t rear_tof_firmware_load_store(struct device *dev,
 	return size;
 }
 
-uint8_t rear4_module_id[FROM_MODULE_ID_SIZE + 1] = "\0";
-static ssize_t rear4_moduleid_show(struct device *dev,
+uint8_t rear_tof_module_id[FROM_MODULE_ID_SIZE + 1] = "\0";
+static ssize_t rear_tof_moduleid_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
-	pr_info("[FW_DBG] rear4_module_id : %c%c%c%c%c%02X%02X%02X%02X%02X\n",
-	  rear4_module_id[0], rear4_module_id[1], rear4_module_id[2], rear4_module_id[3], rear4_module_id[4],
-	  rear4_module_id[5], rear4_module_id[6], rear4_module_id[7], rear4_module_id[8], rear4_module_id[9]);
+	pr_info("[FW_DBG] rear_tof_module_id : %c%c%c%c%c%02X%02X%02X%02X%02X\n",
+	  rear_tof_module_id[0], rear_tof_module_id[1], rear_tof_module_id[2], rear_tof_module_id[3], rear_tof_module_id[4],
+	  rear_tof_module_id[5], rear_tof_module_id[6], rear_tof_module_id[7], rear_tof_module_id[8], rear_tof_module_id[9]);
 	return sprintf(buf, "%c%c%c%c%c%02X%02X%02X%02X%02X\n",
-	  rear4_module_id[0], rear4_module_id[1], rear4_module_id[2], rear4_module_id[3], rear4_module_id[4],
-	  rear4_module_id[5], rear4_module_id[6], rear4_module_id[7], rear4_module_id[8], rear4_module_id[9]);
+	  rear_tof_module_id[0], rear_tof_module_id[1], rear_tof_module_id[2], rear_tof_module_id[3], rear_tof_module_id[4],
+	 rear_tof_module_id[5], rear_tof_module_id[6], rear_tof_module_id[7], rear_tof_module_id[8], rear_tof_module_id[9]);
 }
 
 char rear_tof_sensor_id[FROM_SENSOR_ID_SIZE + 1] = "\0";
@@ -3342,7 +3822,7 @@ static ssize_t rear_tofcal_uid_show(struct device *dev,
 	return 0;
 }
 
-uint8_t rear_tof_cal[REAR_TOFCAL_SIZE + 1] = "\0";
+uint8_t rear_tof_cal[TOFCAL_SIZE + 1] = "\0";
 static ssize_t rear_tofcal_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
@@ -3351,10 +3831,10 @@ static ssize_t rear_tofcal_show(struct device *dev,
 
 	pr_info("[FW_DBG] rear_tof_cal : %s\n", rear_tof_cal);
 
-	if (REAR_TOFCAL_SIZE > SYSFS_MAX_READ_SIZE)
+	if (TOFCAL_SIZE > SYSFS_MAX_READ_SIZE)
 		copy_size = SYSFS_MAX_READ_SIZE;
 	else
-		copy_size = REAR_TOFCAL_SIZE;
+		copy_size = TOFCAL_SIZE;
 
 	ret = memcpy(buf, rear_tof_cal, copy_size);
 
@@ -3364,7 +3844,7 @@ static ssize_t rear_tofcal_show(struct device *dev,
 	return 0;
 }
 
-uint8_t rear_tof_cal_extra[REAR_TOFCAL_EXTRA_SIZE + 1] = "\0";
+uint8_t rear_tof_cal_extra[TOFCAL_EXTRA_SIZE + 1] = "\0";
 static ssize_t rear_tofcal_extra_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
@@ -3373,10 +3853,10 @@ static ssize_t rear_tofcal_extra_show(struct device *dev,
 
 	pr_info("[FW_DBG] rear_tof_cal_extra : %s\n", rear_tof_cal_extra);
 
-	if (REAR_TOFCAL_EXTRA_SIZE > SYSFS_MAX_READ_SIZE)
+	if (TOFCAL_EXTRA_SIZE > SYSFS_MAX_READ_SIZE)
 		copy_size = SYSFS_MAX_READ_SIZE;
 	else
-		copy_size = REAR_TOFCAL_EXTRA_SIZE;
+		copy_size = TOFCAL_EXTRA_SIZE;
 
 	ret = memcpy(buf, rear_tof_cal_extra, copy_size);
 
@@ -3387,7 +3867,7 @@ static ssize_t rear_tofcal_extra_show(struct device *dev,
 }
 
 
-uint32_t rear_tof_cal_size = REAR_TOFCAL_TOTAL_SIZE;
+uint32_t rear_tof_cal_size = TOFCAL_TOTAL_SIZE;
 static ssize_t rear_tofcal_size_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
@@ -3437,6 +3917,25 @@ static ssize_t rear_tof_dual_cal_show(struct device *dev,
 	return 0;
 }
 
+#if 1
+DualTilt_t rear_tof_dual;
+static ssize_t rear_tof_tilt_show(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	int rc = 0;
+
+	pr_info("[FW_DBG] rear tof tilt x = %d, y = %d, z = %d, sx = %d, sy = %d, range = %d, max_err = %d, avg_err = %d, dll_ver = %d\n",
+		rear_tof_dual.x, rear_tof_dual.y, rear_tof_dual.z, rear_tof_dual.sx, rear_tof_dual.sy,
+		rear_tof_dual.range, rear_tof_dual.max_err, rear_tof_dual.avg_err, rear_tof_dual.dll_ver);
+
+	rc = scnprintf(buf, PAGE_SIZE, "1 %d %d %d %d %d %d %d %d %d\n", rear_tof_dual.x, rear_tof_dual.y,
+			rear_tof_dual.z, rear_tof_dual.sx, rear_tof_dual.sy, rear_tof_dual.range,
+			rear_tof_dual.max_err, rear_tof_dual.avg_err, rear_tof_dual.dll_ver);
+	if (rc)
+		return rc;
+	return 0;
+}
+#else
 int rear_tof_dual_tilt_x;
 int rear_tof_dual_tilt_y;
 int rear_tof_dual_tilt_z;
@@ -3462,7 +3961,27 @@ static ssize_t rear_tof_tilt_show(struct device *dev,
 		return rc;
 	return 0;
 }
+#endif
 
+#if 1
+DualTilt_t rear2_tof_dual;
+static ssize_t rear2_tof_tilt_show(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	int rc = 0;
+
+	pr_info("[FW_DBG] rear tof tilt x = %d, y = %d, z = %d, sx = %d, sy = %d, range = %d, max_err = %d, avg_err = %d, dll_ver = %d\n",
+		rear2_tof_dual.x, rear2_tof_dual.y, rear2_tof_dual.z, rear2_tof_dual.sx, rear2_tof_dual.sy,
+		rear2_tof_dual.range, rear2_tof_dual.max_err, rear2_tof_dual.avg_err, rear2_tof_dual.dll_ver);
+
+	rc = scnprintf(buf, PAGE_SIZE, "1 %d %d %d %d %d %d %d %d %d\n", rear2_tof_dual.x, rear2_tof_dual.y,
+			rear2_tof_dual.z, rear2_tof_dual.sx, rear2_tof_dual.sy, rear2_tof_dual.range,
+			rear2_tof_dual.max_err, rear2_tof_dual.avg_err, rear2_tof_dual.dll_ver);
+	if (rc)
+		return rc;
+	return 0;
+}
+#else
 int rear2_tof_dual_tilt_x;
 int rear2_tof_dual_tilt_y;
 int rear2_tof_dual_tilt_z;
@@ -3488,6 +4007,7 @@ static ssize_t rear2_tof_tilt_show(struct device *dev,
 		return rc;
 	return 0;
 }
+#endif
 
 static ssize_t rear_tof_ld_onoff_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
@@ -3497,8 +4017,10 @@ static ssize_t rear_tof_ld_onoff_show(struct device *dev,
 	uint32_t read_data1 = -1;
 	int rc = 0;
 
-	if(g_s_ctrl_tof == NULL)
+	if(g_s_ctrl_tof == NULL) {
+		pr_err("[TOF] g_s_ctrl_tof ptr is NULL\n");
 		return 0;
+	}
 	if(g_s_ctrl_tof->id == CAMERA_7)
 		return 0;
 
@@ -3521,8 +4043,10 @@ static ssize_t rear_tof_ld_onoff_store(struct device *dev,
 {
 	int value = -1;
 
-	if(g_s_ctrl_tof == NULL)
+	if(g_s_ctrl_tof == NULL) {
+		pr_err("[TOF] g_s_ctrl_tof ptr is NULL\n");
 		return -1;
+	}
 	if(g_s_ctrl_tof->id == CAMERA_7)
 		return -1;
 
@@ -3544,19 +4068,33 @@ static ssize_t rear_tof_ld_onoff_store(struct device *dev,
 static ssize_t rear_tof_ae_value_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
+	struct cam_camera_slave_info *slave_info;
 	uint32_t ae_value = 0;
 	uint32_t reg_data3, reg_data2, reg_data1, reg_data0 = 0;
 	int rc = 0;
 
-	if(g_s_ctrl_tof == NULL)
+	if(g_s_ctrl_tof == NULL) {
+		pr_err("[TOF] g_s_ctrl_tof ptr is NULL\n");
 		return 0;
+	}
 	if(g_s_ctrl_tof->id == CAMERA_7)
 		return 0;
 
-	cam_sensor_tof_i2c_read(0x2110, &reg_data3, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	cam_sensor_tof_i2c_read(0x2111, &reg_data2, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	cam_sensor_tof_i2c_read(0x2112, &reg_data1, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	cam_sensor_tof_i2c_read(0x2113, &reg_data0, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+	slave_info = &(g_s_ctrl_tof->sensordata->slave_info);
+
+	if(slave_info->sensor_id == TOF_SENSOR_ID_IMX316) {
+		cam_sensor_tof_i2c_read(0x2110, &reg_data3, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		cam_sensor_tof_i2c_read(0x2111, &reg_data2, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		cam_sensor_tof_i2c_read(0x2112, &reg_data1, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		cam_sensor_tof_i2c_read(0x2113, &reg_data0, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+	} else if(slave_info->sensor_id == TOF_SENSOR_ID_IMX516) {
+		cam_sensor_tof_i2c_read(0x2124, &reg_data3, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		cam_sensor_tof_i2c_read(0x2125, &reg_data2, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		cam_sensor_tof_i2c_read(0x2126, &reg_data1, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		cam_sensor_tof_i2c_read(0x2127, &reg_data0, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+	} else {
+		pr_info("TOF AE support not added\n");
+	}
 
 	pr_info("value 0x%x reg_data3: 0x%2x, addr2: 0x%2x, addr1: 0x%2x, addr0: 0x%2x\n", ae_value, reg_data3,reg_data2, reg_data1,reg_data0);
 
@@ -3575,36 +4113,57 @@ static ssize_t rear_tof_ae_value_show(struct device *dev,
 static ssize_t rear_tof_ae_value_store(struct device *dev,
 	struct device_attribute *attr, const char *buf, size_t size)
 {
+	struct cam_camera_slave_info *slave_info;
 	uint32_t value = 0;
 	uint32_t reg_data3, reg_data2, reg_data1, reg_data0 = 0;
 	uint32_t hmax = 0x02FE;
 
-	if(g_s_ctrl_tof == NULL)
+	if(g_s_ctrl_tof == NULL) {
+		pr_err("[TOF] g_s_ctrl_tof ptr is NULL\n");
 		return 0;
+	}
 	if(g_s_ctrl_tof->id == CAMERA_7)
 		return 0;
 
 	if (buf == NULL || kstrtouint(buf, 10, &value))
 		return -1;
 
+	pr_info("ae_value: 0x%x\n", value);
+
 	value  = value * 120; // 120Mhz
+
 	if(value >= hmax && value <= 0x1D4C0)
 	{
+		slave_info = &(g_s_ctrl_tof->sensordata->slave_info);
 		reg_data3 = (value & 0xFF000000) >> 24;
 		reg_data2 = (value & 0xFF0000) >> 16;
 		reg_data1 = (value & 0xFF00) >> 8;
 		reg_data0 = value & 0xFF;
+
 		//pr_info("value 0x%x reg_data3: 0x%2x, addr2: 0x%2x, addr1: 0x%2x, addr0: 0x%2x\n", value, reg_data3,reg_data2, reg_data1,reg_data0);
+		if(slave_info->sensor_id == TOF_SENSOR_ID_IMX316) {
+			cam_sensor_tof_i2c_write(0x2110, reg_data3, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+			cam_sensor_tof_i2c_write(0x2111, reg_data2, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+			cam_sensor_tof_i2c_write(0x2112, reg_data1, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+			cam_sensor_tof_i2c_write(0x2113, reg_data0, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
 
-		cam_sensor_tof_i2c_write(0x2110, reg_data3, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-		cam_sensor_tof_i2c_write(0x2111, reg_data2, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-		cam_sensor_tof_i2c_write(0x2112, reg_data1, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-		cam_sensor_tof_i2c_write(0x2113, reg_data0, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+			cam_sensor_tof_i2c_write(0x2114, reg_data3, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+			cam_sensor_tof_i2c_write(0x2115, reg_data2, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+			cam_sensor_tof_i2c_write(0x2116, reg_data1, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+			cam_sensor_tof_i2c_write(0x2117, reg_data0, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		} else if(slave_info->sensor_id == TOF_SENSOR_ID_IMX516) {
+			cam_sensor_tof_i2c_write(0x2124, reg_data3, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+			cam_sensor_tof_i2c_write(0x2125, reg_data2, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+			cam_sensor_tof_i2c_write(0x2126, reg_data1, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+			cam_sensor_tof_i2c_write(0x2127, reg_data0, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
 
-		cam_sensor_tof_i2c_write(0x2114, reg_data3, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-		cam_sensor_tof_i2c_write(0x2115, reg_data2, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-		cam_sensor_tof_i2c_write(0x2116, reg_data1, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-		cam_sensor_tof_i2c_write(0x2117, reg_data0, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+			cam_sensor_tof_i2c_write(0x2128, reg_data3, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+			cam_sensor_tof_i2c_write(0x2129, reg_data2, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+			cam_sensor_tof_i2c_write(0x212A, reg_data1, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+			cam_sensor_tof_i2c_write(0x212B, reg_data0, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		} else {
+			pr_info("TOF AE support not added\n");
+		}
 	}
 
 	return size;
@@ -3613,43 +4172,52 @@ static ssize_t rear_tof_ae_value_store(struct device *dev,
 static ssize_t rear_tof_check_pd_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
+	struct cam_camera_slave_info *slave_info;
 	uint32_t value = 0;
 	uint32_t reg_data1, reg_data0 = 0;
 	int rc = 0;
 
-        if(g_s_ctrl_tof == NULL)
+	if(g_s_ctrl_tof == NULL) {
+		pr_err("[TOF] g_s_ctrl_tof ptr is NULL\n");
 		return 0;
+	}
 
 	if(g_s_ctrl_tof->id == CAMERA_7)
 		return 0;
 
 	if(check_pd_ready == 0) {
 		rc = scnprintf(buf, PAGE_SIZE, "NG\n");
-	}
-	else {
-		cam_sensor_tof_i2c_write(0x0421, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-		cam_sensor_tof_i2c_write(0x0436, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-		cam_sensor_tof_i2c_write(0x0437, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-		cam_sensor_tof_i2c_write(0x043A, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-		cam_sensor_tof_i2c_write(0x0500, 0x11, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-		cam_sensor_tof_i2c_write(0x0501, 0x90, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-		cam_sensor_tof_i2c_write(0x0431, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-		cam_sensor_tof_i2c_write(0x0430, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-		cam_sensor_tof_i2c_write(0x0431, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-		cam_sensor_tof_i2c_read(0x058B, &reg_data1, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+	} else {
+		slave_info = &(g_s_ctrl_tof->sensordata->slave_info);
 
-		cam_sensor_tof_i2c_write(0x0423, 0xA0, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-		cam_sensor_tof_i2c_write(0x0436, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-		cam_sensor_tof_i2c_write(0x0437, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-		cam_sensor_tof_i2c_write(0x043A, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-		cam_sensor_tof_i2c_write(0x0500, 0x07, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-		cam_sensor_tof_i2c_write(0x0501, 0xA0, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-		cam_sensor_tof_i2c_write(0x0431, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-		cam_sensor_tof_i2c_write(0x0430, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-		cam_sensor_tof_i2c_write(0x0431, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-		cam_sensor_tof_i2c_read(0x0582, &reg_data0, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		if (slave_info->sensor_id == TOF_SENSOR_ID_IMX316) {
+			cam_sensor_tof_i2c_write(0x0421, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+			cam_sensor_tof_i2c_write(0x0436, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+			cam_sensor_tof_i2c_write(0x0437, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+			cam_sensor_tof_i2c_write(0x043A, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+			cam_sensor_tof_i2c_write(0x0500, 0x11, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+			cam_sensor_tof_i2c_write(0x0501, 0x90, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+			cam_sensor_tof_i2c_write(0x0431, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+			cam_sensor_tof_i2c_write(0x0430, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+			cam_sensor_tof_i2c_write(0x0431, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+			cam_sensor_tof_i2c_read(0x058B, &reg_data1, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
 
-	        value = (reg_data1 & 0x30) >> 4;
+			cam_sensor_tof_i2c_write(0x0423, 0xA0, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+			cam_sensor_tof_i2c_write(0x0436, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+			cam_sensor_tof_i2c_write(0x0437, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+			cam_sensor_tof_i2c_write(0x043A, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+			cam_sensor_tof_i2c_write(0x0500, 0x07, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+			cam_sensor_tof_i2c_write(0x0501, 0xA0, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+			cam_sensor_tof_i2c_write(0x0431, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+			cam_sensor_tof_i2c_write(0x0430, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+			cam_sensor_tof_i2c_write(0x0431, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+			cam_sensor_tof_i2c_read(0x0582, &reg_data0, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		} else if(slave_info->sensor_id == TOF_SENSOR_ID_IMX516) {
+			cam_sensor_tof_i2c_read(0x0588, &reg_data1, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+			cam_sensor_tof_i2c_read(0x058F, &reg_data0, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		}
+
+		value = (reg_data1 & 0x30) >> 4;
 		value = (value << 8)|reg_data0;
 
 		pr_info("rear pd value: 0x%x\n", value);
@@ -3666,278 +4234,312 @@ static ssize_t rear_tof_check_pd_show(struct device *dev,
 static ssize_t rear_tof_check_pd_store(struct device *dev,
 	struct device_attribute *attr, const char *buf, size_t size)
 {
+	struct cam_camera_slave_info *slave_info;
 	uint32_t value = 0;
 
-	if(g_s_ctrl_tof == NULL)
+	if (g_s_ctrl_tof == NULL) {
+		pr_err("[TOF] g_s_ctrl_tof ptr is NULL\n");
 		return -1;
+	}
 
-	if(g_s_ctrl_tof->id == CAMERA_7)
+	if (g_s_ctrl_tof->id == CAMERA_7)
 		return -1;
 
 	if (buf == NULL || kstrtouint(buf, 10, &value))
 		return -1;
 
-	if(value > 0) {
-		if(check_pd_ready == 0) {
-		//read enable sequence
-	        cam_sensor_tof_i2c_write(0x0401, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0411, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0421, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0431, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0450, 0x43, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0454, 0x03, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0450, 0x43, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0454, 0x03, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0450, 0x47, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0454, 0x03, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0450, 0x47, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0454, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0450, 0x47, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0454, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0450, 0x47, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0454, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0431, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x043A, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0433, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0433, 0x20, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0435, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0436, 0x08, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0437, 0x08, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x043A, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0508, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0509, 0xA3, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0431, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0430, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0431, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x043A, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0508, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0509, 0xA3, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0431, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0430, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0431, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x043A, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0508, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0509, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x050A, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0431, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0430, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0431, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x043A, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0508, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0509, 0x25, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x050A, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0431, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0430, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0431, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x043A, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0508, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0509, 0x12, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x050A, 0x20, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0431, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0430, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0431, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x043A, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0508, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0509, 0x0C, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x050A, 0x28, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0431, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0430, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0431, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x043A, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0508, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0509, 0x13, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x050A, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0431, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0430, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0431, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x043A, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0508, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0509, 0x09, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x050A, 0x05, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0431, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0430, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0431, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x043A, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0508, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0509, 0x04, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x050A, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0431, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0430, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0431, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x043A, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0508, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0509, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x050A, 0x0C, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0431, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0430, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0431, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x043A, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0508, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0509, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x050A, 0x89, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0431, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0430, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0431, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x043A, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0508, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0509, 0x03, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x050A, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0431, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0430, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0431, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x043A, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0508, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0509, 0x11, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x050A, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0431, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0430, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0431, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x043A, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0508, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0509, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x050A, 0x6B, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0431, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0430, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0431, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x043A, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0508, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0509, 0x08, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x050A, 0xB3, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0431, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0430, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0431, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x043A, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0508, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0509, 0x0D, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x050A, 0xC4, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0431, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0430, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0431, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x043A, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0508, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0509, 0x05, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x050A, 0x9C, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0431, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0430, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0431, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x043A, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0508, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0509, 0x07, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x050A, 0x41, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0431, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0430, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0431, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x043A, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0508, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0509, 0x0E, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x050A, 0xF1, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0431, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0430, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0431, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x043A, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0508, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0509, 0x10, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x050A, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0431, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0430, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0431, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x043A, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0508, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0509, 0x06, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x050A, 0xBA, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0431, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0430, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0431, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x043A, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0508, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0509, 0x0B, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x050A, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0431, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0430, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0431, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x043A, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0508, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0509, 0x0F, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x050A, 0x90, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0431, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0430, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0431, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x043A, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0508, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0509, 0x0A, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x050A, 0x04, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0431, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0430, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0431, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x043A, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0508, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0509, 0xA3, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0431, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0430, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0431, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x043A, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0508, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0509, 0xA3, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0431, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0430, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0431, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x043A, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0508, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0509, 0x23, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x050A, 0x04, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0431, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0430, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0431, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0411, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0413, 0x80, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0413, 0xA0, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0415, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0417, 0x18, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0518, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0519, 0x13, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x051A, 0x23, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0411, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0421, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x042A, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0423, 0x80, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0423, 0xA0, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0425, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0426, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0427, 0x1B, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0443, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0441, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0442, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x051B, 0x03, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x051C, 0x94, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x051D, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x051E, 0xA3, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x0421, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x149B, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-	        cam_sensor_tof_i2c_write(0x1001, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+	slave_info = &(g_s_ctrl_tof->sensordata->slave_info);
 
-		check_pd_ready = 1;
+	if (value > 0) {
+		if (slave_info->sensor_id == TOF_SENSOR_ID_IMX316) {
+			if (check_pd_ready == 0) {
+			//read enable sequence
+		        cam_sensor_tof_i2c_write(0x0401, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0411, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0421, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0431, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0450, 0x43, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0454, 0x03, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0450, 0x43, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0454, 0x03, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0450, 0x47, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0454, 0x03, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0450, 0x47, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0454, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0450, 0x47, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0454, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0450, 0x47, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0454, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0431, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x043A, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0433, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0433, 0x20, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0435, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0436, 0x08, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0437, 0x08, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x043A, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0508, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0509, 0xA3, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0431, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0430, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0431, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x043A, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0508, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0509, 0xA3, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0431, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0430, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0431, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x043A, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0508, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0509, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x050A, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0431, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0430, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0431, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x043A, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0508, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0509, 0x25, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x050A, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0431, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0430, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0431, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x043A, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0508, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0509, 0x12, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x050A, 0x20, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0431, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0430, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0431, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x043A, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0508, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0509, 0x0C, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x050A, 0x28, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0431, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0430, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0431, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x043A, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0508, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0509, 0x13, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x050A, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0431, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0430, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0431, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x043A, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0508, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0509, 0x09, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x050A, 0x05, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0431, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0430, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0431, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x043A, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0508, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0509, 0x04, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x050A, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0431, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0430, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0431, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x043A, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0508, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0509, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x050A, 0x0C, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0431, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0430, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0431, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x043A, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0508, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0509, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x050A, 0x89, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0431, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0430, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0431, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x043A, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0508, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0509, 0x03, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x050A, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0431, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0430, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0431, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x043A, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0508, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0509, 0x11, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x050A, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0431, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0430, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0431, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x043A, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0508, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0509, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x050A, 0x6B, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0431, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0430, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0431, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x043A, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0508, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0509, 0x08, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x050A, 0xB3, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0431, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0430, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0431, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x043A, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0508, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0509, 0x0D, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x050A, 0xC4, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0431, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0430, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0431, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x043A, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0508, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0509, 0x05, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x050A, 0x9C, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0431, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0430, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0431, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x043A, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0508, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0509, 0x07, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x050A, 0x41, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0431, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0430, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0431, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x043A, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0508, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0509, 0x0E, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x050A, 0xF1, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0431, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0430, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0431, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x043A, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0508, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0509, 0x10, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x050A, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0431, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0430, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0431, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x043A, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0508, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0509, 0x06, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x050A, 0xBA, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0431, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0430, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0431, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x043A, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0508, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0509, 0x0B, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x050A, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0431, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0430, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0431, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x043A, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0508, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0509, 0x0F, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x050A, 0x90, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0431, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0430, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0431, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x043A, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0508, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0509, 0x0A, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x050A, 0x04, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0431, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0430, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0431, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x043A, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0508, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0509, 0xA3, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0431, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0430, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0431, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x043A, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0508, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0509, 0xA3, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0431, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0430, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0431, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x043A, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0508, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0509, 0x23, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x050A, 0x04, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0431, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0430, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0431, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0411, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0413, 0x80, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0413, 0xA0, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0415, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0417, 0x18, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0518, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0519, 0x13, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x051A, 0x23, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0411, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0421, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x042A, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0423, 0x80, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0423, 0xA0, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0425, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0426, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0427, 0x1B, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0443, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0441, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0442, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x051B, 0x03, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x051C, 0x94, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x051D, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x051E, 0xA3, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x0421, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x149B, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		        cam_sensor_tof_i2c_write(0x1001, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+
+				check_pd_ready = 1;
+			}
+			//APC2 check2
+			cam_sensor_tof_i2c_write(0x0436, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+			cam_sensor_tof_i2c_write(0x0437, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+			cam_sensor_tof_i2c_write(0x043A, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+			cam_sensor_tof_i2c_write(0x0500, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+			cam_sensor_tof_i2c_write(0x0501, 0x08, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+			cam_sensor_tof_i2c_write(0x0502, value, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+			cam_sensor_tof_i2c_write(0x0431, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+			cam_sensor_tof_i2c_write(0x0430, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+			cam_sensor_tof_i2c_write(0x0431, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+
+			//IPD_OFFSET
+			cam_sensor_tof_i2c_write(0x0436, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+			cam_sensor_tof_i2c_write(0x0437, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+			cam_sensor_tof_i2c_write(0x043A, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+			cam_sensor_tof_i2c_write(0x0500, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+			cam_sensor_tof_i2c_write(0x0501, 0x0D, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+			cam_sensor_tof_i2c_write(0x0502, 0xC3, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+			cam_sensor_tof_i2c_write(0x0431, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+			cam_sensor_tof_i2c_write(0x0430, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+			cam_sensor_tof_i2c_write(0x0431, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+		} else if (slave_info->sensor_id == TOF_SENSOR_ID_IMX516) {
+			pr_info("[TOF] IMX516 pd store value: %d, ready: %d\n", value, check_pd_ready);
+			if (check_pd_ready == 0)
+				check_pd_ready = 1;
+			pr_info("[TOF] IMX516 pd store ready: %d\n", check_pd_ready);
+
+			//IPD offset write
+			cam_sensor_tof_i2c_write(0x0403, 0x20, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+			cam_sensor_tof_i2c_write(0x0405, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+			cam_sensor_tof_i2c_write(0x0407, 0x26, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+			cam_sensor_tof_i2c_write(0x0526, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+			cam_sensor_tof_i2c_write(0x0527, 0x0D, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+			cam_sensor_tof_i2c_write(0x0528, 0xC0, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE); //IPD offset
+			cam_sensor_tof_i2c_write(0x0401, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+			cam_sensor_tof_i2c_write(0x0400, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+			cam_sensor_tof_i2c_write(0x0401, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+
+			// VCSELL current write
+			cam_sensor_tof_i2c_write(0x0403, 0x20, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+			cam_sensor_tof_i2c_write(0x0405, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+			cam_sensor_tof_i2c_write(0x0407, 0x26, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+			cam_sensor_tof_i2c_write(0x0526, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+			cam_sensor_tof_i2c_write(0x0527, 0x08, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+			cam_sensor_tof_i2c_write(0x0528, value, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+			cam_sensor_tof_i2c_write(0x0401, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+			cam_sensor_tof_i2c_write(0x0400, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+			cam_sensor_tof_i2c_write(0x0401, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
 		}
-        //APC2 check2
-	cam_sensor_tof_i2c_write(0x0436, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-        cam_sensor_tof_i2c_write(0x0437, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-        cam_sensor_tof_i2c_write(0x043A, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-        cam_sensor_tof_i2c_write(0x0500, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-        cam_sensor_tof_i2c_write(0x0501, 0x08, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-        cam_sensor_tof_i2c_write(0x0502, value, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-        cam_sensor_tof_i2c_write(0x0431, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-        cam_sensor_tof_i2c_write(0x0430, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-        cam_sensor_tof_i2c_write(0x0431, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-
-        //IPD_OFFSET
-        cam_sensor_tof_i2c_write(0x0436, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-        cam_sensor_tof_i2c_write(0x0437, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-        cam_sensor_tof_i2c_write(0x043A, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-        cam_sensor_tof_i2c_write(0x0500, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-        cam_sensor_tof_i2c_write(0x0501, 0x0D, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-        cam_sensor_tof_i2c_write(0x0502, 0xC3, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-        cam_sensor_tof_i2c_write(0x0431, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-        cam_sensor_tof_i2c_write(0x0430, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-        cam_sensor_tof_i2c_write(0x0431, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
 	}
 
 	return size;
@@ -3948,8 +4550,10 @@ static ssize_t rear_tof_fps_show(struct device *dev,
 {
 	int rc = 0;
 
-	if(g_s_ctrl_tof == NULL)
+	if(g_s_ctrl_tof == NULL) {
+		pr_err("[TOF] g_s_ctrl_tof ptr is NULL\n");
 		return 0;
+	}
 	if(g_s_ctrl_tof->id == CAMERA_7)
 		return 0;
 
@@ -3963,55 +4567,326 @@ static ssize_t rear_tof_fps_store(struct device *dev,
 	struct device_attribute *attr, const char *buf, size_t size)
 {
 	uint32_t value = 0;
+	struct cam_camera_slave_info *slave_info;
 
-	if(g_s_ctrl_tof == NULL)
+	if(g_s_ctrl_tof == NULL) {
+		pr_err("[TOF] g_s_ctrl_tof ptr is NULL\n");
 		return 0;
+	}
 	if(g_s_ctrl_tof->id == CAMERA_7)
 		return 0;
 
 	if (buf == NULL || kstrtouint(buf, 10, &value))
 		return -1;
 
-	switch (value) {
-		case 30:
-			cam_sensor_tof_i2c_write(0x0104, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE); //GroupHold On
-			cam_sensor_tof_i2c_write(0x2154, 0x0A, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-			cam_sensor_tof_i2c_write(0x2155, 0x3E, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-			cam_sensor_tof_i2c_write(0x0104, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE); //GroupHold Off
-			break;
+	slave_info = &(g_s_ctrl_tof->sensordata->slave_info);
 
-		case 20:
-			cam_sensor_tof_i2c_write(0x0104, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE); //GroupHold On
-			cam_sensor_tof_i2c_write(0x2154, 0x14, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-			cam_sensor_tof_i2c_write(0x2155, 0x71, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-			cam_sensor_tof_i2c_write(0x0104, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE); //GroupHold Off
-			break;
+	if(slave_info->sensor_id == TOF_SENSOR_ID_IMX316)
+	{
+		pr_info("[TOF] IMX316 fps : %d\n", value);
+		switch (value) {
+			case 30:
+				cam_sensor_tof_i2c_write(0x0104, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE); //GroupHold On
+				cam_sensor_tof_i2c_write(0x2154, 0x0A, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+				cam_sensor_tof_i2c_write(0x2155, 0x3E, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+				cam_sensor_tof_i2c_write(0x0104, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE); //GroupHold Off
+				break;
 
-		case 15:
-			cam_sensor_tof_i2c_write(0x0104, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE); //GroupHold On
-			cam_sensor_tof_i2c_write(0x2154, 0x1E, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-			cam_sensor_tof_i2c_write(0x2155, 0xA4, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-			cam_sensor_tof_i2c_write(0x0104, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE); //GroupHold Off
-			break;
+			case 20:
+				cam_sensor_tof_i2c_write(0x0104, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE); //GroupHold On
+				cam_sensor_tof_i2c_write(0x2154, 0x14, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+				cam_sensor_tof_i2c_write(0x2155, 0x71, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+				cam_sensor_tof_i2c_write(0x0104, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE); //GroupHold Off
+				break;
 
-		case 10:
-			cam_sensor_tof_i2c_write(0x0104, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE); //GroupHold On
-			cam_sensor_tof_i2c_write(0x2154, 0x33, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-			cam_sensor_tof_i2c_write(0x2155, 0x0A, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-			cam_sensor_tof_i2c_write(0x0104, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE); //GroupHold Off
-			break;
+			case 15:
+				cam_sensor_tof_i2c_write(0x0104, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE); //GroupHold On
+				cam_sensor_tof_i2c_write(0x2154, 0x1E, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+				cam_sensor_tof_i2c_write(0x2155, 0xA4, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+				cam_sensor_tof_i2c_write(0x0104, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE); //GroupHold Off
+				break;
 
-		case 5:
-			cam_sensor_tof_i2c_write(0x0104, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE); //GroupHold On
-			cam_sensor_tof_i2c_write(0x2154, 0x70, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-			cam_sensor_tof_i2c_write(0x2155, 0x3C, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
-			cam_sensor_tof_i2c_write(0x0104, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE); //GroupHold Off
-			break;
+			case 10:
+				cam_sensor_tof_i2c_write(0x0104, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE); //GroupHold On
+				cam_sensor_tof_i2c_write(0x2154, 0x33, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+				cam_sensor_tof_i2c_write(0x2155, 0x0A, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+				cam_sensor_tof_i2c_write(0x0104, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE); //GroupHold Off
+				break;
 
-		default :
-			pr_err("[TOF] invalid fps : %d\n", value);
-			break;
+			case 5:
+				cam_sensor_tof_i2c_write(0x0104, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE); //GroupHold On
+				cam_sensor_tof_i2c_write(0x2154, 0x70, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+				cam_sensor_tof_i2c_write(0x2155, 0x3C, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+				cam_sensor_tof_i2c_write(0x0104, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE); //GroupHold Off
+				break;
+
+			default :
+				pr_err("[TOF] invalid fps : %d\n", value);
+				break;
+		}
 	}
+	else if(slave_info->sensor_id == TOF_SENSOR_ID_IMX516)
+	{
+		pr_info("[TOF] rear tof uid : %x\n", rear_tof_uid);
+		if (rear_tof_uid == 0xBA03
+			|| rear_tof_uid == 0xBC03)
+		{
+			if(value > 999) //VGA
+			{
+				value = value / 1000;
+
+				switch (value) {
+					case 30:
+						cam_sensor_tof_i2c_write(0x0104, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE); //GroupHold On
+						cam_sensor_tof_i2c_write(0x2110, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+						cam_sensor_tof_i2c_write(0x2111, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+						cam_sensor_tof_i2c_write(0x2112, 0x0E, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+						cam_sensor_tof_i2c_write(0x2113, 0x09, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+						cam_sensor_tof_i2c_write(0x0104, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE); //GroupHold Off
+						pr_info("[TOF] VGA fps : %d\n", value);
+						break;
+
+					case 20:
+						cam_sensor_tof_i2c_write(0x0104, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE); //GroupHold On
+						cam_sensor_tof_i2c_write(0x2110, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+						cam_sensor_tof_i2c_write(0x2111, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+						cam_sensor_tof_i2c_write(0x2112, 0x1B, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+						cam_sensor_tof_i2c_write(0x2113, 0x0E, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+						cam_sensor_tof_i2c_write(0x0104, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE); //GroupHold Off
+						pr_info("[TOF] VGA fps : %d\n", value);
+						break;
+
+					case 15:
+						cam_sensor_tof_i2c_write(0x0104, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE); //GroupHold On
+						cam_sensor_tof_i2c_write(0x2110, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+						cam_sensor_tof_i2c_write(0x2111, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+						cam_sensor_tof_i2c_write(0x2112, 0x28, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+						cam_sensor_tof_i2c_write(0x2113, 0x13, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+						cam_sensor_tof_i2c_write(0x0104, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE); //GroupHold Off
+						pr_info("[TOF] VGA fps : %d\n", value);
+						break;
+
+					case 10:
+						cam_sensor_tof_i2c_write(0x0104, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE); //GroupHold On
+						cam_sensor_tof_i2c_write(0x2110, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+						cam_sensor_tof_i2c_write(0x2111, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+						cam_sensor_tof_i2c_write(0x2112, 0x42, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+						cam_sensor_tof_i2c_write(0x2113, 0x1E, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+						cam_sensor_tof_i2c_write(0x0104, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE); //GroupHold Off
+						pr_info("[TOF] VGA fps : %d\n", value);
+						break;
+
+					case 5:
+						cam_sensor_tof_i2c_write(0x0104, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE); //GroupHold On
+						cam_sensor_tof_i2c_write(0x2110, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+						cam_sensor_tof_i2c_write(0x2111, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+						cam_sensor_tof_i2c_write(0x2112, 0x90, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+						cam_sensor_tof_i2c_write(0x2113, 0x3E, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+						cam_sensor_tof_i2c_write(0x0104, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE); //GroupHold Off
+						pr_info("[TOF] VGA fps : %d\n", value);
+						break;
+
+					default :
+						pr_info("[TOF] invalid fps : %d\n", value);
+						break;
+				}
+			}
+			else  // QVGA
+			{
+				switch (value) {
+					case 30:
+						cam_sensor_tof_i2c_write(0x0104, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE); //GroupHold On
+						cam_sensor_tof_i2c_write(0x2110, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+						cam_sensor_tof_i2c_write(0x2111, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+						cam_sensor_tof_i2c_write(0x2112, 0x14, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+						cam_sensor_tof_i2c_write(0x2113, 0x90, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+						cam_sensor_tof_i2c_write(0x0104, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE); //GroupHold Off
+						pr_info("[TOF] QVGA fps : %d\n", value);
+						break;
+
+					case 20:
+						cam_sensor_tof_i2c_write(0x0104, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE); //GroupHold On
+						cam_sensor_tof_i2c_write(0x2110, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+						cam_sensor_tof_i2c_write(0x2111, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+						cam_sensor_tof_i2c_write(0x2112, 0x21, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+						cam_sensor_tof_i2c_write(0x2113, 0x95, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+						cam_sensor_tof_i2c_write(0x0104, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE); //GroupHold Off
+						pr_info("[TOF] QVGA fps : %d\n", value);
+						break;
+
+					case 15:
+						cam_sensor_tof_i2c_write(0x0104, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE); //GroupHold On
+						cam_sensor_tof_i2c_write(0x2110, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+						cam_sensor_tof_i2c_write(0x2111, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+						cam_sensor_tof_i2c_write(0x2112, 0x2E, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+						cam_sensor_tof_i2c_write(0x2113, 0x9A, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+						cam_sensor_tof_i2c_write(0x0104, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE); //GroupHold Off
+						pr_info("[TOF] QVGA fps : %d\n", value);
+						break;
+
+					case 10:
+						cam_sensor_tof_i2c_write(0x0104, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE); //GroupHold On
+						cam_sensor_tof_i2c_write(0x2110, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+						cam_sensor_tof_i2c_write(0x2111, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+						cam_sensor_tof_i2c_write(0x2112, 0x48, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+						cam_sensor_tof_i2c_write(0x2113, 0xA5, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+						cam_sensor_tof_i2c_write(0x0104, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE); //GroupHold Off
+						pr_info("[TOF] QVGA fps : %d\n", value);
+						break;
+
+					case 5:
+						cam_sensor_tof_i2c_write(0x0104, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE); //GroupHold On
+						cam_sensor_tof_i2c_write(0x2110, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+						cam_sensor_tof_i2c_write(0x2111, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+						cam_sensor_tof_i2c_write(0x2112, 0x96, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+						cam_sensor_tof_i2c_write(0x2113, 0xC5, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+						cam_sensor_tof_i2c_write(0x0104, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE); //GroupHold Off
+						pr_info("[TOF] QVGA fps : %d\n", value);
+						break;
+
+					default :
+						pr_info("[TOF] Invalid fps : %d\n", value);
+						break;
+				}
+			}
+		}
+		else if (rear_tof_uid == 0xBA13
+			|| rear_tof_uid == 0xBC13)
+		{
+			if(value > 999) //VGA
+			{
+				value = value / 1000;
+
+				switch (value) {
+					case 20:
+						cam_sensor_tof_i2c_write(0x0104, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE); //GroupHold On
+						cam_sensor_tof_i2c_write(0x2110, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+						cam_sensor_tof_i2c_write(0x2111, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+						cam_sensor_tof_i2c_write(0x2112, 0x19, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+						cam_sensor_tof_i2c_write(0x2113, 0xF1, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+						cam_sensor_tof_i2c_write(0x0104, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE); //GroupHold Off
+						pr_info("[TOF] VGA fps : %d\n", value);
+						break;
+
+					case 15:
+						cam_sensor_tof_i2c_write(0x0104, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE); //GroupHold On
+						cam_sensor_tof_i2c_write(0x2110, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+						cam_sensor_tof_i2c_write(0x2111, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+						cam_sensor_tof_i2c_write(0x2112, 0x26, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+						cam_sensor_tof_i2c_write(0x2113, 0xF7, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+						cam_sensor_tof_i2c_write(0x0104, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE); //GroupHold Off
+						pr_info("[TOF] VGA fps : %d\n", value);
+						break;
+
+					case 10:
+						cam_sensor_tof_i2c_write(0x0104, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE); //GroupHold On
+						cam_sensor_tof_i2c_write(0x2110, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+						cam_sensor_tof_i2c_write(0x2111, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+						cam_sensor_tof_i2c_write(0x2112, 0x41, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+						cam_sensor_tof_i2c_write(0x2113, 0x02, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+						cam_sensor_tof_i2c_write(0x0104, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE); //GroupHold Off
+						pr_info("[TOF] VGA fps : %d\n", value);
+						break;
+
+					case 5:
+						cam_sensor_tof_i2c_write(0x0104, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE); //GroupHold On
+						cam_sensor_tof_i2c_write(0x2110, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+						cam_sensor_tof_i2c_write(0x2111, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+						cam_sensor_tof_i2c_write(0x2112, 0x8F, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+						cam_sensor_tof_i2c_write(0x2113, 0x22, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+						cam_sensor_tof_i2c_write(0x0104, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE); //GroupHold Off
+						pr_info("[TOF] VGA fps : %d\n", value);
+						break;
+
+					default :
+						pr_info("[TOF] Invalid fps : %d\n", value);
+						break;
+				}
+			}
+			else  // QVGA
+			{
+				switch (value) {
+					case 30:
+						cam_sensor_tof_i2c_write(0x0104, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE); //GroupHold On
+						cam_sensor_tof_i2c_write(0x2110, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+						cam_sensor_tof_i2c_write(0x2111, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+						cam_sensor_tof_i2c_write(0x2112, 0x13, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+						cam_sensor_tof_i2c_write(0x2113, 0x78, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+						cam_sensor_tof_i2c_write(0x0104, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE); //GroupHold Off
+						pr_info("[TOF] QVGA fps : %d\n", value);
+						break;
+
+					case 20:
+						cam_sensor_tof_i2c_write(0x0104, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE); //GroupHold On
+						cam_sensor_tof_i2c_write(0x2110, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+						cam_sensor_tof_i2c_write(0x2111, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+						cam_sensor_tof_i2c_write(0x2112, 0x20, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+						cam_sensor_tof_i2c_write(0x2113, 0x7D, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+						cam_sensor_tof_i2c_write(0x0104, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE); //GroupHold Off
+						pr_info("[TOF] QVGA fps : %d\n", value);
+						break;
+
+					case 15:
+						cam_sensor_tof_i2c_write(0x0104, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE); //GroupHold On
+						cam_sensor_tof_i2c_write(0x2110, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+						cam_sensor_tof_i2c_write(0x2111, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+						cam_sensor_tof_i2c_write(0x2112, 0x2D, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+						cam_sensor_tof_i2c_write(0x2113, 0x83, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+						cam_sensor_tof_i2c_write(0x0104, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE); //GroupHold Off
+						pr_info("[TOF] QVGA fps : %d\n", value);
+						break;
+
+					case 10:
+						cam_sensor_tof_i2c_write(0x0104, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE); //GroupHold On
+						cam_sensor_tof_i2c_write(0x2110, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+						cam_sensor_tof_i2c_write(0x2111, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+						cam_sensor_tof_i2c_write(0x2112, 0x47, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+						cam_sensor_tof_i2c_write(0x2113, 0x8E, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+						cam_sensor_tof_i2c_write(0x0104, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE); //GroupHold Off
+						pr_info("[TOF] QVGA fps : %d\n", value);
+						break;
+
+					case 5:
+						cam_sensor_tof_i2c_write(0x0104, 0x01, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE); //GroupHold On
+						cam_sensor_tof_i2c_write(0x2110, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+						cam_sensor_tof_i2c_write(0x2111, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+						cam_sensor_tof_i2c_write(0x2112, 0x95, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+						cam_sensor_tof_i2c_write(0x2113, 0xAE, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+						cam_sensor_tof_i2c_write(0x0104, 0x00, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE); //GroupHold Off
+						pr_info("[TOF] QVGA fps : %d\n", value);
+						break;
+
+					default :
+						pr_info("[TOF] Invalid fps : %d\n", value);
+						break;
+				}
+			}
+		}
+		else
+		{
+			pr_err("[TOF] Invalid tof UID : %x\n", rear_tof_uid);
+		}
+	}
+	return size;
+}
+
+static ssize_t rear_tof_freq_show(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	int rc = 0;
+
+	pr_err("[SETCAL_DBG] tof_freq : %s\n", tof_freq);
+	rc = scnprintf(buf, PAGE_SIZE, "%s", tof_freq);
+	if (rc)
+		return rc;
+	return 0;
+}
+
+static ssize_t rear_tof_freq_store(struct device *dev,
+	struct device_attribute *attr, const char *buf, size_t size)
+{
+	pr_err("[SETCAL_DBG] buf : %s\n", buf);
+	scnprintf(tof_freq, sizeof(tof_freq), "%s", buf);
 
 	return size;
 }
@@ -4201,7 +5076,7 @@ static ssize_t front_tofcal_uid_show(struct device *dev,
 	return 0;
 }
 
-uint8_t front_tof_cal[FRONT_TOFCAL_SIZE + 1] = "\0";
+uint8_t front_tof_cal[TOFCAL_SIZE + 1] = "\0";
 static ssize_t front_tofcal_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
@@ -4210,10 +5085,10 @@ static ssize_t front_tofcal_show(struct device *dev,
 
 	pr_info("[FW_DBG] front_tof_cal : %s\n", front_tof_cal);
 
-	if (FRONT_TOFCAL_SIZE > SYSFS_MAX_READ_SIZE)
+	if (TOFCAL_SIZE > SYSFS_MAX_READ_SIZE)
 		copy_size = SYSFS_MAX_READ_SIZE;
 	else
-		copy_size = FRONT_TOFCAL_SIZE;
+		copy_size = TOFCAL_SIZE;
 
 	ret = memcpy(buf, front_tof_cal, copy_size);
 
@@ -4223,7 +5098,7 @@ static ssize_t front_tofcal_show(struct device *dev,
 	return 0;
 }
 
-uint8_t front_tof_cal_extra[FRONT_TOFCAL_EXTRA_SIZE + 1] = "\0";
+uint8_t front_tof_cal_extra[TOFCAL_EXTRA_SIZE + 1] = "\0";
 static ssize_t front_tofcal_extra_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
@@ -4232,10 +5107,10 @@ static ssize_t front_tofcal_extra_show(struct device *dev,
 
 	pr_info("[FW_DBG] front_tof_cal_ext : %s\n", front_tof_cal_extra);
 
-	if (FRONT_TOFCAL_EXTRA_SIZE > SYSFS_MAX_READ_SIZE)
+	if (TOFCAL_EXTRA_SIZE > SYSFS_MAX_READ_SIZE)
 		copy_size = SYSFS_MAX_READ_SIZE;
 	else
-		copy_size = FRONT_TOFCAL_EXTRA_SIZE;
+		copy_size = TOFCAL_EXTRA_SIZE;
 
 	ret = memcpy(buf, front_tof_cal_extra, copy_size);
 
@@ -4246,7 +5121,7 @@ static ssize_t front_tofcal_extra_show(struct device *dev,
 }
 
 
-uint32_t front_tof_cal_size = FRONT_TOFCAL_TOTAL_SIZE;
+uint32_t front_tof_cal_size = TOFCAL_TOTAL_SIZE;
 static ssize_t front_tofcal_size_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
@@ -4296,6 +5171,25 @@ static ssize_t front_tof_dual_cal_show(struct device *dev,
 	return 0;
 }
 
+#if 1
+DualTilt_t front_tof_dual;
+static ssize_t front_tof_tilt_show(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	int rc = 0;
+
+	pr_info("[FW_DBG] rear tof tilt x = %d, y = %d, z = %d, sx = %d, sy = %d, range = %d, max_err = %d, avg_err = %d, dll_ver = %d\n",
+		front_tof_dual.x, front_tof_dual.y, front_tof_dual.z, front_tof_dual.sx, front_tof_dual.sy,
+		front_tof_dual.range, front_tof_dual.max_err, front_tof_dual.avg_err, front_tof_dual.dll_ver);
+
+	rc = scnprintf(buf, PAGE_SIZE, "1 %d %d %d %d %d %d %d %d %d\n", front_tof_dual.x, front_tof_dual.y,
+			front_tof_dual.z, front_tof_dual.sx, front_tof_dual.sy, front_tof_dual.range,
+			front_tof_dual.max_err, front_tof_dual.avg_err, front_tof_dual.dll_ver);
+	if (rc)
+		return rc;
+	return 0;
+}
+#else
 int front_tof_dual_tilt_x;
 int front_tof_dual_tilt_y;
 int front_tof_dual_tilt_z;
@@ -4321,6 +5215,7 @@ static ssize_t front_tof_tilt_show(struct device *dev,
 		return rc;
 	return 0;
 }
+#endif
 
 static ssize_t front_tof_ld_onoff_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
@@ -4330,8 +5225,10 @@ static ssize_t front_tof_ld_onoff_show(struct device *dev,
 	uint32_t read_data1 = -1;
 	int rc = 0;
 
-	if(g_s_ctrl_tof == NULL)
+	if(g_s_ctrl_tof == NULL) {
+		pr_err("[TOF] g_s_ctrl_tof ptr is NULL\n");
 		return 0;
+	}
 	if(g_s_ctrl_tof->id == CAMERA_6)
 		return 0;
 
@@ -4357,8 +5254,10 @@ static ssize_t front_tof_ld_onoff_store(struct device *dev,
 	if (buf == NULL || kstrtouint(buf, 10, &value))
 		return -1;
 
-	if(g_s_ctrl_tof == NULL)
+	if(g_s_ctrl_tof == NULL) {
+		pr_err("[TOF] g_s_ctrl_tof ptr is NULL\n");
 		return -1;
+	}
 	if(g_s_ctrl_tof->id == CAMERA_6)
 		return -1;
 
@@ -4381,8 +5280,10 @@ static ssize_t front_tof_ae_value_show(struct device *dev,
 	uint32_t reg_data3, reg_data2, reg_data1, reg_data0 = 0;
 	int rc = 0;
 
-	if(g_s_ctrl_tof == NULL)
+	if(g_s_ctrl_tof == NULL) {
+		pr_err("[TOF] g_s_ctrl_tof ptr is NULL\n");
 		return 0;
+	}
 	if(g_s_ctrl_tof->id == CAMERA_6)
 		return 0;
 
@@ -4412,8 +5313,10 @@ static ssize_t front_tof_ae_value_store(struct device *dev,
 	uint32_t reg_data3, reg_data2, reg_data1, reg_data0 = 0;
 	uint32_t hmax = 0x02FE;
 
-        if(g_s_ctrl_tof == NULL)
+	if(g_s_ctrl_tof == NULL) {
+		pr_err("[TOF] g_s_ctrl_tof ptr is NULL\n");
 		return -1;
+	}
 	if(g_s_ctrl_tof->id == CAMERA_6)
 		return -1;
 
@@ -4427,7 +5330,7 @@ static ssize_t front_tof_ae_value_store(struct device *dev,
 		reg_data2 = (value & 0xFF0000) >> 16;
 		reg_data1 = (value & 0xFF00) >> 8;
 		reg_data0 = value & 0xFF;
-		//pr_info("sslee value 0x%x reg_data3: 0x%2x, addr2: 0x%2x, addr1: 0x%2x, addr0: 0x%2x\n", value, reg_data3,reg_data2, reg_data1,reg_data0);
+		//pr_info("value 0x%x reg_data3: 0x%2x, addr2: 0x%2x, addr1: 0x%2x, addr0: 0x%2x\n", value, reg_data3,reg_data2, reg_data1,reg_data0);
 
 		cam_sensor_tof_i2c_write(0x2110, reg_data3, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
 		cam_sensor_tof_i2c_write(0x2111, reg_data2, CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
@@ -4450,8 +5353,10 @@ static ssize_t front_tof_check_pd_show(struct device *dev,
 	uint32_t reg_data1, reg_data0 = 0;
 	int rc = 0;
 
-	if(g_s_ctrl_tof == NULL)
+	if(g_s_ctrl_tof == NULL) {
+		pr_err("[TOF] g_s_ctrl_tof ptr is NULL\n");
 		return 0;
+	}
 	if(g_s_ctrl_tof->id == CAMERA_6)
 		return 0;
 
@@ -4500,8 +5405,10 @@ static ssize_t front_tof_check_pd_store(struct device *dev,
 {
 	uint32_t value = 0;
 
-	if(g_s_ctrl_tof == NULL)
+	if(g_s_ctrl_tof == NULL) {
+		pr_err("[TOF] g_s_ctrl_tof ptr is NULL\n");
 		return -1;
+	}
 	if(g_s_ctrl_tof->id == CAMERA_6)
 		return -1;
 
@@ -4768,8 +5675,10 @@ static ssize_t front_tof_fps_show(struct device *dev,
 {
 	int rc = 0;
 
-	if(g_s_ctrl_tof == NULL)
+	if(g_s_ctrl_tof == NULL) {
+		pr_err("[TOF] g_s_ctrl_tof ptr is NULL\n");
 		return 0;
+	}
 	if(g_s_ctrl_tof->id == CAMERA_6)
 		return 0;
 
@@ -4784,8 +5693,10 @@ static ssize_t front_tof_fps_store(struct device *dev,
 {
 	uint32_t value = 0;
 
-	if(g_s_ctrl_tof == NULL)
+	if(g_s_ctrl_tof == NULL) {
+		pr_err("[TOF] g_s_ctrl_tof ptr is NULL\n");
 		return 0;
+	}
 	if(g_s_ctrl_tof->id == CAMERA_6)
 		return 0;
 
@@ -4857,6 +5768,29 @@ static ssize_t front_tof_freq_store(struct device *dev,
 	return size;
 }
 
+#endif
+
+#if defined(CONFIG_CAMERA_DYNAMIC_MIPI)
+static ssize_t adaptive_test_show(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	int rc = 0;
+
+	pr_err("[dynamic_mipi] band_info : %s\n", band_info);
+	rc = scnprintf(buf, PAGE_SIZE, "%s", band_info);
+	if (rc)
+		return rc;
+	return 0;
+}
+
+static ssize_t adaptive_test_store(struct device *dev,
+	struct device_attribute *attr, const char *buf, size_t size)
+{
+	pr_err("[dynamic_mipi] buf : %s\n", buf);
+	scnprintf(band_info, sizeof(band_info), "%s", buf);
+
+	return size;
+}
 #endif
 
 #if defined(CONFIG_CAMERA_SSM_I2C_ENV)
@@ -5053,10 +5987,11 @@ static DEVICE_ATTR(rear2_camfw_full, S_IRUGO|S_IWUSR|S_IWGRP,
 	rear2_firmware_full_show, rear2_firmware_full_store);
 static DEVICE_ATTR(SVC_rear_module2, S_IRUGO, rear2_moduleid_show, NULL);
 static DEVICE_ATTR(rear2_camtype, S_IRUGO, rear2_type_show, NULL);
+#if !defined(CONFIG_SEC_GTS5L_PROJECT) && !defined(CONFIG_SEC_GTS6L_PROJECT) && !defined(CONFIG_SEC_GTS6X_PROJECT) && !defined(CONFIG_SEC_GTS6LWIFI_PROJECT) && (defined(CONFIG_SAMSUNG_REAR_DUAL) || defined(CONFIG_SAMSUNG_REAR_TRIPLE))
 static DEVICE_ATTR(rear2_dualcal, S_IRUGO, rear2_dual_cal_show, NULL);
 static DEVICE_ATTR(rear2_dualcal_size, S_IRUGO, rear2_dual_cal_size_show, NULL);
 static DEVICE_ATTR(rear2_tilt, S_IRUGO, rear2_tilt_show, NULL);
-
+#endif
 #endif
 
 #if defined(CONFIG_USE_CAMERA_HW_BIG_DATA)
@@ -5113,6 +6048,18 @@ static DEVICE_ATTR(ois_supperssion_ratio_rear3, S_IRUGO, ois_supperssion_ratio_r
 static DEVICE_ATTR(reset_check, S_IRUGO, ois_reset_check, NULL);
 #endif
 
+#if defined(CONFIG_SAMSUNG_OIS_RUMBA_S4)
+static DEVICE_ATTR(ois_power, S_IWUSR, NULL, ois_power_store);
+static DEVICE_ATTR(autotest, S_IRUGO|S_IWUSR|S_IWGRP, ois_autotest_show, ois_autotest_store);
+static DEVICE_ATTR(selftest, S_IRUGO, gyro_selftest_show, NULL);
+static DEVICE_ATTR(ois_rawdata, S_IRUGO, gyro_rawdata_test_show, NULL);
+static DEVICE_ATTR(oisfw, S_IRUGO|S_IWUSR|S_IWGRP, ois_fw_full_show, ois_fw_full_store);
+static DEVICE_ATTR(ois_exif, S_IRUGO|S_IWUSR|S_IWGRP, ois_exif_show, ois_exif_store);
+static DEVICE_ATTR(ois_gain_rear, S_IRUGO, ois_gain_rear_show, NULL);
+static DEVICE_ATTR(ois_supperssion_ratio_rear, S_IRUGO, ois_supperssion_ratio_rear_show, NULL);
+static DEVICE_ATTR(calibrationtest, S_IRUGO, gyro_calibration_show, NULL);
+#endif
+
 #if defined(CONFIG_CAMERA_FRS_DRAM_TEST)
 static DEVICE_ATTR(rear_frs_test, S_IRUGO|S_IWUSR|S_IWGRP,
 	rear_camera_frs_test_show, rear_camera_frs_test_store);
@@ -5144,7 +6091,8 @@ static DEVICE_ATTR(rear_tof_camfw_full, S_IRUGO|S_IWUSR|S_IWGRP,
 	rear_tof_firmware_full_show, rear_tof_firmware_full_store);
 static DEVICE_ATTR(rear_tof_camfw_load, S_IRUGO|S_IWUSR|S_IWGRP,
 	rear_tof_firmware_load_show, rear_tof_firmware_load_store);
-static DEVICE_ATTR(rear4_moduleid, S_IRUGO, rear4_moduleid_show, NULL);
+static DEVICE_ATTR(rear_tof_moduleid, S_IRUGO, rear_tof_moduleid_show, NULL);
+static DEVICE_ATTR(rear4_moduleid, S_IRUGO, rear_tof_moduleid_show, NULL);
 static DEVICE_ATTR(rear_tof_sensorid_exif, S_IRUGO|S_IWUSR|S_IWGRP,
 	rear_tof_sensorid_exif_show, rear_tof_sensorid_exif_store);
 static DEVICE_ATTR(rear_tofcal_uid, S_IRUGO, rear_tofcal_uid_show, NULL);
@@ -5159,11 +6107,13 @@ static DEVICE_ATTR(rear_tof_ld_onoff, S_IRUGO|S_IWUSR|S_IWGRP,
 static DEVICE_ATTR(rear_tof_dual_cal, S_IRUGO, rear_tof_dual_cal_show, NULL);
 static DEVICE_ATTR(rear_tof_ae_value, S_IRUGO|S_IWUSR|S_IWGRP,
 	rear_tof_ae_value_show, rear_tof_ae_value_store);
-static DEVICE_ATTR(SVC_rear_module4, S_IRUGO, rear4_moduleid_show, NULL);
+static DEVICE_ATTR(SVC_rear_module4, S_IRUGO, rear_tof_moduleid_show, NULL);
 static DEVICE_ATTR(rear_tof_check_pd, S_IRUGO|S_IWUSR|S_IWGRP,
 	rear_tof_check_pd_show, rear_tof_check_pd_store);
 static DEVICE_ATTR(rear_tof_fps, S_IRUGO|S_IWUSR|S_IWGRP,
 	rear_tof_fps_show, rear_tof_fps_store);
+static DEVICE_ATTR(rear_tof_freq, S_IRUGO|S_IWUSR|S_IWGRP,
+	rear_tof_freq_show, rear_tof_freq_store);
 #endif
 #if defined(CONFIG_SAMSUNG_FRONT_TOF)
 static DEVICE_ATTR(front_tof_caminfo, S_IRUGO|S_IWUSR|S_IWGRP,
@@ -5202,6 +6152,15 @@ static DEVICE_ATTR(front_tof_freq, S_IRUGO|S_IWUSR|S_IWGRP,
 	front_tof_freq_show, front_tof_freq_store);
 #endif
 
+#if defined(CONFIG_LEDS_PMIC_QPNP)
+static DEVICE_ATTR(rear_flash, S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP|S_IROTH, NULL, flash_power_store);
+#endif
+
+#if defined(CONFIG_CAMERA_DYNAMIC_MIPI)
+static DEVICE_ATTR(adaptive_test, S_IRUGO|S_IWUSR|S_IWGRP,
+	adaptive_test_show, adaptive_test_store);
+#endif
+
 int svc_cheating_prevent_device_file_create(struct kobject **obj)
 {
 	struct kernfs_node *SVC_sd;
@@ -5214,19 +6173,19 @@ int svc_cheating_prevent_device_file_create(struct kobject **obj)
 		/* try to create SVC kobject */
 		data = kobject_create_and_add("SVC", &devices_kset->kobj);
 		if (IS_ERR_OR_NULL(data))
-			pr_info("Failed to create sys/devices/svc already exist svc : 0x%p\n", data);
+			pr_info("Failed to create sys/devices/svc already exist svc : 0x%pK\n", data);
 		else
-			pr_info("Success to create sys/devices/svc svc : 0x%p\n", data);
+			pr_info("Success to create sys/devices/svc svc : 0x%pK\n", data);
 	} else {
 		data = (struct kobject *)SVC_sd->priv;
-		pr_info("Success to find SVC_sd : 0x%p SVC : 0x%p\n", SVC_sd, data);
+		pr_info("Success to find SVC_sd : 0x%pK SVC : 0x%pK\n", SVC_sd, data);
 	}
 
 	Camera = kobject_create_and_add("Camera", data);
 	if (IS_ERR_OR_NULL(Camera))
-		pr_info("Failed to create sys/devices/svc/Camera : 0x%p\n", Camera);
+		pr_info("Failed to create sys/devices/svc/Camera : 0x%pK\n", Camera);
 	else
-		pr_info("Success to create sys/devices/svc/Camera : 0x%p\n", Camera);
+		pr_info("Success to create sys/devices/svc/Camera : 0x%pK\n", Camera);
 
 	*obj = Camera;
 	return 0;
@@ -5292,11 +6251,17 @@ static int __init cam_sysfs_init(void)
 	struct device		  *cam_dev_af;
 	struct device		  *cam_dev_dual;
 #endif
-#if defined(CONFIG_SAMSUNG_OIS_MCU_STM32)
+#if defined(CONFIG_SAMSUNG_OIS_MCU_STM32) || defined(CONFIG_SAMSUNG_OIS_RUMBA_S4)
 	struct device		  *cam_dev_ois;
 #endif
 #if defined(CONFIG_CAMERA_SSM_I2C_ENV)
 	struct device		  *cam_dev_ssm;
+#endif
+#if defined(CONFIG_LEDS_PMIC_QPNP)
+	struct device		  *cam_dev_flash;
+#endif
+#if defined(CONFIG_CAMERA_DYNAMIC_MIPI)
+	struct device		  *cam_dev_test;
 #endif
 	struct kobject *SVC = 0;
 	int ret = 0;
@@ -5789,6 +6754,7 @@ static int __init cam_sysfs_init(void)
 		ret = -ENODEV;
 	}
 
+#if !defined(CONFIG_SEC_GTS5L_PROJECT) && !defined(CONFIG_SEC_GTS6L_PROJECT) && !defined(CONFIG_SEC_GTS6X_PROJECT) && !defined(CONFIG_SEC_GTS6LWIFI_PROJECT) && (defined(CONFIG_SAMSUNG_REAR_DUAL) || defined(CONFIG_SAMSUNG_REAR_TRIPLE))
 	if (device_create_file(cam_dev_rear, &dev_attr_rear2_dualcal) < 0) {
 		pr_err("Failed to create device file!(%s)!\n",
 			dev_attr_rear2_dualcal.attr.name);
@@ -5799,12 +6765,12 @@ static int __init cam_sysfs_init(void)
 			dev_attr_rear2_dualcal_size.attr.name);
 		ret = -ENODEV;
 	}
-
 	if (device_create_file(cam_dev_rear, &dev_attr_rear2_tilt) < 0) {
 		pr_err("Failed to create device file!(%s)!\n",
 			dev_attr_rear2_tilt.attr.name);
 		ret = -ENODEV;
 	}
+#endif
 	if (device_create_file(cam_dev_rear, &dev_attr_rear2_camtype) < 0) {
 		pr_err("Failed to create device file!(%s)!\n",
 			dev_attr_rear2_camtype.attr.name);
@@ -5986,6 +6952,75 @@ static int __init cam_sysfs_init(void)
 
 #endif
 
+#if defined(CONFIG_LEDS_PMIC_QPNP)
+        cam_dev_flash = device_create(camera_class, NULL,
+                0, NULL, "flash");
+        if (IS_ERR(cam_dev_flash)) {
+                pr_err("Failed to create cam_dev_flash device!\n");
+                ret = -ENOENT;
+        }
+
+        if (device_create_file(cam_dev_flash, &dev_attr_rear_flash) < 0) {
+                pr_err("failed to create device file, %s\n",
+                        dev_attr_rear_flash.attr.name);
+                ret = -ENOENT;
+        }
+#endif
+
+#if defined(CONFIG_SAMSUNG_OIS_RUMBA_S4)
+	cam_dev_ois = device_create(camera_class, NULL,
+		0, NULL, "ois");
+	if (IS_ERR(cam_dev_ois)) {
+		pr_err("Failed to create cam_dev_ois device!\n");
+		ret = -ENOENT;
+	}
+	if (device_create_file(cam_dev_ois, &dev_attr_ois_power) < 0) {
+		pr_err("failed to create device file, %s\n",
+			dev_attr_ois_power.attr.name);
+		ret = -ENOENT;
+	}
+	if (device_create_file(cam_dev_ois, &dev_attr_autotest) < 0) {
+		pr_err("Failed to create device file, %s\n",
+			dev_attr_autotest.attr.name);
+		ret = -ENODEV;
+	}
+	if (device_create_file(cam_dev_ois, &dev_attr_selftest) < 0) {
+		pr_err("failed to create device file, %s\n",
+		dev_attr_selftest.attr.name);
+		ret = -ENOENT;
+	}
+	if (device_create_file(cam_dev_ois, &dev_attr_calibrationtest) < 0) {
+			pr_err("Failed to create device file,%s\n",
+				dev_attr_calibrationtest.attr.name);
+			ret = -ENODEV;
+	}
+	if (device_create_file(cam_dev_ois, &dev_attr_ois_rawdata) < 0) {
+		pr_err("failed to create device file, %s\n",
+		dev_attr_ois_rawdata.attr.name);
+		ret = -ENOENT;
+	}
+	if (device_create_file(cam_dev_ois, &dev_attr_oisfw) < 0) {
+		pr_err("Failed to create device file, %s\n",
+		dev_attr_oisfw.attr.name);
+		ret = -ENODEV;
+	}
+	if (device_create_file(cam_dev_ois, &dev_attr_ois_exif) < 0) {
+		pr_err("Failed to create device file,%s\n",
+			dev_attr_ois_exif.attr.name);
+		ret = -ENODEV;
+	}
+	if (device_create_file(cam_dev_ois, &dev_attr_ois_gain_rear) < 0) {
+		pr_err("Failed to create device file,%s\n",
+			dev_attr_ois_gain_rear.attr.name);
+		ret = -ENODEV;
+	}
+	if (device_create_file(cam_dev_ois, &dev_attr_ois_supperssion_ratio_rear) < 0) {
+		pr_err("Failed to create device file,%s\n",
+			dev_attr_ois_supperssion_ratio_rear.attr.name);
+		ret = -ENODEV;
+	}
+#endif
+
 #if defined(CONFIG_CAMERA_DYNAMIC_MIPI)
 	if (device_create_file(cam_dev_front, &dev_attr_front_mipi_clock) < 0) {
 		pr_err("failed to create front device file, %s\n",
@@ -6057,6 +7092,11 @@ static int __init cam_sysfs_init(void)
 			dev_attr_rear_tof_sensorid_exif.attr.name);
 		ret = -ENODEV;
 	}
+	if (device_create_file(cam_dev_rear, &dev_attr_rear_tof_moduleid) < 0) {
+		pr_err("Failed to create device file!(%s)!\n",
+			dev_attr_rear_tof_moduleid.attr.name);
+		ret = -ENODEV;
+	}
 	if (device_create_file(cam_dev_rear, &dev_attr_rear4_moduleid) < 0) {
 		pr_err("Failed to create device file!(%s)!\n",
 			dev_attr_rear4_moduleid.attr.name);
@@ -6125,6 +7165,11 @@ static int __init cam_sysfs_init(void)
 	if (device_create_file(cam_dev_rear, &dev_attr_rear_tof_fps) < 0) {
 		pr_err("Failed to create device file!(%s)!\n",
 			dev_attr_rear_tof_fps.attr.name);
+		ret = -ENODEV;
+	}
+	if (device_create_file(cam_dev_rear, &dev_attr_rear_tof_freq) < 0) {
+		pr_err("Failed to create device file!(%s)!\n",
+			dev_attr_rear_tof_freq.attr.name);
 		ret = -ENODEV;
 	}
 #endif
@@ -6236,6 +7281,20 @@ static int __init cam_sysfs_init(void)
 	}
 #endif
 
+#if defined(CONFIG_CAMERA_DYNAMIC_MIPI)
+	cam_dev_test = device_create(camera_class, NULL,
+			0, NULL, "test");
+	if (IS_ERR(cam_dev_test)) {
+			pr_err("Failed to create cam_dev_flash device!\n");
+			ret = -ENOENT;
+	}
+
+	if (device_create_file(cam_dev_test, &dev_attr_adaptive_test) < 0) {
+			pr_err("failed to create device file, %s\n",
+					dev_attr_adaptive_test.attr.name);
+			ret = -ENOENT;
+	}
+#endif
 	return ret;
 }
 

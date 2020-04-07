@@ -1064,7 +1064,7 @@ static int uvc_parse_standard_control(struct uvc_device *dev,
 		 *   direction flag.
 		 *
 		 * Other unknown types are accepted.
- 		 */
+		 */
 		type = get_unaligned_le16(&buffer[4]);
 		if ((type & 0x7f00) == 0 || (type & 0x8000) != 0) {
 			uvc_trace(UVC_TRACE_DESCR, "device %d videocontrol "

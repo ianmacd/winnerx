@@ -47,6 +47,7 @@ int cam_fd_soc_enable_resources(struct cam_hw_soc_info *soc_info);
 int cam_fd_soc_disable_resources(struct cam_hw_soc_info *soc_info);
 uint32_t cam_fd_soc_register_read(struct cam_hw_soc_info *soc_info,
 	enum cam_fd_reg_base reg_base, uint32_t reg_offset);
+void cam_fd_soc_register_dump(struct cam_hw_info *fd_hw);
 void cam_fd_soc_register_write(struct cam_hw_soc_info *soc_info,
 	enum cam_fd_reg_base reg_base, uint32_t reg_offset, uint32_t reg_value);
 

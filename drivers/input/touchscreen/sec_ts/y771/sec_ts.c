@@ -15,6 +15,7 @@ struct sec_ts_data *tsp_info;
 #include "sec_ts.h"
 
 struct sec_ts_data *ts_dup;
+bool shutdown_is_on_going_tsp;
 
 #ifdef USE_POWER_RESET_WORK
 static void sec_ts_reset_work(struct work_struct *work);
@@ -366,7 +367,7 @@ int sec_ts_i2c_write(struct sec_ts_data *ts, u8 reg, u8 *data, int len)
 		input_err(true, &ts->client->dev, "%s: I2C write over retry limit\n", __func__);
 		ret = -EIO;
 #ifdef USE_POR_AFTER_I2C_RETRY
-		if (ts->probe_done && !ts->reset_is_on_going)
+		if (ts->probe_done && !ts->reset_is_on_going && !shutdown_is_on_going_tsp)
 			schedule_delayed_work(&ts->reset_work, msecs_to_jiffies(TOUCH_RESET_DWORK_TIME));
 #endif
 	}
@@ -524,9 +525,8 @@ int sec_ts_i2c_read(struct sec_ts_data *ts, u8 reg, u8 *data, int len)
 
 	if (retry == SEC_TS_I2C_RETRY_CNT) {
 		input_err(true, &ts->client->dev, "%s: I2C read over retry limit\n", __func__);
-		ret = -EIO;
 #ifdef USE_POR_AFTER_I2C_RETRY
-		if (ts->probe_done && !ts->reset_is_on_going)
+		if (ts->probe_done && !ts->reset_is_on_going && !shutdown_is_on_going_tsp)
 			schedule_delayed_work(&ts->reset_work, msecs_to_jiffies(TOUCH_RESET_DWORK_TIME));
 #endif
 	}
@@ -763,7 +763,7 @@ static void sec_ts_set_prox_power_off(struct sec_ts_data *ts, u8 data)
 }
 
 #if defined(CONFIG_TOUCHSCREEN_DUMP_MODE)
-#include <linux/sec_debug.h>
+#include <linux/sec_ts_common.h>
 extern struct tsp_dump_callbacks dump_callbacks;
 static struct delayed_work *p_ghost_check;
 
@@ -797,7 +797,8 @@ static void dump_tsp_log(void)
 		pr_err("%s: %s %s: ignored ## tsp probe fail!!\n", SEC_TS_I2C_NAME, SECLOG, __func__);
 		return;
 	}
-	schedule_delayed_work(p_ghost_check, msecs_to_jiffies(100));
+	if (!shutdown_is_on_going_tsp)
+		schedule_delayed_work(p_ghost_check, msecs_to_jiffies(100));
 }
 #endif
 
@@ -819,7 +820,8 @@ int sec_ts_set_touch_function(struct sec_ts_data *ts)
 		input_err(true, &ts->client->dev, "%s: Failed to send command(0x%x)",
 				__func__, SEC_TS_CMD_SET_TOUCHFUNCTION);
 
-	schedule_delayed_work(&ts->work_read_functions, msecs_to_jiffies(30));
+	if (!shutdown_is_on_going_tsp)
+		schedule_delayed_work(&ts->work_read_functions, msecs_to_jiffies(30));
 
 	return ret;
 }
@@ -1179,7 +1181,8 @@ static void sec_ts_read_event(struct sec_ts_data *ts)
 					(p_event_status->status_id == SEC_TS_ERR_EVENT_ESD)) {
 				input_err(true, &ts->client->dev, "%s: ESD detected. run reset\n", __func__);
 #ifdef USE_RESET_DURING_POWER_ON
-				schedule_work(&ts->reset_work.work);
+				if (!shutdown_is_on_going_tsp)
+					schedule_work(&ts->reset_work.work);
 #endif
 			}
 
@@ -1467,9 +1470,9 @@ static void sec_ts_read_event(struct sec_ts_data *ts)
 					ts->all_aod_tap_count++;
 				} else if (p_gesture_status->gesture_id == SEC_TS_GESTURE_ID_DOUBLETAP_TO_WAKEUP) {
 					input_info(true, &ts->client->dev, "%s: AOT\n", __func__);
-					input_report_key(ts->input_dev, KEY_HOMEPAGE, 1);
+					input_report_key(ts->input_dev, KEY_WAKEUP, 1);
 					input_sync(ts->input_dev);
-					input_report_key(ts->input_dev, KEY_HOMEPAGE, 0);
+					input_report_key(ts->input_dev, KEY_WAKEUP, 0);
 				}
 				break;
 			case SEC_TS_GESTURE_CODE_SINGLE_TAP:
@@ -2065,7 +2068,7 @@ static void sec_ts_set_input_prop(struct sec_ts_data *ts, struct input_dev *dev,
 	set_bit(KEY_INT_CANCEL, dev->keybit);
 
 	set_bit(propbit, dev->propbit);
-	set_bit(KEY_HOMEPAGE, dev->keybit);
+	set_bit(KEY_WAKEUP, dev->keybit);
 
 	input_set_abs_params(dev, ABS_MT_POSITION_X, 0, ts->plat_data->max_x, 0, 0);
 	input_set_abs_params(dev, ABS_MT_POSITION_Y, 0, ts->plat_data->max_y, 0, 0);
@@ -2254,6 +2257,18 @@ static int sec_ts_probe(struct i2c_client *client, const struct i2c_device_id *i
 		sec_ts_delay(70);
 	ts->power_status = SEC_TS_STATE_POWER_ON;
 	ts->tdata->external_factory = false;
+
+#ifdef CONFIG_SEC_BLOOMQ_PROJECT
+	/* will be removed */
+	{
+		u8 tBuff[SEC_TS_EVENT_BUFF_SIZE] = {0,};
+
+		ret = sec_ts_i2c_read(ts, SEC_TS_READ_ONE_EVENT, tBuff, SEC_TS_EVENT_BUFF_SIZE);
+		if (ret == -ENOTCONN) {
+			goto err_init;
+		}
+	}
+#endif
 
 	sec_ts_wait_for_ready(ts, SEC_TS_ACK_BOOT_COMPLETE);
 
@@ -2544,7 +2559,6 @@ void sec_ts_unlocked_release_all_finger(struct sec_ts_data *ts)
 	ts->touch_count = 0;
 	ts->check_multi = 0;
 
-	input_report_key(ts->input_dev, KEY_HOMEPAGE, 0);
 	input_sync(ts->input_dev);
 }
 
@@ -2596,7 +2610,6 @@ void sec_ts_locked_release_all_finger(struct sec_ts_data *ts)
 	ts->touch_count = 0;
 	ts->check_multi = 0;
 
-	input_report_key(ts->input_dev, KEY_HOMEPAGE, 0);
 	input_sync(ts->input_dev);
 
 	mutex_unlock(&ts->eventlock);
@@ -2635,7 +2648,8 @@ static void sec_ts_reset_work(struct work_struct *work)
 		input_err(true, &ts->client->dev, "%s: failed to reset, ret:%d\n", __func__, ret);
 		ts->reset_is_on_going = false;
 		cancel_delayed_work(&ts->reset_work);
-		schedule_delayed_work(&ts->reset_work, msecs_to_jiffies(TOUCH_RESET_DWORK_TIME));
+		if (!shutdown_is_on_going_tsp)
+			schedule_delayed_work(&ts->reset_work, msecs_to_jiffies(TOUCH_RESET_DWORK_TIME));
 		mutex_unlock(&ts->modechange);
 
 		if (ts->debug_flag & SEC_TS_DEBUG_SEND_UEVENT) {
@@ -2659,7 +2673,8 @@ static void sec_ts_reset_work(struct work_struct *work)
 				input_err(true, &ts->client->dev, "%s: failed to reset, ret:%d\n", __func__, ret);
 				ts->reset_is_on_going = false;
 				cancel_delayed_work(&ts->reset_work);
-				schedule_delayed_work(&ts->reset_work, msecs_to_jiffies(TOUCH_RESET_DWORK_TIME));
+				if (!shutdown_is_on_going_tsp)
+					schedule_delayed_work(&ts->reset_work, msecs_to_jiffies(TOUCH_RESET_DWORK_TIME));
 				mutex_unlock(&ts->modechange);
 				wake_unlock(&ts->wakelock);
 				return;
@@ -2695,7 +2710,8 @@ static void sec_ts_print_info_work(struct work_struct *work)
 	struct sec_ts_data *ts = container_of(work, struct sec_ts_data,
 			work_print_info.work);
 	sec_ts_print_info(ts);
-	schedule_delayed_work(&ts->work_print_info, msecs_to_jiffies(TOUCH_PRINT_INFO_DWORK_TIME));
+	if (!shutdown_is_on_going_tsp)
+		schedule_delayed_work(&ts->work_print_info, msecs_to_jiffies(TOUCH_PRINT_INFO_DWORK_TIME));
 }
 
 static void sec_ts_read_info_work(struct work_struct *work)
@@ -2742,7 +2758,8 @@ int sec_ts_set_lowpowermode(struct sec_ts_data *ts, u8 mode)
 		if (ret < 0)
 			goto i2c_error;
 	} else {
-		schedule_work(&ts->work_read_functions.work);
+		if (!shutdown_is_on_going_tsp)
+			schedule_work(&ts->work_read_functions.work);
 		sec_ts_set_prox_power_off(ts, 0);
 	}
 
@@ -2820,7 +2837,8 @@ static int sec_ts_input_open(struct input_dev *dev)
 
 	if (ts->power_status == SEC_TS_STATE_LPM) {
 #ifdef USE_RESET_EXIT_LPM
-		schedule_delayed_work(&ts->reset_work, msecs_to_jiffies(TOUCH_RESET_DWORK_TIME));
+		if (!shutdown_is_on_going_tsp)
+			schedule_delayed_work(&ts->reset_work, msecs_to_jiffies(TOUCH_RESET_DWORK_TIME));
 #else
 		sec_ts_set_lowpowermode(ts, TO_TOUCH_MODE);
 		sec_ts_set_grip_type(ts, ONLY_EDGE_HANDLER);
@@ -2841,7 +2859,8 @@ static int sec_ts_input_open(struct input_dev *dev)
 	cancel_delayed_work(&ts->work_print_info);
 	ts->print_info_cnt_open = 0;
 	ts->print_info_cnt_release = 0;
-	schedule_work(&ts->work_print_info.work);
+	if (!shutdown_is_on_going_tsp)
+		schedule_work(&ts->work_print_info.work);
 	return 0;
 }
 
@@ -2892,12 +2911,13 @@ static int sec_ts_remove(struct i2c_client *client)
 
 	input_info(true, &ts->client->dev, "%s\n", __func__);
 
+	shutdown_is_on_going_tsp = true;
 	sec_ts_ioctl_remove(ts);
 
+	disable_irq_nosync(ts->client->irq);
 	cancel_delayed_work_sync(&ts->work_read_info);
 	cancel_delayed_work_sync(&ts->work_print_info);
 	cancel_delayed_work_sync(&ts->work_read_functions);
-	disable_irq_nosync(ts->client->irq);
 	free_irq(ts->client->irq, ts);
 	input_info(true, &ts->client->dev, "%s: irq disabled\n", __func__);
 

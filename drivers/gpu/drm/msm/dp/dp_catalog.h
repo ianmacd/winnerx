@@ -326,10 +326,21 @@ static inline u8 dp_header_get_parity(u32 data)
 	return parity_byte;
 }
 
+#ifdef CONFIG_SEC_DISPLAYPORT
+extern bool secdp_get_clk_status(enum dp_pm_type type);
+#endif
+
 static inline u32 dp_read(char *exe_mode, struct dp_io_data *io_data,
 				u32 offset)
 {
 	u32 data = 0;
+
+#ifdef CONFIG_SEC_DISPLAYPORT
+	if (!secdp_get_clk_status(DP_CORE_PM)) {
+		pr_debug("core_clks_on: off\n");
+		return 0;
+	}
+#endif
 
 	if (!strcmp(exe_mode, "hw") || !strcmp(exe_mode, "all")) {
 		data = readl_relaxed(io_data->io.base + offset);
@@ -344,6 +355,13 @@ static inline u32 dp_read(char *exe_mode, struct dp_io_data *io_data,
 static inline void dp_write(char *exe_mode, struct dp_io_data *io_data,
 				u32 offset, u32 data)
 {
+#ifdef CONFIG_SEC_DISPLAYPORT
+	if (!secdp_get_clk_status(DP_CORE_PM)) {
+		pr_debug("core_clks_on: off\n");
+		return;
+	}
+#endif
+
 	if (!strcmp(exe_mode, "hw") || !strcmp(exe_mode, "all"))
 		writel_relaxed(data, io_data->io.base + offset);
 

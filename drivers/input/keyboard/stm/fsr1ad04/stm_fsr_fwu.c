@@ -104,24 +104,33 @@ int FSR_Check_DMA_Done(struct fsr_sidekey_info *info)
 	return 0;
 }
 
-static int FSR_Check_Erase_Done(struct fsr_sidekey_info *info)
+static int FSR_Check_Erase_Done(struct fsr_sidekey_info *info, unsigned char page)
 {
 	int timeout = 60;  // 3 sec timeout
 	unsigned char regAdd[2] = {0xF9, 0x02};
 	unsigned char val[1];
 
+	fsr_read_reg(info, &regAdd[0], 2, (unsigned char*)val, 1);
+	if ((val[0] & 0x80) != 0x80) {
+		input_err(true, &info->client->dev, "%s: Flash erasing mode has been exited while erasing page %d,%d\n",
+			__func__, val[0], page);
+		return -FSR_ERROR_FW_UPDATE_FAIL;
+	}
+	fsr_delay(50);
+
 	do {
 		fsr_read_reg(info, &regAdd[0], 2, (unsigned char*)val, 1);
-
-		if ((val[0] & 0x80) != 0x80)
+		if (val[0] == page)
 			break;
 
 		fsr_delay(50);
 		timeout--;
 	} while (timeout != 0);
 
-	if (timeout == 0)
-		return -1;
+	if (timeout == 0) {
+		input_err(true, &info->client->dev, "%s: Time Over page %d\n", __func__, page);
+		return -FSR_ERROR_TIMEOUT;
+	}
 
 	return 0;
 }
@@ -162,14 +171,44 @@ static int fsr_fw_burn_d3(struct fsr_sidekey_info *info, unsigned char *fw_data)
 	fsr_delay(20);
 
 	//==================== System reset ====================
-	//System Reset ==> B6 00 28 80
-	input_info(true, &info->client->dev, "%s: System reset\n", __func__);
+	if (info->board->rst_invalid) {
+		//System Reset ==> B6 00 28 80
+		input_info(true, &info->client->dev, "%s: System reset\n", __func__);
+		regAdd[0] = 0xB6;
+		regAdd[1] = 0x00;
+		regAdd[2] = 0x28;
+		regAdd[3] = 0x80;
+		fsr_write_reg(info, &regAdd[0], 4);
+	} else {
+		fsr_systemreset_gpio(info, 50, false);
+	}
+
+	//==================== M3 NO SLEEP ====================
+	input_info(true, &info->client->dev, "%s: M3 NO SLEEP\n", __func__);
+	regAdd[0] = 0xB6;
+	regAdd[1] = 0x00;
+	regAdd[2] = 0x1F;
+	regAdd[3] = 0x80;
+	fsr_write_reg(info, &regAdd[0], 4);
+	if (info->board->rst_invalid) {
+		fsr_delay(50);
+	}
+
+	//==================== M3 HOLD ====================
+	input_info(true, &info->client->dev, "%s: M3 HOLD\n", __func__);
 	regAdd[0] = 0xB6;
 	regAdd[1] = 0x00;
 	regAdd[2] = 0x28;
-	regAdd[3] = 0x80;
+	regAdd[3] = 0x01;
 	fsr_write_reg(info, &regAdd[0], 4);
-	fsr_delay(50);
+
+	//==================== Disable Watchdog warm reset ====================
+	input_info(true, &info->client->dev, "%s: Disable Watchdog warm reset\n", __func__);
+	regAdd[0] = 0xB6;
+	regAdd[1] = 0x00;
+	regAdd[2] = 0x21;
+	regAdd[3] = 0x00;
+	fsr_write_reg(info, &regAdd[0], 4);
 
 	//==================== Disable Watchdog ====================
 	input_info(true, &info->client->dev, "%s: Disable Watchdog\n", __func__);
@@ -206,9 +245,37 @@ static int fsr_fw_burn_d3(struct fsr_sidekey_info *info, unsigned char *fw_data)
 		regAdd[1] = 0x02;
 		regAdd[2] = (0x80 + i) & 0xFF;
 		fsr_write_reg(info, &regAdd[0], 3);
-		rc = FSR_Check_Erase_Done(info);
-		if (rc < 0)
-			return rc;
+		rc = FSR_Check_Erase_Done(info, i);
+		if (rc < 0) {
+			input_info(true, &info->client->dev, "%s: Retry erasing page %d\n", __func__, i);
+
+			//==================== Unlock Flash ====================
+			//Unlock Flash Command ==> F7 74 45
+			input_info(true, &info->client->dev, "%s: Unlock Flash\n", __func__);
+			regAdd[0] = 0xF7;
+			regAdd[1] = 0x74;
+			regAdd[2] = 0x45;
+			fsr_write_reg(info, &regAdd[0], 3);
+			fsr_delay(100);
+
+			//==================== Unlock Erase Operation ====================
+			input_info(true, &info->client->dev, "%s: Unlock Erase Operation\n", __func__);
+			regAdd[0] = 0xFA;
+			regAdd[1] = 0x72;
+			regAdd[2] = 0x01;
+			fsr_write_reg(info, &regAdd[0], 3);
+			fsr_delay(100);
+
+			regAdd[0] = 0xFA;
+			regAdd[1] = 0x02;
+			regAdd[2] = (0x80 + i) & 0xFF;
+			fsr_write_reg(info, &regAdd[0], 3);
+			rc = FSR_Check_Erase_Done(info, i);
+			if (rc < 0) {
+				input_err(true, &info->client->dev, "%s: failed, %d\n", __func__, __LINE__);
+				return rc;
+			}
+		}
 	}
 
 	//==================== Unlock Flash ====================
@@ -231,8 +298,10 @@ static int fsr_fw_burn_d3(struct fsr_sidekey_info *info, unsigned char *fw_data)
 	// Main Code Programming
 	input_info(true, &info->client->dev, "%s: Write to FLASH\n", __func__);
 	buf = kzalloc(WRITE_CHUNK_SIZE_D3 + 3, GFP_KERNEL);
-	if (!buf)
+	if (!buf) {
+		input_err(true, &info->client->dev, "%s: failed, %d\n", __func__, __LINE__);
 		return -ENOMEM;
+	}
 
 	i = 0;
 	k = 0;
@@ -295,6 +364,7 @@ static int fsr_fw_burn_d3(struct fsr_sidekey_info *info, unsigned char *fw_data)
 		rc = FSR_Check_DMA_Done(info);
 		if (rc < 0) {
 			kfree(buf);
+			input_err(true, &info->client->dev, "%s: failed, %d\n", __func__, __LINE__);
 			return rc;
 		}
 		k++;
@@ -307,9 +377,8 @@ static int fsr_fw_burn_d3(struct fsr_sidekey_info *info, unsigned char *fw_data)
 
 	config_data = kzalloc(FSR_CONFIG_SIZE, GFP_KERNEL);
 	if (!config_data) {
-		input_err(true, &info->client->dev, "%s: failed to alloc mem\n",
-				__func__);
 		kfree(buf);
+		input_err(true, &info->client->dev, "%s: failed, %d\n", __func__, __LINE__);
 		return -ENOMEM;
 	}
 
@@ -363,8 +432,10 @@ static int fsr_fw_burn_d3(struct fsr_sidekey_info *info, unsigned char *fw_data)
 	kfree(buf);
 
 	rc = FSR_Check_DMA_Done(info);
-	if (rc < 0)
+	if (rc < 0) {
+		input_err(true, &info->client->dev, "%s: failed, %d\n", __func__, __LINE__);
 		return rc;
+	}
 
 	input_info(true, &info->client->dev, "%s: Total write %ld kbytes for Config\n", __func__, i / 1024);
 
@@ -407,7 +478,7 @@ int fsr_fw_wait_for_event(struct fsr_sidekey_info *info, unsigned char eid)
 	return rc;
 }
 
-static int fsr_fw_wait_for_event_D3(struct fsr_sidekey_info *info, unsigned char eid0, unsigned char eid1)
+int fsr_fw_wait_for_event_D3(struct fsr_sidekey_info *info, unsigned char eid0, unsigned char eid1)
 {
 	int rc;
 	unsigned char regAdd;
@@ -520,6 +591,9 @@ int fsr_execute_autotune(struct fsr_sidekey_info *info)
 
 	input_info(true, &info->client->dev, "%s\n", __func__);
 
+	fsr_command(info, CMD_CLEAR_ALL_EVENT);
+	fsr_delay(50);
+
 	fsr_command(info, CMD_SENSEOFF);
 	fsr_interrupt_set(info, INT_DISABLE);
 	fsr_delay(50);
@@ -552,6 +626,8 @@ int fsr_execute_autotune(struct fsr_sidekey_info *info)
 
 void fsr_fw_init(struct fsr_sidekey_info *info)
 {
+	fsr_read_system_info(info);
+
 	input_info(true, &info->client->dev, "%s: %d\n", __func__, info->fsr_sys_info.PureSetFlag);
 
 //	if (info->fsr_sys_info.PureSetFlag == 0) {
@@ -631,6 +707,9 @@ int fsr_fw_update_on_probe(struct fsr_sidekey_info *info)
 	const struct ftb_header *header;
 	int restore_cal = 0;
 
+	if (info->board->bringup == 1)
+		return FSR_NOT_ERROR;
+
 	if (info->board->firmware_name) {
 		info->firmware_name = info->board->firmware_name;
 	}
@@ -670,6 +749,12 @@ int fsr_fw_update_on_probe(struct fsr_sidekey_info *info)
 		info->config_version_of_bin,
 		info->fw_main_version_of_bin);
 
+	if (info->board->bringup == 2) {
+		input_err(true, &info->client->dev, "%s: skip fw_update for bringup\n", __func__);
+		retval = FSR_NOT_ERROR;
+		goto done;
+	}
+
 	if ((info->fw_main_version_of_ic < info->fw_main_version_of_bin)
 		|| (info->config_version_of_ic < info->config_version_of_bin)
 		|| (info->fw_version_of_ic < info->fw_version_of_bin))
@@ -692,6 +777,12 @@ static int fsr_load_fw_from_kernel(struct fsr_sidekey_info *info,
 	const struct firmware *fw_entry = NULL;
 	unsigned char *fw_data = NULL;
 
+	if (info->board->bringup == 1) {
+		input_err(true, &info->client->dev, "%s: can't update for bringup\n",
+			__func__);
+		return -EINVAL;
+	}
+
 	if (!fw_path) {
 		input_err(true, &info->client->dev, "%s: Firmware name is not defined\n",
 			__func__);
@@ -712,7 +803,8 @@ static int fsr_load_fw_from_kernel(struct fsr_sidekey_info *info,
 
 	fw_data = (unsigned char *)fw_entry->data;
 
-	disable_irq(info->irq);
+	if (info->irq >= 0)
+		disable_irq(info->irq);
 
 	fsr_systemreset(info, 20);
 
@@ -722,7 +814,8 @@ static int fsr_load_fw_from_kernel(struct fsr_sidekey_info *info,
 		input_err(true, &info->client->dev, "%s: failed update firmware\n",
 			__func__);
 
-	enable_irq(info->irq);
+	if (info->irq >= 0)
+		enable_irq(info->irq);
  done:
 	if (fw_entry)
 		release_firmware(fw_entry);
@@ -778,7 +871,8 @@ static int fsr_load_fw_from_ums(struct fsr_sidekey_info *info)
 			header = (struct ftb_header *)fw_data;
 			if (header->signature == FTBFILE_SIGNATURE) {
 
-				disable_irq(info->irq);
+				if (info->irq >= 0)
+					disable_irq(info->irq);
 
 				fsr_systemreset(info, 20);
 
@@ -790,7 +884,8 @@ static int fsr_load_fw_from_ums(struct fsr_sidekey_info *info)
 				/* use virtual pat_control - magic cal 1 */
 				error = fsr_fw_updater(info, fw_data, 1);
 
-				enable_irq(info->irq);
+				if (info->irq >= 0)
+					enable_irq(info->irq);
 
 			} else {
 				error = -1;
@@ -853,7 +948,8 @@ static int fsr_load_fw_from_ffu(struct fsr_sidekey_info *info)
 		__func__, info->fw_version_of_bin, info->config_version_of_bin,
 		info->fw_main_version_of_bin);
 
-	disable_irq(info->irq);
+	if (info->irq >= 0)
+		disable_irq(info->irq);
 
 	fsr_systemreset(info, 20);
 
@@ -862,7 +958,8 @@ static int fsr_load_fw_from_ffu(struct fsr_sidekey_info *info)
 	if (retval)
 		input_err(true, &info->client->dev, "%s: failed update firmware\n", __func__);
 
-	enable_irq(info->irq);
+	if (info->irq >= 0)
+		enable_irq(info->irq);
 
 done:
 	if (fw_entry)

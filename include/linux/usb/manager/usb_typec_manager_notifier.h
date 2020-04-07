@@ -136,6 +136,7 @@ typedef struct _manager_data_t
 #if defined(CONFIG_VBUS_NOTIFIER)
 	struct delayed_work muic_event_work;
 #endif
+	struct mutex mo_lock;
 
 	int muic_attach_state;
 	int muic_cable_type;
@@ -160,7 +161,6 @@ typedef struct _manager_data_t
 	int vbus_by_otg_detection;
 	int pd_con_state;
 	int water_det;
-	int water_cable_det;
 	int wVbus_det;
 	int is_MPSM;
 	void *pd;

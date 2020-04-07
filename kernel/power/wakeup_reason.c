@@ -230,6 +230,7 @@ static int wakeup_reason_pm_event(struct notifier_block *notifier,
 
 static struct notifier_block wakeup_reason_pm_notifier_block = {
 	.notifier_call = wakeup_reason_pm_event,
+	.priority = INT_MAX,
 };
 
 /* Initializes the sysfs parameter
@@ -259,4 +260,4 @@ int __init wakeup_reason_init(void)
 	return 0;
 }
 
-late_initcall(wakeup_reason_init);
+subsys_initcall(wakeup_reason_init);

@@ -760,6 +760,29 @@ int32_t msm_camera_fill_vreg_params(
 			if (j == num_vreg)
 				power_setting[i].seq_val = INVALID_VREG;
 			break;
+		case SENSOR_CUSTOM_REG6:
+			for (j = 0; j < num_vreg; j++) {
+
+				if (!strcmp(soc_info->rgltr_name[j],
+					"cam_v_custom6")) {
+					CAM_DBG(CAM_SENSOR,
+						"i:%d j:%d cam_vcustom6", i, j);
+					power_setting[i].seq_val = j;
+
+					if (VALIDATE_VOLTAGE(
+						soc_info->rgltr_min_volt[j],
+						soc_info->rgltr_max_volt[j],
+						power_setting[i].config_val)) {
+						soc_info->rgltr_min_volt[j] =
+						soc_info->rgltr_max_volt[j] =
+						power_setting[i].config_val;
+					}
+					break;
+				}
+			}
+			if (j == num_vreg)
+				power_setting[i].seq_val = INVALID_VREG;
+			break;
 		default:
 			break;
 		}
@@ -874,11 +897,20 @@ int32_t cam_sensor_update_power_settings(void *cmd_buf,
 			struct cam_cmd_power *pwr_cmd =
 				(struct cam_cmd_power *)ptr;
 
+			if ((U16_MAX - power_info->power_setting_size) <
+				pwr_cmd->count) {
+				CAM_ERR(CAM_SENSOR, "ERR: Overflow occurs");
+				rc = -EINVAL;
+				goto free_power_settings;
+			}
+
 			power_info->power_setting_size += pwr_cmd->count;
-			if (power_info->power_setting_size > MAX_POWER_CONFIG) {
+			if ((power_info->power_setting_size > MAX_POWER_CONFIG)
+				|| (pwr_cmd->count >= SENSOR_SEQ_TYPE_MAX)) {
 				CAM_ERR(CAM_SENSOR,
-					"Invalid: power up setting size %d",
-					power_info->power_setting_size);
+				"pwr_up setting size %d, pwr_cmd->count: %d",
+					power_info->power_setting_size,
+					pwr_cmd->count);
 				rc = -EINVAL;
 				goto free_power_settings;
 			}
@@ -973,12 +1005,21 @@ int32_t cam_sensor_update_power_settings(void *cmd_buf,
 
 			scr = ptr + sizeof(struct cam_cmd_power);
 			tot_size = tot_size + sizeof(struct cam_cmd_power);
+			if ((U16_MAX - power_info->power_down_setting_size) <
+				pwr_cmd->count) {
+				CAM_ERR(CAM_SENSOR, "ERR: Overflow");
+				rc = -EINVAL;
+				goto free_power_settings;
+			}
+
 			power_info->power_down_setting_size += pwr_cmd->count;
-			if (power_info->power_down_setting_size >
-				MAX_POWER_CONFIG) {
+			if ((power_info->power_down_setting_size >
+				MAX_POWER_CONFIG) || (pwr_cmd->count >=
+				SENSOR_SEQ_TYPE_MAX)) {
 				CAM_ERR(CAM_SENSOR,
-					"Invalid: power down setting size %d",
-					power_info->power_down_setting_size);
+				"pwr_down_setting_size %d, pwr_cmd->count: %d",
+					power_info->power_down_setting_size,
+					pwr_cmd->count);
 				rc = -EINVAL;
 				goto free_power_settings;
 			}
@@ -1664,6 +1705,9 @@ int cam_sensor_core_power_up(struct cam_sensor_power_ctrl_t *ctrl,
 		case SENSOR_CUSTOM_REG3:
 		case SENSOR_CUSTOM_REG4:
 		case SENSOR_CUSTOM_REG5:
+		case SENSOR_CUSTOM_REG6:
+#if !defined(CONFIG_SEC_R3Q_PROJECT) && !defined(CONFIG_SEC_GTS5L_PROJECT) && !defined(CONFIG_SEC_GTS5LWIFI_PROJECT) && \
+	!defined(CONFIG_SEC_GTS6L_PROJECT) && !defined(CONFIG_SEC_GTS6LWIFI_PROJECT)&& !defined(CONFIG_SEC_GTS6X_PROJECT)
 			if (power_setting->seq_val == INVALID_VREG)
 				break;
 
@@ -1673,6 +1717,7 @@ int cam_sensor_core_power_up(struct cam_sensor_power_ctrl_t *ctrl,
 					CAM_VREG_MAX);
 				goto power_up_failed;
 			}
+#endif
 			if (power_setting->seq_val < num_vreg) {
 				CAM_DBG(CAM_SENSOR, "Enable Regulator");
 				vreg_idx = power_setting->seq_val;
@@ -1784,6 +1829,7 @@ power_up_failed:
 		case SENSOR_CUSTOM_REG3:
 		case SENSOR_CUSTOM_REG4:
 		case SENSOR_CUSTOM_REG5:
+		case SENSOR_CUSTOM_REG6:
 			if (power_setting->seq_val < num_vreg) {
 				CAM_DBG(CAM_SENSOR, "Disable Regulator");
 				vreg_idx = power_setting->seq_val;
@@ -1877,8 +1923,8 @@ msm_camera_get_power_settings(struct cam_sensor_power_ctrl_t *ctrl,
 }
 
 int cam_sensor_util_power_down(struct cam_sensor_power_ctrl_t *ctrl,
-#if defined(CONFIG_SENSOR_RETENTION)
-		struct cam_hw_soc_info *soc_info, int retention)
+#if defined(CONFIG_SAMSUNG_FORCE_DISABLE_REGULATOR)
+		struct cam_hw_soc_info *soc_info, int force)
 #else
 		struct cam_hw_soc_info *soc_info)
 #endif
@@ -1958,8 +2004,12 @@ int cam_sensor_util_power_down(struct cam_sensor_power_ctrl_t *ctrl,
 		case SENSOR_CUSTOM_REG3:
 		case SENSOR_CUSTOM_REG4:
 		case SENSOR_CUSTOM_REG5:
+		case SENSOR_CUSTOM_REG6:
+#if !defined(CONFIG_SEC_R3Q_PROJECT) && !defined(CONFIG_SEC_GTS5L_PROJECT) && !defined(CONFIG_SEC_GTS5LWIFI_PROJECT) && \
+	!defined(CONFIG_SEC_GTS6L_PROJECT) && !defined(CONFIG_SEC_GTS6LWIFI_PROJECT) && !defined(CONFIG_SEC_GTS6X_PROJECT)
 			if (pd->seq_val == INVALID_VREG)
 				break;
+#endif
 
 			ps = msm_camera_get_power_settings(
 				ctrl, pd->seq_type,
@@ -1967,7 +2017,11 @@ int cam_sensor_util_power_down(struct cam_sensor_power_ctrl_t *ctrl,
 			if (ps) {
 				if (pd->seq_val < num_vreg) {
 #if defined(CONFIG_SENSOR_RETENTION)
+#if defined(CONFIG_SAMSUNG_FORCE_DISABLE_REGULATOR)
+					if ((pd->config_val > 0) && (force == FALSE)) {
+#else
 					if (pd->config_val > 0) {
+#endif
 						CAM_INFO(CAM_SENSOR, "[RET_DBG] skip disable regulator, set sensor power %s, %ld",
 							soc_info->rgltr_name[ps->seq_val], pd->config_val);
 						if (soc_info->rgltr[ps->seq_val] != NULL)
@@ -1985,24 +2039,25 @@ int cam_sensor_util_power_down(struct cam_sensor_power_ctrl_t *ctrl,
 #endif
 					CAM_INFO(CAM_SENSOR,
 						"Disable Regulator");
-#if defined(CONFIG_SENSOR_RETENTION) && defined(CONFIG_EEPROM_FORCE_DOWN)
-					if((retention == 2) && (pd->seq_type == SENSOR_VIO))
+
+#if defined(CONFIG_SAMSUNG_FORCE_DISABLE_REGULATOR)
+					if (force == TRUE)
 						ret =  cam_soc_util_regulator_force_disable(
-							soc_info->rgltr[ps->seq_val],
-							soc_info->rgltr_name[ps->seq_val],
-							soc_info->rgltr_min_volt[ps->seq_val],
-							soc_info->rgltr_max_volt[ps->seq_val],
-							soc_info->rgltr_op_mode[ps->seq_val],
-							soc_info->rgltr_delay[ps->seq_val]);
-					else
+    						soc_info->rgltr[ps->seq_val],
+    						soc_info->rgltr_name[ps->seq_val],
+    						soc_info->rgltr_min_volt[ps->seq_val],
+    						soc_info->rgltr_max_volt[ps->seq_val],
+    						soc_info->rgltr_op_mode[ps->seq_val],
+    						soc_info->rgltr_delay[ps->seq_val]);
+                    else
 #endif
 					ret =  cam_soc_util_regulator_disable(
-					soc_info->rgltr[ps->seq_val],
-					soc_info->rgltr_name[ps->seq_val],
-					soc_info->rgltr_min_volt[ps->seq_val],
-					soc_info->rgltr_max_volt[ps->seq_val],
-					soc_info->rgltr_op_mode[ps->seq_val],
-					soc_info->rgltr_delay[ps->seq_val]);
+						soc_info->rgltr[ps->seq_val],
+						soc_info->rgltr_name[ps->seq_val],
+						soc_info->rgltr_min_volt[ps->seq_val],
+						soc_info->rgltr_max_volt[ps->seq_val],
+						soc_info->rgltr_op_mode[ps->seq_val],
+						soc_info->rgltr_delay[ps->seq_val]);
 					if (ret) {
 						CAM_ERR(CAM_SENSOR,
 						"Reg: %s disable failed",

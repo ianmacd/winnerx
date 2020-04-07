@@ -3,7 +3,7 @@
  * drivers/staging/android/ion/ion.c
  *
  * Copyright (C) 2011 Google, Inc.
- * Copyright (c) 2011-2018, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2011-2019, The Linux Foundation. All rights reserved.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -29,6 +29,7 @@
 #include <linux/export.h>
 #include <linux/mm.h>
 #include <linux/mm_types.h>
+#include <linux/oom.h>
 #include <linux/rbtree.h>
 #include <linux/slab.h>
 #include <linux/seq_file.h>
@@ -335,9 +336,9 @@ static void ion_dma_buf_detatch(struct dma_buf *dmabuf,
 	struct ion_buffer *buffer = dmabuf->priv;
 
 	mutex_lock(&buffer->lock);
-	free_duped_table(a->table);
 	list_del(&a->list);
 	mutex_unlock(&buffer->lock);
+	free_duped_table(a->table);
 
 	kfree(a);
 }
@@ -591,7 +592,8 @@ static int ion_sgl_sync_range(struct device *dev, struct scatterlist *sgl,
 			break;
 
 		if (i > 0) {
-			pr_warn("Partial cmo only supported with 1 segment\n"
+			pr_warn_ratelimited(
+				"Partial cmo only supported with 1 segment\n"
 				"is dma_set_max_seg_size being set on dev:%s\n",
 				dev_name(dev));
 			return -EINVAL;
@@ -1074,6 +1076,13 @@ struct dma_buf *ion_alloc_dmabuf(size_t len, unsigned int heap_id_mask,
 	if (!len)
 		return ERR_PTR(-EINVAL);
 
+	if (heap_id_mask == 0xFFFFFFFF) {
+		heap_id_mask = get_ion_system_heap_id();
+		if (IS_ERR(ERR_PTR(heap_id_mask)))
+			return ERR_PTR(heap_id_mask);
+		heap_id_mask = (1 << heap_id_mask);
+	}
+
 	down_read(&dev->lock);
 	plist_for_each_entry(heap, &dev->heaps, node) {
 		/* if the caller didn't specify this heap id */
@@ -1232,25 +1241,13 @@ static const struct file_operations ion_fops = {
 #endif
 };
 
-static void ion_debug_heap_usage_show(struct ion_heap *heap)
+static void __ion_debug_heap_usage_show(struct ion_heap *heap)
 {
 	struct ion_device *dev = heap->dev;
 	struct rb_node *n;
 	size_t total_size = 0;
-	static DEFINE_RATELIMIT_STATE(show_heap_usage, HZ * 10, 1);
 
-	/* supports only for some heaps */
-	if (heap->type != ION_HEAP_TYPE_CARVEOUT &&
-	    heap->type != ION_HEAP_TYPE_DMA &&
-	    heap->type != ION_HEAP_TYPE_SECURE_DMA &&
-	    heap->type != ION_HEAP_TYPE_HYP_CMA &&
-	    heap->type != ION_HEAP_TYPE_SECURE_CARVEOUT)
-		return;
-
-	if (!__ratelimit(&show_heap_usage))
-		return;
-
-	pr_info("heap: %s %u\n", heap->name, heap->id);
+	pr_info("ion heap: %s %u\n", heap->name, heap->id);
 	pr_info("%16s %16s %16s\n", "task", "pid", "size");
 	mutex_lock(&dev->buffer_lock);
 	for (n = rb_first(&dev->buffers); n; n = rb_next(n)) {
@@ -1268,6 +1265,54 @@ static void ion_debug_heap_usage_show(struct ion_heap *heap)
 	pr_info("%16.s %16lu\n", "peak allocated",
 		atomic_long_read(&heap->total_allocated_peak));
 }
+
+static void ion_debug_heap_usage_show(struct ion_heap *heap)
+{
+	static DEFINE_RATELIMIT_STATE(show_heap_usage, HZ * 10, 1);
+
+	/* supports only for some heaps */
+	if (heap->type != ION_HEAP_TYPE_CARVEOUT &&
+	    heap->type != ION_HEAP_TYPE_DMA &&
+	    heap->type != ION_HEAP_TYPE_SECURE_DMA &&
+	    heap->type != ION_HEAP_TYPE_HYP_CMA &&
+	    heap->type != ION_HEAP_TYPE_SECURE_CARVEOUT)
+		return;
+
+	if (!__ratelimit(&show_heap_usage))
+		return;
+
+	__ion_debug_heap_usage_show(heap);
+}
+
+static void ion_debug_heap_usage_show_force(struct ion_heap *heap)
+{
+	static DEFINE_RATELIMIT_STATE(show_heap_usage_force, HZ * 10, 1);
+
+	if (!__ratelimit(&show_heap_usage_force))
+		return;
+
+	__ion_debug_heap_usage_show(heap);
+}
+
+void show_ion_system_heap(void)
+{
+	struct ion_heap *heap;
+
+	/* print ion system_heap */
+	heap = get_ion_heap(ION_SYSTEM_HEAP_ID);
+	ion_debug_heap_usage_show_force(heap);
+}
+
+static int ion_oom_notify(struct notifier_block *nb,
+			  unsigned long action, void *data)
+{
+	show_ion_system_heap();
+	return NOTIFY_DONE;
+}
+
+static struct notifier_block ion_oom_notifier = {
+	.notifier_call = ion_oom_notify,
+};
 
 static int ion_debug_heap_show(struct seq_file *s, void *unused)
 {
@@ -1442,6 +1487,7 @@ struct ion_device *ion_device_create(void)
 		pr_err("ion: failed to create debugfs heaps directory.\n");
 		goto debugfs_done;
 	}
+	WARN_ON(register_oom_notifier(&ion_oom_notifier));
 
 debugfs_done:
 

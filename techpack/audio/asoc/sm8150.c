@@ -44,6 +44,8 @@
 #include <linux/mfd/cs35l41/registers.h>
 #include <linux/mfd/cs35l41/big_data.h>
 #endif
+#include <linux/pm_qos.h>
+
 #define DRV_NAME "sm8150-asoc-snd"
 
 #define __CHIPSET__ "SM8150 "
@@ -78,6 +80,10 @@
 
 #define TDM_MAX_SLOTS		8
 #define TDM_SLOT_WIDTH_BITS	32
+
+#define VDD_APCx_PC_DISABLE    800 // Little 909us, Big 1461us
+#define VDD_APCx_PC_ENABLE     PM_QOS_DEFAULT_VALUE
+static struct pm_qos_request noise_wa_req;
 
 #ifdef CONFIG_SND_SOC_CS35L41
 #define CLK_SRC_SCLK 0
@@ -191,6 +197,7 @@ struct msm_asoc_mach_data {
 	struct device_node *fsa_handle;
 	struct snd_soc_codec *codec;
 	struct work_struct adsp_power_up_work;
+	bool pm_qos_noise_wa;
 };
 
 struct msm_asoc_wcd93xx_codec {
@@ -677,6 +684,15 @@ unsigned int dai_force_frame32;
 static const char *const dai_force_frame32_config[] = {"Off", "On"};
 #endif
 
+#ifdef CONFIG_SND_SOC_TAS2562
+static struct snd_soc_codec_conf ti_amp_conf[] = {
+	{
+		.dev_name = "tas2562.24-004c",
+		.name_prefix = "TI",
+	}
+};
+#endif
+
 static void *def_wcd_mbhc_cal(struct snd_soc_card *card);
 static int msm_snd_enable_codec_ext_clk(struct snd_soc_codec *codec,
 					int enable, bool dapm);
@@ -1114,6 +1130,28 @@ static int dai_force_frame32_put(struct snd_kcontrol *kcontrol,
 	return 0;
 }
 #endif
+
+static int vdd_apcx_control_get(struct snd_kcontrol *kcontrol,
+	struct snd_ctl_elem_value *ucontrol)
+{
+	return 0;
+}
+
+static int vdd_apcx_control_put(struct snd_kcontrol *kcontrol,
+	struct snd_ctl_elem_value *ucontrol)
+{
+	pr_info("%s: ucontrol value = %ld\n", __func__,
+		ucontrol->value.integer.value[0]);
+	switch (ucontrol->value.integer.value[0]) {
+	case 0:
+		pm_qos_update_request(&noise_wa_req, VDD_APCx_PC_ENABLE);
+		break;
+	case 1:
+		pm_qos_update_request(&noise_wa_req, VDD_APCx_PC_DISABLE);
+		break;
+	}
+	return 0;
+}
 
 static int slim_get_sample_rate_val(int sample_rate)
 {
@@ -3191,6 +3229,10 @@ static int msm_mi2s_rx_format_put(struct snd_kcontrol *kcontrol,
 	mi2s_rx_cfg[idx].bit_format =
 		mi2s_auxpcm_get_format(ucontrol->value.enumerated.item[0]);
 
+	/* I2S needs to configurate same bit format between rx and tx */
+	mi2s_tx_cfg[idx].bit_format =
+		mi2s_auxpcm_get_format(ucontrol->value.enumerated.item[0]);
+
 	pr_info("%s: idx[%d]_rx_format = %d, item = %d\n", __func__,
 		  idx, mi2s_rx_cfg[idx].bit_format,
 		  ucontrol->value.enumerated.item[0]);
@@ -3671,6 +3713,11 @@ static const struct snd_kcontrol_new msm_snd_controls[] = {
 #endif
 };
 
+static const struct snd_kcontrol_new pm_qos_noise_wa_controls[] = {
+	SOC_SINGLE_EXT("Vdd Apcx Control", SND_SOC_NOPM, 0, 1, 0,
+			vdd_apcx_control_get, vdd_apcx_control_put),
+};
+
 static int msm_snd_enable_codec_ext_clk(struct snd_soc_codec *codec,
 					int enable, bool dapm)
 {
@@ -3843,6 +3890,9 @@ static const struct snd_soc_dapm_widget msm_dapm_widgets_tavil[] = {
 	SND_SOC_DAPM_SPK("Lineout_2 amp", NULL),
 	SND_SOC_DAPM_SPK("hifi amp", msm_hifi_ctrl_event),
 	SND_SOC_DAPM_MIC("Handset Mic", NULL),
+	SND_SOC_DAPM_MIC("Sub Mic", NULL),
+	SND_SOC_DAPM_MIC("3rd Mic", NULL),
+	SND_SOC_DAPM_MIC("4th Mic", NULL),
 	SND_SOC_DAPM_MIC("Headset Mic", NULL),
 	SND_SOC_DAPM_MIC("ANCRight Headset Mic", NULL),
 	SND_SOC_DAPM_MIC("ANCLeft Headset Mic", NULL),
@@ -4603,6 +4653,17 @@ static int msm_audrx_init(struct snd_soc_pcm_runtime *rtd)
 		return ret;
 	}
 
+	if (pdata->pm_qos_noise_wa) {
+		ret = snd_soc_add_codec_controls(codec, pm_qos_noise_wa_controls,
+					ARRAY_SIZE(pm_qos_noise_wa_controls));
+		if (ret < 0) {
+			pr_err("%s: add_pm_qos_noise_wa_controls failed, err %d\n",
+				__func__, ret);
+ 
+			return ret;
+		}
+	}
+
 	if (!strcmp(dev_name(codec_dai->dev), "tavil_codec")) {
 		snd_soc_dapm_new_controls(dapm, msm_dapm_widgets_tavil,
 				ARRAY_SIZE(msm_dapm_widgets_tavil));
@@ -4637,6 +4698,9 @@ static int msm_audrx_init(struct snd_soc_pcm_runtime *rtd)
 	snd_soc_dapm_ignore_suspend(dapm, "FMRight Tx");
 
 	if (!strcmp(dev_name(codec_dai->dev), "tavil_codec")) {
+		snd_soc_dapm_ignore_suspend(dapm, "Sub Mic");
+		snd_soc_dapm_ignore_suspend(dapm, "3rd Mic");
+		snd_soc_dapm_ignore_suspend(dapm, "4th Mic");
 		snd_soc_dapm_ignore_suspend(dapm, "Headset Mic");
 		snd_soc_dapm_ignore_suspend(dapm, "ANCRight Headset Mic");
 		snd_soc_dapm_ignore_suspend(dapm, "ANCLeft Headset Mic");
@@ -4657,7 +4721,6 @@ static int msm_audrx_init(struct snd_soc_pcm_runtime *rtd)
 	snd_soc_dapm_ignore_suspend(dapm, "L SPK");
 	snd_soc_dapm_ignore_suspend(dapm, "R SPK");
 #endif
-
 	snd_soc_dapm_sync(dapm);
 
 	snd_soc_dai_set_channel_map(codec_dai, ARRAY_SIZE(tx_ch),
@@ -4780,6 +4843,21 @@ static int sm8150_tdm_cirrus_init(struct snd_soc_pcm_runtime *rtd)
 	snd_soc_dapm_ignore_suspend(right_dapm, "Right VSENSE");
 	snd_soc_dapm_ignore_suspend(right_dapm, "Right TEMP");
 	snd_soc_dapm_sync(right_dapm);
+
+	return 0;
+}
+#endif
+
+#ifdef CONFIG_SND_SOC_TAS2562
+static int sm8150_tas2562_init(struct snd_soc_pcm_runtime *rtd)
+{
+	struct snd_soc_codec *codec = rtd->codec;
+	struct snd_soc_dapm_context *dapm = snd_soc_codec_get_dapm(codec);
+
+	snd_soc_dapm_ignore_suspend(dapm, "TI ASI1 Capture");
+	snd_soc_dapm_ignore_suspend(dapm, "TI ASI1 Playback");
+	snd_soc_dapm_ignore_suspend(dapm, "TI OUT");
+	snd_soc_dapm_sync(dapm);
 
 	return 0;
 }
@@ -6405,6 +6483,7 @@ static struct snd_soc_dai_link msm_common_dai_links[] = {
 		.ignore_pmdown_time = 1,
 		 /* this dainlink has playback support */
 		.id = MSM_FRONTEND_DAI_MULTIMEDIA16,
+		.ops = &msm_fe_qos_ops,
 	},
 	{
 		.name = "SLIMBUS_8 Hostless",
@@ -7392,8 +7471,14 @@ static struct snd_soc_dai_link msm_mi2s_be_dai_links[] = {
 		.stream_name = "Secondary MI2S Playback",
 		.cpu_dai_name = "msm-dai-q6-mi2s.1",
 		.platform_name = "msm-pcm-routing",
+#ifdef CONFIG_SND_SOC_TAS2562
+		.codec_name     = "tas2562.24-004c",
+		.codec_dai_name = "tas2562 ASI1",
+		.init = &sm8150_tas2562_init,
+#else
 		.codec_name = "msm-stub-codec.1",
 		.codec_dai_name = "msm-stub-rx",
+#endif
 		.no_pcm = 1,
 		.dpcm_playback = 1,
 		.id = MSM_BACKEND_DAI_SECONDARY_MI2S_RX,
@@ -7407,8 +7492,13 @@ static struct snd_soc_dai_link msm_mi2s_be_dai_links[] = {
 		.stream_name = "Secondary MI2S Capture",
 		.cpu_dai_name = "msm-dai-q6-mi2s.1",
 		.platform_name = "msm-pcm-routing",
+#ifdef CONFIG_SND_SOC_TAS2562
+		.codec_name 	= "tas2562.24-004c",
+		.codec_dai_name = "tas2562 ASI1",
+#else
 		.codec_name = "msm-stub-codec.1",
 		.codec_dai_name = "msm-stub-tx",
+#endif
 		.no_pcm = 1,
 		.dpcm_capture = 1,
 		.id = MSM_BACKEND_DAI_SECONDARY_MI2S_TX,
@@ -8447,6 +8537,18 @@ static int msm_asoc_machine_probe(struct platform_device *pdev)
 	if (!pdata)
 		return -ENOMEM;
 
+
+	pdata->pm_qos_noise_wa = false;
+	pdata->pm_qos_noise_wa= of_parse_phandle(pdev->dev.of_node,
+							"pm_qos_noise_wa", 0);
+
+	if (pdata->pm_qos_noise_wa) {
+		dev_info(&pdev->dev,
+			"%s: pm noise\n", __func__);
+		noise_wa_req.type = PM_QOS_REQ_ALL_CORES;
+		pm_qos_add_request(&noise_wa_req, PM_QOS_CPU_DMA_LATENCY, PM_QOS_DEFAULT_VALUE);
+	}
+
 	card = populate_snd_card_dailinks(&pdev->dev);
 	if (!card) {
 		dev_err(&pdev->dev, "%s: Card uninitialized\n", __func__);
@@ -8483,6 +8585,10 @@ static int msm_asoc_machine_probe(struct platform_device *pdev)
 #ifdef CONFIG_SND_SOC_CS35L41
 	card->codec_conf = cs35l41_conf;
 	card->num_configs = ARRAY_SIZE(cs35l41_conf);
+#endif
+#ifdef CONFIG_SND_SOC_TAS2562
+	card->codec_conf = ti_amp_conf;
+	card->num_configs = ARRAY_SIZE(ti_amp_conf);
 #endif
 
 	ret = devm_snd_soc_register_card(&pdev->dev, card);
@@ -8602,7 +8708,10 @@ static int msm_asoc_machine_remove(struct platform_device *pdev)
 {
 	audio_notifier_deregister("sm8150");
 	msm_i2s_auxpcm_deinit();
-
+	if (of_parse_phandle(pdev->dev.of_node,
+		"pm_qos_noise_wa", 0)) {
+		pm_qos_remove_request(&noise_wa_req);
+	}
 	msm_release_pinctrl(pdev);
 	return 0;
 }

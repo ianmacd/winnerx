@@ -257,10 +257,8 @@ static int sde_hdcp_2x_get_next_message(struct sde_hdcp_2x_ctrl *hdcp,
 	case REP_SEND_RECV_ID_LIST:
 		return REP_SEND_ACK;
 	case REP_STREAM_MANAGE:
-		if (hdcp->resend_stream_manage)
-			return REP_STREAM_MANAGE;
-		else
-			return REP_STREAM_READY;
+		hdcp->resend_stream_manage = false;
+		return REP_STREAM_READY;
 	default:
 		pr_err("Uknown message ID (%d)", hdcp->last_msg);
 		return -EINVAL;
@@ -491,6 +489,12 @@ static void sde_hdcp_2x_stream(struct sde_hdcp_2x_ctrl *hdcp)
 		return;
 	}
 
+	if (!hdcp->authenticated &&
+			hdcp->app_data.response.data[0] != REP_SEND_ACK) {
+		pr_debug("invalid state. HDCP repeater not authenticated\n");
+		return;
+	}
+
 	rc = hdcp2_app_comm(hdcp->hdcp2_ctx, HDCP2_CMD_QUERY_STREAM,
 			&hdcp->app_data);
 	if (rc)
@@ -505,8 +509,11 @@ static void sde_hdcp_2x_stream(struct sde_hdcp_2x_ctrl *hdcp)
 	pr_debug("message received from TZ: %s\n",
 		 sde_hdcp_2x_message_name(hdcp->app_data.response.data[0]));
 exit:
-	if (!rc && !atomic_read(&hdcp->hdcp_off))
+	if (!rc && !atomic_read(&hdcp->hdcp_off)) {
+		/* Modify last message to ensure the proper message is sent */
+		hdcp->last_msg = REP_SEND_ACK;
 		sde_hdcp_2x_send_message(hdcp);
+	}
 }
 
 static void sde_hdcp_2x_query_stream_work(struct kthread_work *work)
@@ -526,6 +533,35 @@ static void sde_hdcp_2x_initialize_command(struct sde_hdcp_2x_ctrl *hdcp,
 		cdata->buf = hdcp->app_data.request.data + 1;
 }
 
+static void sde_hdcp_2x_set_hw_key(struct sde_hdcp_2x_ctrl *hdcp)
+{
+	int rc;
+	struct hdcp_transport_wakeup_data cdata = {
+						HDCP_TRANSPORT_CMD_INVALID };
+	cdata.context = hdcp->client_data;
+
+	if (hdcp->authenticated) {
+		pr_debug("authenticated, h/w key already set\n");
+		return;
+	}
+
+	rc = hdcp2_app_comm(hdcp->hdcp2_ctx, HDCP2_CMD_SET_HW_KEY,
+			&hdcp->app_data);
+	if (rc) {
+		pr_err("failed to set h/w key: %d\n", rc);
+		return;
+	}
+
+	hdcp->authenticated = true;
+	pr_debug("authenticated\n");
+
+	if (hdcp->force_encryption)
+		hdcp2_force_encryption(hdcp->hdcp2_ctx, 1);
+
+	cdata.cmd = HDCP_TRANSPORT_CMD_STATUS_SUCCESS;
+	sde_hdcp_2x_wakeup_client(hdcp, &cdata);
+}
+
 static void sde_hdcp_2x_msg_sent(struct sde_hdcp_2x_ctrl *hdcp)
 {
 	struct hdcp_transport_wakeup_data cdata = {
@@ -534,16 +570,7 @@ static void sde_hdcp_2x_msg_sent(struct sde_hdcp_2x_ctrl *hdcp)
 
 	switch (hdcp->app_data.response.data[0]) {
 	case SKE_SEND_TYPE_ID:
-		if (!hdcp2_app_comm(hdcp->hdcp2_ctx,
-				HDCP2_CMD_EN_ENCRYPTION, &hdcp->app_data)) {
-			hdcp->authenticated = true;
-
-			if (hdcp->force_encryption)
-				hdcp2_force_encryption(hdcp->hdcp2_ctx, 1);
-
-			cdata.cmd = HDCP_TRANSPORT_CMD_STATUS_SUCCESS;
-			sde_hdcp_2x_wakeup_client(hdcp, &cdata);
-		}
+		sde_hdcp_2x_set_hw_key(hdcp);
 
 		/* poll for link check */
 		sde_hdcp_2x_initialize_command(hdcp,
@@ -727,30 +754,26 @@ static void sde_hdcp_2x_msg_recvd(struct sde_hdcp_2x_ctrl *hdcp)
 		goto exit;
 	}
 
-	out_msg = (u32)hdcp->app_data.response.data[0];
+	if (hdcp->app_data.response.length == 0)
+		out_msg = INVALID_MESSAGE;
+	else
+		out_msg = (u32)hdcp->app_data.response.data[0];
 
 	pr_debug("message received from TZ: %s\n",
 			sde_hdcp_2x_message_name(out_msg));
 
 	if (msg[0] == REP_STREAM_READY && out_msg != REP_STREAM_MANAGE) {
-		if (!hdcp->authenticated) {
+		if (hdcp->resend_stream_manage) {
+			pr_debug("resend stream management\n");
 			rc = hdcp2_app_comm(hdcp->hdcp2_ctx,
-					HDCP2_CMD_EN_ENCRYPTION,
+					HDCP2_CMD_QUERY_STREAM,
 					&hdcp->app_data);
-			if (!rc) {
-				hdcp->authenticated = true;
-
-				if (hdcp->force_encryption)
-					hdcp2_force_encryption(
-							hdcp->hdcp2_ctx, 1);
-
-				cdata.cmd = HDCP_TRANSPORT_CMD_STATUS_SUCCESS;
-				sde_hdcp_2x_wakeup_client(hdcp, &cdata);
-			} else {
-				pr_err("failed to enable encryption (%d)\n",
-						rc);
-			}
+			if (!rc)
+				sde_hdcp_2x_send_message(hdcp);
+			goto exit;
 		}
+
+		sde_hdcp_2x_set_hw_key(hdcp);
 
 		sde_hdcp_2x_initialize_command(hdcp,
 				HDCP_TRANSPORT_CMD_LINK_POLL, &cdata);
@@ -763,11 +786,8 @@ static void sde_hdcp_2x_msg_recvd(struct sde_hdcp_2x_ctrl *hdcp)
 		hdcp->resend_lc_init = true;
 	}
 
-	hdcp->resend_stream_manage = false;
-	if (msg[0] == REP_STREAM_READY && out_msg == REP_STREAM_MANAGE) {
+	if (msg[0] == REP_STREAM_READY && out_msg == REP_STREAM_MANAGE)
 		pr_debug("resend %s\n", sde_hdcp_2x_message_name(out_msg));
-		hdcp->resend_stream_manage = true;
-	}
 
 	if (out_msg == AKE_NO_STORED_KM)
 		hdcp->no_stored_km = 1;
@@ -889,8 +909,14 @@ static void sde_hdcp_2x_manage_stream_work(struct kthread_work *work)
 		}
 	}
 
-	if (query_streams && hdcp->authenticated)
-		HDCP_2X_EXECUTE(stream);
+	if (query_streams) {
+		if (hdcp->authenticated) {
+			HDCP_2X_EXECUTE(stream);
+		} else if (hdcp->last_msg == REP_STREAM_MANAGE ||
+				hdcp->last_msg == REP_STREAM_READY) {
+			hdcp->resend_stream_manage = true;
+		}
+	}
 }
 
 static bool sde_remove_streams(struct sde_hdcp_2x_ctrl *hdcp,
@@ -902,7 +928,7 @@ static bool sde_remove_streams(struct sde_hdcp_2x_ctrl *hdcp,
 	struct list_head *entry;
 	struct sde_hdcp_stream *stream_entry;
 	bool changed = false;
- 
+
 	for (i = 0 ; i < num_streams; i++) {
 		stream_id = streams[i].stream_id;
 		virtual_channel = streams[i].virtual_channel;
@@ -1150,8 +1176,8 @@ int sde_hdcp_2x_register(struct sde_hdcp_2x_register_data *data)
 
 	kthread_init_worker(&hdcp->worker);
 
-	kthread_init_work(&hdcp->wk_enable, 	 sde_hdcp_2x_enable_work);
-	kthread_init_work(&hdcp->wk_disable,	  sde_hdcp_2x_disable_work);
+	kthread_init_work(&hdcp->wk_enable,      sde_hdcp_2x_enable_work);
+	kthread_init_work(&hdcp->wk_disable,      sde_hdcp_2x_disable_work);
 	kthread_init_work(&hdcp->wk_init,      sde_hdcp_2x_init_work);
 	kthread_init_work(&hdcp->wk_start_auth, sde_hdcp_2x_start_auth_work);
 	kthread_init_work(&hdcp->wk_msg_sent,  sde_hdcp_2x_msg_sent_work);

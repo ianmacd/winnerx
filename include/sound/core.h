@@ -140,6 +140,7 @@ struct snd_card {
 #ifdef CONFIG_PM
 	unsigned int power_state;	/* power state */
 	wait_queue_head_t power_sleep;
+	unsigned long power_change;
 #endif
 
 #if IS_ENABLED(CONFIG_SND_MIXER_OSS)
@@ -159,6 +160,9 @@ static inline unsigned int snd_power_get_state(struct snd_card *card)
 static inline void snd_power_change_state(struct snd_card *card, unsigned int state)
 {
 	card->power_state = state;
+	/* make sure power is updated prior to wake up */
+	wmb();
+	xchg(&card->power_change, 1);
 	wake_up(&card->power_sleep);
 }
 
@@ -236,6 +240,10 @@ int snd_card_locked(int card);
 #define SND_MIXER_OSS_NOTIFY_DISCONNECT	1
 #define SND_MIXER_OSS_NOTIFY_FREE	2
 extern int (*snd_mixer_oss_notify_callback)(struct snd_card *card, int cmd);
+#endif
+
+#ifdef CONFIG_USB_AUDIO_ENHANCED_DETECT_TIME
+int get_next_snd_card_number(struct module *module);
 #endif
 
 int snd_card_new(struct device *parent, int idx, const char *xid,

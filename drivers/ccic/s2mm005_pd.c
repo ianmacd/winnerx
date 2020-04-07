@@ -31,6 +31,9 @@
 #include <linux/ccic/ccic_core.h>
 #endif
 
+#ifdef CONFIG_MUIC_SM5705_SWITCH_CONTROL_GPIO
+extern int muic_GPIO_control(int gpio);
+#endif
 extern struct pdic_notifier_struct pd_noti;
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -79,7 +82,13 @@ void s2mm005_select_pdo(int num)
 
 	CMD_DATA[0] = 0x3;
 	CMD_DATA[1] = 0x2;
+//lse 0717
+#if 0
 	CMD_DATA[2] = State_PE_SNK_Wait_for_Capabilities;
+#else
+	CMD_DATA[2] = State_PE_SNK_Select_Capability;
+#endif
+	
 	s2mm005_write_byte(usbpd_data->i2c, REG_I2C_SLV_CMD, &CMD_DATA[0], 3);
 }
 
@@ -219,7 +228,11 @@ void process_message_role(void *data)
 		pr_info("%s skip. already power role is set.\n", __func__);
 		return;
 	}
-		
+
+#ifdef CONFIG_MUIC_SM5705_SWITCH_CONTROL_GPIO
+	pr_info("%s call muic_GPIO_control(1) to keep usb path\n", __func__);
+	muic_GPIO_control(1);
+#endif
 	// 2. process power role
 	if (usbpd_data->func_state != State_PE_PRS_SNK_SRC_Source_on) {
 #if defined(CONFIG_DUAL_ROLE_USB_INTF)
@@ -290,7 +303,7 @@ void process_pd(void *data, u8 plug_attach_done, u8 *pdic_attach, MSG_IRQ_STATUS
 		process_message_role(usbpd_data);
 	} else ;
 
-	if (MSG_IRQ_State->BITS.Data_Flag_SRC_Capability)
+	if ((MSG_IRQ_State->BITS.Data_Flag_SRC_Capability || MSG_IRQ_State->BITS.Ctrl_Flag_PS_RDY) && !is_src)
 	{
 		uint8_t ReadMSG[32];
 		int available_pdo_num;
@@ -343,7 +356,7 @@ void process_pd(void *data, u8 plug_attach_done, u8 *pdic_attach, MSG_IRQ_STATUS
 	/* notify to battery */
 #ifdef CONFIG_USB_TYPEC_MANAGER_NOTIFIER
 	if (plug_attach_done) {
-		if (*pdic_attach) {
+		if (*pdic_attach  && !is_src && usbpd_data->pd_state == State_PE_SNK_Ready) {
 			/* PD charger is detected by PDIC */
 		} else if (!is_src && (usbpd_data->pd_state == State_PE_SNK_Wait_for_Capabilities ||
 			usbpd_data->pd_state == State_ErrorRecovery) &&

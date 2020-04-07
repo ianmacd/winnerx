@@ -382,7 +382,7 @@ int sde_smmu_map_dma_buf(struct dma_buf *dma_buf,
 
 #if defined(CONFIG_DISPLAY_SAMSUNG)
 	if (sec_debug_is_enabled())
-		ss_smmu_debug_map(SMMU_NRT_ROTATOR_DEBUG, domain, NULL, table);
+		ss_smmu_debug_map(SMMU_NRT_ROTATOR_DEBUG, table);
 #endif
 	return 0;
 }

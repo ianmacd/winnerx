@@ -30,13 +30,17 @@ static void samsung_pba_config(struct samsung_display_driver_data *vdd, void *ar
 {
 	struct sde_mdss_cfg *sde_cfg = (struct sde_mdss_cfg *)arg;
 
-	if (!IS_ERR_OR_NULL(sde_cfg)) {
-#if !defined(CONFIG_SEC_WINNERLTE_PROJECT) && !defined(CONFIG_SEC_WINNERX_PROJECT)
+	/* In pba booting mode, SS disables continuous splash mode.
+	 * But QC recommended to enable splash mode as default..
+	 * In case of splash enabled, it should not touch has_src_split  setitng..
+	 * Refer to case 03756419.
+	 */
+	if (!IS_ERR_OR_NULL(sde_cfg) && !vdd->samsung_enable_splash_pba) {
 		LCD_INFO("Disable source split\n");
 		sde_cfg->has_src_split = false;
-#endif
 	}
 }
+
 static void samsung_panel_init(struct samsung_display_driver_data *vdd)
 {
 	LCD_INFO("%s\n", ss_get_panel_name(vdd));

@@ -5,6 +5,7 @@
  *      Author: olic.moon
  */
 
+#include <linux/bio.h>
 #include "fscrypt_private.h"
 
 extern int dd_submit_bio(struct dd_info *info, struct bio *bio);
@@ -47,7 +48,9 @@ int update_encryption_context_with_dd_policy(
 	} else if (ret == sizeof(ctx)) {
 		ctx.knox_flags |= policy->flags << FSCRYPT_KNOX_FLG_DDAR_SHIFT & FSCRYPT_KNOX_FLG_DDAR_MASK;
 		dd_verbose("fscrypt_context.knox_flag:0x%08x\n", ctx.knox_flags);
-		ret = inode->i_sb->s_cop->set_context(inode, &ctx, sizeof(ctx), NULL);
+//		ret = inode->i_sb->s_cop->set_context(inode, &ctx, sizeof(ctx), NULL);
+		ret = inode->i_sb->s_cop->set_knox_context(inode, NULL, &ctx, sizeof(ctx), NULL);
+		dd_info("result of set knox context for ino(%ld) : %d\n", inode->i_ino, ret);
 	} else {
 		dd_error("failed to set dd policy. get_context rc:%d\n", ret);
 		ret = -EEXIST;
@@ -59,11 +62,16 @@ int update_encryption_context_with_dd_policy(
 
 	if (!ret) {
 		struct fscrypt_info	*ci = inode->i_crypt_info;
-		ci->ci_dd_info = alloc_dd_info(inode);
-		if (IS_ERR(ci->ci_dd_info)) {
-			dd_error("%s - failed to alloc dd info:%ld\n", __func__, inode->i_ino);
-			ret = -ENOMEM;
-			ci->ci_dd_info = NULL;
+		if (!ci) {
+			dd_error("failed to alloc dd_info: no fbe policy found\n");
+			ret = -EINVAL;
+		} else {
+			ci->ci_dd_info = alloc_dd_info(inode);
+			if (IS_ERR(ci->ci_dd_info)) {
+				dd_error("failed to alloc dd info:%ld\n", inode->i_ino);
+				ret = -ENOMEM;
+				ci->ci_dd_info = NULL;
+			}
 		}
 	}
 	return ret;
@@ -93,8 +101,72 @@ int fscrypt_dd_encrypted_inode(const struct inode *inode)
 	return 0;
 }
 
+struct inode *fscrypt_bio_get_inode(const struct bio *bio)
+{
+	if (!bio)
+		return NULL;
+	if (!bio_has_data((struct bio *)bio))
+		return NULL;
+	if (!bio->bi_io_vec)
+		return NULL;
+	if (!bio->bi_io_vec->bv_page)
+		return NULL;
+
+	if (PageAnon(bio->bi_io_vec->bv_page)) {
+		struct inode *inode;
+
+		/* Using direct-io (O_DIRECT) without page cache */
+		inode = dio_bio_get_inode((struct bio *)bio);
+		dd_verbose("inode on direct-io, inode = 0x%pK.\n", inode);
+
+		return inode;
+	}
+
+	if (!page_mapping(bio->bi_io_vec->bv_page))
+		return NULL;
+
+	return page_mapping(bio->bi_io_vec->bv_page)->host;
+}
+
+/**
+ * prevent merging bios from different files when either is ddar enabled
+ */
+bool fscrypt_dd_can_merge_bio(struct bio *bio, struct address_space *mapping) {
+	struct dd_info *info1, *info2;
+
+	if (!bio)
+		return true;
+
+	info1 = dd_get_info(fscrypt_bio_get_inode(bio));
+	info2 = dd_get_info(mapping->host);
+
+	if (info1 || info2) {
+		// either is ddar protected
+		if (!info1)
+			goto err_out;
+		if (!info2)
+			goto err_out;
+
+		if (info1->ino == info2->ino) {
+			dd_verbose("allowing bio merge ino:%ld\n", info1->ino);
+			return true;
+		}
+
+err_out:
+		dd_verbose("disallowing bio merge ino1:%ld ino2:%ld\n",
+				info1 ? info1->ino : -1, info2 ? info2->ino : -1);
+		return false;
+	}
+
+	// none is ddar enabled
+	return true;
+}
+
 void *dd_get_info(const struct inode *inode)
 {
+	if (!inode)
+		return NULL;
+
 	if (!inode->i_crypt_info)
 		return NULL;
 	return inode->i_crypt_info->ci_dd_info;
@@ -140,4 +212,28 @@ long fscrypt_dd_ioctl(unsigned int cmd, unsigned long *arg, struct inode *inode)
 int fscrypt_dd_submit_bio(struct inode *inode, struct bio *bio)
 {
 	return dd_submit_bio(dd_get_info(inode), bio);
+}
+
+int fscrypt_dd_may_submit_bio(struct bio *bio)
+{
+	struct inode *inode = fscrypt_bio_get_inode(bio);
+	if (!fscrypt_dd_encrypted_inode(inode))
+		return -EOPNOTSUPP;
+
+	return fscrypt_dd_submit_bio(inode, bio);
+}
+
+long fscrypt_dd_get_ino(struct bio *bio)
+{
+	struct inode *inode = fscrypt_bio_get_inode(bio);
+	if (fscrypt_dd_encrypted_inode(inode))
+		return inode->i_ino;
+
+	return 0;
+}
+
+int fscrypt_dd_encrypted(struct bio *bio)
+{
+	struct inode *inode = fscrypt_bio_get_inode(bio);
+	return fscrypt_dd_encrypted_inode(inode);
 }

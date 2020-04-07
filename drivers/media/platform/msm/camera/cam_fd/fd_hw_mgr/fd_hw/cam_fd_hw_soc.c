@@ -141,6 +141,83 @@ uint32_t cam_fd_soc_register_read(struct cam_hw_soc_info *soc_info,
 	return reg_value;
 }
 
+void cam_fd_soc_register_dump(struct cam_hw_info *fd_hw)
+{
+	struct cam_hw_soc_info *soc_info = NULL;
+	int32_t reg_index;
+	uint32_t reg_value, i, m = 0;
+
+	mutex_lock(&fd_hw->hw_mutex);
+	if (fd_hw->hw_state == CAM_HW_STATE_POWER_DOWN) {
+		CAM_INFO(CAM_FD, "power off state");
+		mutex_unlock(&fd_hw->hw_mutex);
+		return;
+	}
+
+	soc_info = &fd_hw->soc_info;
+
+	reg_index = CAM_FD_REG_CORE;
+
+	cam_io_dump(soc_info->reg_map[reg_index].mem_base, 0x00, (0x40 - 0x0) / 0x4);
+	
+	m = 0x400;
+	for (i = 0; i <= 34; i++) {
+		reg_value = cam_io_r_mb(
+			soc_info->reg_map[reg_index].mem_base + (m + 0x10*i));
+		CAM_INFO(CAM_FD, "Addr 0x%x: Val 0x%x",
+			soc_info->reg_map[reg_index].mem_base + (m + 0x10*i),
+			reg_value);
+	}
+
+	m = 0x404;
+	for (i = 0; i <= 34; i++) {
+		reg_value = cam_io_r_mb(
+			soc_info->reg_map[reg_index].mem_base + (m + 0x10*i));
+		CAM_INFO(CAM_FD, "Addr 0x%x: Val0x%x",
+			soc_info->reg_map[reg_index].mem_base + (m + 0x10*i),
+			reg_value);
+	}
+
+	m = 0x408;
+	for (i = 0; i <= 34; i++) {
+		reg_value = cam_io_r_mb(
+			soc_info->reg_map[reg_index].mem_base + (m + 0x10*i));
+		CAM_INFO(CAM_FD, "Addr 0x%x: Val0x%x",
+			soc_info->reg_map[reg_index].mem_base + (m + 0x10*i),
+			reg_value);
+	}
+
+	m = 0x40C;
+	for (i = 0; i <= 34; i++) {
+		reg_value = cam_io_r_mb(
+			soc_info->reg_map[reg_index].mem_base + (m + 0x10*i));
+		CAM_INFO(CAM_FD, "Addr 0x%x: Val 0x%x",
+			soc_info->reg_map[reg_index].mem_base + (m + 0x10*i),
+			reg_value);
+	}
+
+	m = 0x800;
+	for (i = 0; i <= 511; i++) {
+		reg_value = cam_io_r_mb(
+			soc_info->reg_map[reg_index].mem_base + (m + 0x4*i));
+		CAM_INFO(CAM_FD, "Addr 0x%x: Val 0x%x",
+			soc_info->reg_map[reg_index].mem_base + (m + 0x4*i),
+			reg_value);
+	}
+
+	reg_index = CAM_FD_REG_WRAPPER;
+
+	cam_io_dump(soc_info->reg_map[reg_index].mem_base, 0x00, (0xC - 0x0) / 0x4);
+	cam_io_dump(soc_info->reg_map[reg_index].mem_base, 0x10, (0x1C - 0x10) / 0x4);
+	cam_io_dump(soc_info->reg_map[reg_index].mem_base, 0x20, (0x28 - 0x20) / 0x4);
+	cam_io_dump(soc_info->reg_map[reg_index].mem_base, 0x34, (0x38 - 0x34) / 0x4);
+	cam_io_dump(soc_info->reg_map[reg_index].mem_base, 0x40, (0x44 - 0x40) / 0x4);
+	cam_io_dump(soc_info->reg_map[reg_index].mem_base, 0x48, (0x5C - 0x48) / 0x4);
+	cam_io_dump(soc_info->reg_map[reg_index].mem_base, 0x3FC, (0x400 - 0x3FC) / 0x4);
+
+	mutex_unlock(&fd_hw->hw_mutex);
+}
+
 int cam_fd_soc_enable_resources(struct cam_hw_soc_info *soc_info)
 {
 	struct cam_fd_soc_private *soc_private = soc_info->soc_private;

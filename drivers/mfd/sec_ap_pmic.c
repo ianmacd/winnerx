@@ -18,7 +18,7 @@
 #include <linux/device.h>
 #include <linux/proc_fs.h>
 #include <linux/input/qpnp-power-on.h>
-#include <linux/sec_crashkey.h>
+#include <linux/sec_debug.h>
 
 /* for enable/disable manual reset, from retail group's request */
 extern void do_keyboard_notifier(int onoff);

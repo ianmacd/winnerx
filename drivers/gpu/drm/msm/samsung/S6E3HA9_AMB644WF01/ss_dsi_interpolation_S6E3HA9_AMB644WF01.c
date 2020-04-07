@@ -50,7 +50,7 @@ static struct ss_interpolation_brightness_table hbm_interpolation_table[] = {
 	{486, 5, 800},
 };
 
-#if defined(CONFIG_MACH_BEYOND2QLTE_JPN_KDI) || defined(CONFIG_MACH_BEYOND2QLTE_JPN_DCM)
+#if defined(CONFIG_MACH_BEYOND2QLTE_JPN_KDI) || defined(CONFIG_MACH_BEYOND2QLTE_JPN_DCM) || defined(CONFIG_MACH_BEYOND2QLTE_JPN_DCMOLY)
 static struct ss_interpolation_brightness_table normal_interpolation_table[] = {
 	{0,		1,	2},
 	{7,		7,	3},

@@ -553,27 +553,49 @@ ssize_t s2mpb02_store(struct device *dev,
 	} else if (onoff == 1001) {
 		// level 1 (Flashlight level 1)
 		onoff = S2MPB02_TORCH_OUT_I_40MA;
-#if defined(CONFIG_SEC_BEYONDXQ_PROJECT)
+#if defined(CONFIG_SEC_BEYONDXQ_PROJECT) || defined(CONFIG_SEC_D2XQ_PROJECT) || defined(CONFIG_SEC_D2Q_PROJECT)\
+	|| defined(CONFIG_SEC_D1Q_PROJECT) || defined(CONFIG_SEC_D2XQ2_PROJECT) || defined(CONFIG_SEC_BLOOMQ_PROJECT)
 		onoff = S2MPB02_TORCH_OUT_I_60MA;
 #endif
+
 	} else if (onoff == 1002) {
 		// level 2 (Flashlight level 2)
 		onoff = S2MPB02_TORCH_OUT_I_60MA;
 #if defined(CONFIG_SEC_BEYONDXQ_PROJECT)
 		onoff = S2MPB02_TORCH_OUT_I_120MA;
+#elif defined(CONFIG_SEC_D2XQ_PROJECT) || defined(CONFIG_SEC_D2Q_PROJECT) || defined(CONFIG_SEC_D1Q_PROJECT)\
+	|| defined(CONFIG_SEC_D2XQ2_PROJECT) || defined(CONFIG_SEC_BLOOMQ_PROJECT)
+		onoff = S2MPB02_TORCH_OUT_I_100MA;
 #endif
 	} else if (onoff == 1003) {
 		// level 3
 		onoff = S2MPB02_TORCH_OUT_I_80MA;
+#if defined(CONFIG_SEC_D2XQ_PROJECT) || defined(CONFIG_SEC_D2Q_PROJECT) || defined(CONFIG_SEC_D1Q_PROJECT)\
+	|| defined(CONFIG_SEC_D2XQ2_PROJECT) || defined(CONFIG_SEC_BLOOMQ_PROJECT)
+		onoff = S2MPB02_TORCH_OUT_I_120MA;
+#endif
+#if defined(CONFIG_MACH_BLOOMQ_JPN_KDI)
+        onoff = S2MPB02_TORCH_OUT_I_60MA;
+#endif
 	} else if (onoff == 1004) {
 		// level 4 (Flashlight level 3)
 		onoff = S2MPB02_TORCH_OUT_I_100MA;
 #if defined(CONFIG_SEC_BEYONDXQ_PROJECT)
 		onoff = S2MPB02_TORCH_OUT_I_180MA;
+#elif defined(CONFIG_SEC_D2XQ_PROJECT) || defined(CONFIG_SEC_D2Q_PROJECT) || defined(CONFIG_SEC_D1Q_PROJECT)\
+	|| defined(CONFIG_SEC_D2XQ2_PROJECT) || defined(CONFIG_SEC_BLOOMQ_PROJECT)
+		onoff = S2MPB02_TORCH_OUT_I_140MA;
 #endif
 	} else if (onoff == 1005) {
 		// level 5
 		onoff = S2MPB02_TORCH_OUT_I_120MA;
+#if defined(CONFIG_SEC_D2XQ_PROJECT) || defined(CONFIG_SEC_D2Q_PROJECT) || defined(CONFIG_SEC_D1Q_PROJECT)\
+	|| defined(CONFIG_SEC_D2XQ2_PROJECT) || defined(CONFIG_SEC_BLOOMQ_PROJECT)
+		onoff = S2MPB02_TORCH_OUT_I_140MA;
+#endif
+#if defined(CONFIG_MACH_BLOOMQ_JPN_KDI)
+	onoff = S2MPB02_TORCH_OUT_I_60MA;
+#endif
 	} else if (onoff == 1006) {
 		// level 6 (Flashlight level 4)
 		onoff = S2MPB02_TORCH_OUT_I_160MA;
@@ -583,9 +605,15 @@ ssize_t s2mpb02_store(struct device *dev,
 	} else if (onoff == 1007) {
 		// level 7
 		onoff = S2MPB02_TORCH_OUT_I_180MA;
+#if defined(CONFIG_MACH_BLOOMQ_JPN_KDI)
+	onoff = S2MPB02_TORCH_OUT_I_60MA;
+#endif
 	} else if (onoff == 1008) {
 		// level 8
 		onoff = S2MPB02_TORCH_OUT_I_180MA;
+#if defined(CONFIG_MACH_BLOOMQ_JPN_KDI)
+	onoff = S2MPB02_TORCH_OUT_I_60MA;
+#endif
 	} else if (onoff == 1009) {
 		// level 9 (Flashlight level 5)
 		onoff = S2MPB02_TORCH_OUT_I_200MA;
@@ -595,6 +623,9 @@ ssize_t s2mpb02_store(struct device *dev,
 	} else if (onoff == 1010) {
 		// level 10
 		onoff = S2MPB02_TORCH_OUT_I_200MA;
+#if defined(CONFIG_MACH_BLOOMQ_JPN_KDI)
+	onoff = S2MPB02_TORCH_OUT_I_60MA;
+#endif
 	} else if ((2001 <= onoff) && (onoff <= 2015)) {
 		// Torch ON for tunning : Step 20mA ~ 300mA
 		onoff = onoff - 2000;

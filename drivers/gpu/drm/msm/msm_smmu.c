@@ -41,6 +41,8 @@
 #define SZ_2G	(((size_t) SZ_1G) * 2)
 #endif
 
+int smmu_fault_rec = 0;
+
 struct msm_smmu_client {
 	struct device *dev;
 	struct dma_iommu_mapping *mmu_mapping;
@@ -278,7 +280,7 @@ static int msm_smmu_map_dma_buf(struct msm_mmu *mmu, struct sg_table *sgt,
 
 #if defined(CONFIG_DISPLAY_SAMSUNG)
 	if (sec_debug_is_enabled() && sgt && sgt->sgl)
-		ss_smmu_debug_map(SMMU_RT_DISPLAY_DEBUG, 0, NULL, sgt);
+		ss_smmu_debug_map(SMMU_RT_DISPLAY_DEBUG, sgt);
 #endif
 	return 0;
 }
@@ -484,7 +486,7 @@ static int msm_smmu_fault_handler(struct iommu_domain *domain,
 	SDE_EVT32(iova, flags);
 	DRM_ERROR("trigger dump, iova=0x%08lx, flags=0x%x\n", iova, flags);
 	DRM_ERROR("SMMU device:%s", client->dev ? client->dev->kobj.name : "");
-
+	smmu_fault_rec = 1;
 	/* generate dump, but no panic */
 #if defined(CONFIG_DISPLAY_SAMSUNG)
 	ss_smmu_debug_log();

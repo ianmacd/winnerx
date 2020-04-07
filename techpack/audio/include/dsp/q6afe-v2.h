@@ -385,6 +385,7 @@ int afe_port_stop_nowait(int port_id);
 int afe_apply_gain(u16 port_id, u16 gain);
 int afe_q6_interface_prepare(void);
 int afe_q6_update_dyn_bitrate(uint32_t bitrate);
+int afe_q6_slimbus_update_dyn_bitrate(uint32_t bitrate);
 int afe_q6_update_mtu(int mtu);
 int afe_q6_update_a2dp_suspend(int a2dp_suspend);
 int afe_q6_update_enc_format(uint32_t enc_format);

@@ -603,5 +603,6 @@ int msm_pcm_routing_get_pp_ch_cnt(int fe_id, int session_type);
 #ifdef CONFIG_SEC_SND_ADAPTATION
 int q6audio_get_copp_idx_from_port_id(int port_id, int func_type,
 	int sb_val, int *copp_idx);
+int sec_get_copp_idx(int port_id, int func_type);
 #endif
 #endif /*_MSM_PCM_H*/

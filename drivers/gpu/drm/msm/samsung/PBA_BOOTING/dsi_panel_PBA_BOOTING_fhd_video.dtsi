@@ -23,7 +23,7 @@
 		label = "ss_dsi_panel_PBA_BOOTING_FHD";
 
 		/* SDM845 drm nodes */
-		qcom,display-topology = <1 1 1>, <2 2 1>;
+		qcom,display-topology = <1 0 1>, <2 0 1>;
 		qcom,default-topology-index = <0>;
 
 		qcom,mdss-dsi-panel-type = "dsi_video_mode";

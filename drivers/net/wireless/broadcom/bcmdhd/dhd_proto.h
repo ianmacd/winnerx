@@ -27,7 +27,7 @@
  *
  * <<Broadcom-WL-IPTag/Open:>>
  *
- * $Id: dhd_proto.h 802611 2019-02-03 13:06:48Z $
+ * $Id: dhd_proto.h 814912 2019-04-15 10:38:59Z $
  */
 
 #ifndef _dhd_proto_h_
@@ -173,6 +173,13 @@ extern int dhd_prot_init_info_rings(dhd_pub_t *dhd);
 extern int dhd_prot_init_hp2p_rings(dhd_pub_t *dhd);
 #endif /* DHD_HP2P */
 
+extern int dhd_prot_check_tx_resource(dhd_pub_t *dhd);
+
+extern void dhd_prot_update_pktid_txq_stop_cnt(dhd_pub_t *dhd);
+extern void dhd_prot_update_pktid_txq_start_cnt(dhd_pub_t *dhd);
+#else
+static INLINE void dhd_prot_update_pktid_txq_stop_cnt(dhd_pub_t *dhd) { return; }
+static INLINE void dhd_prot_update_pktid_txq_start_cnt(dhd_pub_t *dhd) { return; }
 #endif /* BCMPCIE */
 
 #ifdef DHD_LB

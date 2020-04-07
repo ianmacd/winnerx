@@ -59,6 +59,7 @@ typedef enum {
 #if defined(CONFIG_MUIC_SUPPORT_KEYBOARDDOCK)
 typedef enum {
 	KEYBOARD_NOTIFY_DEV_TSP = 0,
+	KEYBOARD_NOTIFY_DEV_WACOM,
 } keyboard_notifier_device_t;
 #endif
 
@@ -93,11 +94,12 @@ extern void muic_pdic_notifier_attach_attached_dev(muic_attached_dev_t new_dev);
 extern void muic_pdic_notifier_detach_attached_dev(muic_attached_dev_t new_dev);
 extern void muic_notifier_logically_attach_attached_dev(muic_attached_dev_t new_dev);
 extern void muic_notifier_logically_detach_attached_dev(muic_attached_dev_t cur_dev);
+extern void muic_notifier_chg_off(muic_attached_dev_t new_dev);
 #if defined(CONFIG_MUIC_SUPPORT_KEYBOARDDOCK)
 extern void keyboard_notifier_attach(void);
 extern void keyboard_notifier_detach(void);
 #endif
-#if defined(CONFIG_CCIC_S2MU004)
+#if defined(CONFIG_CCIC_S2MU107) || defined(CONFIG_CCIC_S2MU106)
 extern int muic_ccic_notifier_register(struct notifier_block *nb,
 		notifier_fn_t notifier, muic_notifier_device_t listener);
 extern int muic_ccic_notifier_unregister(struct notifier_block *nb);

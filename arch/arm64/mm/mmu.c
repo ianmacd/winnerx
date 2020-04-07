@@ -68,22 +68,12 @@ EXPORT_SYMBOL(kimage_voffset);
  * Empty_zero_page is a special page that is used for zero-initialized data
  * and COW.
  */
-unsigned long empty_zero_page[PAGE_SIZE / sizeof(unsigned long)] __page_aligned_bss;
+unsigned long empty_zero_page[PAGE_SIZE / sizeof(unsigned long)] __page_aligned_rkp_bss;
 EXPORT_SYMBOL(empty_zero_page);
 
-#ifdef CONFIG_UH_RKP
-u32 rkp_ro_buf_ready = 0;
-#endif
-
-#ifdef CONFIG_UH_RKP
-extern pte_t bm_pte[];
-extern pmd_t bm_pmd[];
-extern pud_t bm_pud[];
-#else
-static pte_t bm_pte[PTRS_PER_PTE] __page_aligned_bss;
-static pmd_t bm_pmd[PTRS_PER_PMD] __page_aligned_bss __maybe_unused;
-static pud_t bm_pud[PTRS_PER_PUD] __page_aligned_bss __maybe_unused;
-#endif
+static pte_t bm_pte[PTRS_PER_PTE] __page_aligned_rkp_bss;
+static pmd_t bm_pmd[PTRS_PER_PMD] __page_aligned_rkp_bss __maybe_unused;
+static pud_t bm_pud[PTRS_PER_PUD] __page_aligned_rkp_bss __maybe_unused;
 
 struct dma_contig_early_reserve {
 	phys_addr_t base;
@@ -155,6 +145,15 @@ static phys_addr_t __init early_pgtable_alloc(void)
 	return phys;
 }
 
+#ifdef CONFIG_UH_RKP
+static phys_addr_t rkp_ro_alloc_phys(void)
+{
+	phys_addr_t ret = 0;
+	uh_call(UH_APP_RKP, RKP_RKP_ROBUFFER_ALLOC, (u64)&ret, 0, 0, 0);
+	return ret;
+}
+#endif
+
 static bool pgattr_change_is_safe(u64 old, u64 new)
 {
 	/*
@@ -177,95 +176,6 @@ static bool pgattr_change_is_safe(u64 old, u64 new)
 
 	return ((old ^ new) & ~mask) == 0;
 }
-
-#ifdef CONFIG_UH_RKP
-spinlock_t ro_rkp_pages_lock = __SPIN_LOCK_UNLOCKED();
-char ro_pages_stat[RO_PAGES_12G] = {0};
-unsigned int ro_alloc_avail = 0;
-
-static phys_addr_t __init rkp_ro_alloc_phys(void)
-{
-	unsigned long flags;
-	unsigned int i = 0;
-	phys_addr_t alloc_addr = 0;
-	bool found = false;
-
-	if(!rkp_ro_buf_ready)
-		return alloc_addr;
-
-	spin_lock_irqsave(&ro_rkp_pages_lock, flags);
-	while(i < RO_PAGES) {
-		if(ro_pages_stat[ro_alloc_avail] == false){
-			found = true;
-			if(i == RO_PAGES - 1)
-				pr_err("ro buf slot is last one\n");
-			break;
-		}
-		ro_alloc_avail = (ro_alloc_avail + 1) % RO_PAGES;
-		i++;
-	}
-
-	if(found) {
-		alloc_addr = (phys_addr_t)((u64)RKP_ROBUF_START + (ro_alloc_avail << PAGE_SHIFT));
-		ro_pages_stat[ro_alloc_avail] = true;
-		ro_alloc_avail = (ro_alloc_avail + 1) % RO_PAGES;
-	}
-	spin_unlock_irqrestore(&ro_rkp_pages_lock, flags);
-
-	return alloc_addr;
-}
-void *rkp_ro_alloc(void)
-{
-	unsigned long flags;
-	unsigned int i = 0;
-	void *alloc_addr = NULL;
-	bool found = false;
-
-	if(!rkp_ro_buf_ready)
-		return alloc_addr;
-	spin_lock_irqsave(&ro_rkp_pages_lock, flags);
-	while(i < RO_PAGES) {
-		if(ro_pages_stat[ro_alloc_avail] == false){
-			found = true;
-			if(i == RO_PAGES - 1)
-				pr_err("ro buf slot is last one\n");
-			break;
-		}
-		ro_alloc_avail = (ro_alloc_avail + 1) % RO_PAGES;
-		i++;
-	}
-
-	if(found) {
-		alloc_addr = (void *)((u64)RKP_RBUF_VA + (ro_alloc_avail << PAGE_SHIFT));
-		ro_pages_stat[ro_alloc_avail] = true;
-		ro_alloc_avail = (ro_alloc_avail + 1) % RO_PAGES;
-	}
-	spin_unlock_irqrestore(&ro_rkp_pages_lock, flags);
-
-	return alloc_addr;
-}
-
-void rkp_ro_free(void *free_addr)
-{
-	unsigned int i;
-	unsigned long flags;
-
-	i =  ((u64)free_addr - (u64)RKP_RBUF_VA) >> PAGE_SHIFT;
-	spin_lock_irqsave(&ro_rkp_pages_lock, flags);
-	ro_pages_stat[i] = 0;
-	ro_alloc_avail = i;
-	spin_unlock_irqrestore(&ro_rkp_pages_lock, flags);
-}
-
-unsigned int is_rkp_ro_page(u64 addr)
-{
-	if ((addr >= (u64)RKP_RBUF_VA)
-		&& (addr < (u64)(RKP_RBUF_VA + RKP_ROBUF_SIZE)))
-		return 1;
-	else
-		return 0;
-}
-#endif
 
 static void init_pte(pmd_t *pmd, unsigned long addr, unsigned long end,
 		     phys_addr_t phys, pgprot_t prot)
@@ -378,10 +288,8 @@ static void alloc_init_cont_pmd(pud_t *pud, unsigned long addr,
 #ifdef CONFIG_UH_RKP
 		pmd_phys = rkp_ro_alloc_phys();
 		if (!pmd_phys)
-			pmd_phys = pgtable_alloc();
-#else
-		pmd_phys = pgtable_alloc();
 #endif
+		pmd_phys = pgtable_alloc();
 		__pud_populate(pud, pmd_phys, PUD_TYPE_TABLE);
 	}
 	BUG_ON(pud_bad(*pud));
@@ -405,16 +313,15 @@ static void alloc_init_cont_pmd(pud_t *pud, unsigned long addr,
 static inline bool use_1G_block(unsigned long addr, unsigned long next,
 			unsigned long phys)
 {
+#ifdef CONFIG_UH_RKP
+	return false;    
+#endif
 	if (PAGE_SHIFT != 12)
 		return false;
 
 	if (((addr | next | phys) & ~PUD_MASK) != 0)
 		return false;
 
-#ifdef CONFIG_UH_RKP
-	if ((addr <= (u64)_stext) && ((u64)_stext <= next))
-		return false;    
-#endif
 	return true;
 }
 
@@ -498,19 +405,21 @@ static void __create_pgd_mapping(pgd_t *pgdir, phys_addr_t phys,
 
 static phys_addr_t pgd_pgtable_alloc(void)
 {
-#ifdef CONFIG_UH_RKP
-	void *ptr = rkp_ro_alloc();
-	if (!ptr)
-		ptr = (void *)__get_free_page(PGALLOC_GFP);
-#else
 	void *ptr = (void *)__get_free_page(PGALLOC_GFP);
-#endif
 	if (!ptr || !pgtable_page_ctor(virt_to_page(ptr)))
 		BUG();
 
 	/* Ensure the zeroed page is visible to the page table walker */
 	dsb(ishst);
 	return __pa(ptr);
+}
+
+void create_pgtable_mapping(phys_addr_t start, phys_addr_t end)
+{
+	unsigned long virt = (unsigned long)phys_to_virt(start);
+
+	__create_pgd_mapping(init_mm.pgd, start, virt, end - start,
+				PAGE_KERNEL, NULL, 0);
 }
 
 /*
@@ -665,24 +574,12 @@ static void __init map_kernel_segment(pgd_t *pgd, void *va_start, void *va_end,
 {
 	phys_addr_t pa_start = __pa_symbol(va_start);
 	unsigned long size = va_end - va_start;
-#ifdef CONFIG_UH_RKP
-	void * temp;
-#endif
 
 	BUG_ON(!PAGE_ALIGNED(pa_start));
 	BUG_ON(!PAGE_ALIGNED(size));
 
 	__create_pgd_mapping(pgd, pa_start, (unsigned long)va_start, size, prot,
 			     early_pgtable_alloc, flags);
-
-#ifdef CONFIG_UH_RKP
-	if (va_start == _text) {
-		temp = va_start;
-		va_start = (void *)((unsigned long)va_start & (unsigned long)PMD_MASK);
-		pa_start = (phys_addr_t)((unsigned long)pa_start & (unsigned long)PMD_MASK);
-		size = size + (unsigned long)(temp - va_start);
-	}
-#endif
 
 	if (!(vm_flags & VM_NO_GUARD))
 		size += PAGE_SIZE;
@@ -695,6 +592,33 @@ static void __init map_kernel_segment(pgd_t *pgd, void *va_start, void *va_end,
 
 	vm_area_add_early(vma);
 }
+
+#ifdef CONFIG_UH_RKP
+static void __init map_kernel_text_segment(pgd_t *pgd, void *va_start, void *va_end,
+				      pgprot_t prot, struct vm_struct *vma,
+				      int flags, unsigned long vm_flags)
+{
+	phys_addr_t pa_start = __pa_symbol(va_start);
+	unsigned long size = va_end - va_start;
+
+	BUG_ON(!PAGE_ALIGNED(pa_start));
+	BUG_ON(!PAGE_ALIGNED(size));
+
+	__create_pgd_mapping(pgd, pa_start, (unsigned long)va_start, size, prot,
+			     rkp_ro_alloc_phys, flags);
+
+	if (!(vm_flags & VM_NO_GUARD))
+		size += PAGE_SIZE;
+
+	vma->addr	= (void *)((unsigned long)va_start & PMD_MASK);
+	vma->phys_addr	= (phys_addr_t)((unsigned long)pa_start & PMD_MASK);
+	vma->size	= size + (unsigned long)va_start - (unsigned long)vma->addr;
+	vma->flags	= VM_MAP | vm_flags;
+	vma->caller	= __builtin_return_address(0);
+
+	vm_area_add_early(vma);
+}
+#endif
 
 static int __init parse_rodata(char *arg)
 {
@@ -715,14 +639,9 @@ static int __init map_entry_trampoline(void)
 
 	/* Map only the text into the trampoline page table */
 	memset(tramp_pg_dir, 0, PGD_SIZE);
-#ifdef CONFIG_UH_RKP
-	rkp_ro_buf_ready = 0;
-#endif
 	__create_pgd_mapping(tramp_pg_dir, pa_start, TRAMP_VALIAS, PAGE_SIZE,
 			     prot, pgd_pgtable_alloc, 0);
-#ifdef CONFIG_UH_RKP
-	rkp_ro_buf_ready = 1;
-#endif
+
 	/* Map both the text and data into the kernel page table */
 	__set_fixmap(FIX_ENTRY_TRAMP_TEXT, pa_start, prot);
 	if (IS_ENABLED(CONFIG_RANDOMIZE_BASE)) {
@@ -745,9 +664,7 @@ static void __init map_kernel(pgd_t *pgd)
 {
 	static struct vm_struct vmlinux_text, vmlinux_rodata, vmlinux_inittext,
 				vmlinux_initdata, vmlinux_data;
-#ifdef CONFIG_UH_RKP
-	static struct vm_struct vmlinux_rkp;
-#endif
+
 	/*
 	 * External debuggers may need to write directly to the text
 	 * mapping to install SW breakpoints. Allow this (only) when
@@ -759,11 +676,12 @@ static void __init map_kernel(pgd_t *pgd)
 	 * Only rodata will be remapped with different permissions later on,
 	 * all other segments are allowed to use contiguous mappings.
 	 */
+#ifdef CONFIG_UH_RKP
+	map_kernel_text_segment(pgd, _text, _etext, text_prot, &vmlinux_text, 0,
+			   VM_NO_GUARD);
+#else
 	map_kernel_segment(pgd, _text, _etext, text_prot, &vmlinux_text, 0,
 			   VM_NO_GUARD);
-#ifdef CONFIG_UH_RKP
-	map_kernel_segment(pgd, _etext, __start_rodata, PAGE_KERNEL, 
-			   &vmlinux_rkp, 0, VM_NO_GUARD);
 #endif
 	map_kernel_segment(pgd, __start_rodata, __inittext_begin, PAGE_KERNEL,
 			   &vmlinux_rodata, NO_CONT_MAPPINGS, VM_NO_GUARD);
@@ -812,6 +730,10 @@ void __init paging_init(void)
 	pgd_phys = early_pgtable_alloc();
 	pgd = pgd_set_fixmap(pgd_phys);
 
+#ifdef CONFIG_UH_RKP
+	rkp_robuffer_init();
+#endif
+
 	map_kernel(pgd);
 	map_mem(pgd);
 
@@ -829,14 +751,12 @@ void __init paging_init(void)
 
 	pgd_clear_fixmap();
 	memblock_free(pgd_phys, PAGE_SIZE);
-#ifdef CONFIG_UH_RKP
-	memset(RKP_RBUF_VA, 0, RKP_ROBUF_SIZE);
-	rkp_ro_buf_ready = 1;
-#else
+
 	/*
 	 * We only reuse the PGD from the swapper_pg_dir, not the pud + pmd
 	 * allocated with it.
 	 */
+#ifndef CONFIG_UH_RKP
 	memblock_free(__pa_symbol(swapper_pg_dir) + PAGE_SIZE,
 		      SWAPPER_DIR_SIZE - PAGE_SIZE);
 #endif

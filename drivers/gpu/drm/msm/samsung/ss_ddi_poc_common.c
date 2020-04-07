@@ -796,12 +796,13 @@ static int poc_get_efs_image_index_org(char *filename, int *value)
 
 	memset(buf, 0, sizeof(buf));
 	nread = vfs_read(filp, (char __user *)buf, fsize, &filp->f_pos);
-	buf[nread] = '\0';
-	if (nread != fsize) {
+	if ((nread != fsize) || (nread < 0)) {
 		pr_err("%s failed to read (ret %d)\n", __func__, nread);
 		ret = -EPOCEFS_READ;
 		goto exit;
 	}
+
+	buf[nread] = '\0';
 
 	rc = sscanf(buf, "%c %d %d", &binary, &image_index, &chksum);
 	if (rc != 3) {
@@ -862,12 +863,13 @@ static int poc_get_efs_image_index(char *filename, int *value)
 
 	memset(buf, 0, sizeof(buf));
 	nread = vfs_read(filp, (char __user *)buf, fsize, &filp->f_pos);
-	buf[nread] = '\0';
-	if (nread != fsize) {
+	if ((nread != fsize) || (nread < 0)) {
 		pr_err("%s failed to read (ret %d)\n", __func__, nread);
 		ret = -EPOCEFS_READ;
 		goto exit;
 	}
+
+	buf[nread] = '\0';
 
 	rc = sscanf(buf, "%d,%d", &image_index, &seek);
 	if (rc != 2) {

@@ -163,6 +163,9 @@ extern int get_booster(struct otg_notify *n);
 extern int get_usb_mode(struct otg_notify *n);
 extern unsigned long get_cable_type(struct otg_notify *n);
 extern int is_usb_host(struct otg_notify *n);
+extern void send_usb_audio_uevent(struct usb_device *dev);
+extern int send_usb_notify_uevent
+		(struct otg_notify *n, char *envp_ext[]);
 extern void *get_notify_data(struct otg_notify *n);
 extern void set_notify_data(struct otg_notify *n, void *data);
 extern struct otg_notify *get_otg_notify(void);
@@ -195,6 +198,9 @@ static inline int get_booster(struct otg_notify *n) {return 0; }
 static inline int get_usb_mode(struct otg_notify *n) {return 0; }
 static inline unsigned long get_cable_type(struct otg_notify *n) {return 0; }
 static inline int is_usb_host(struct otg_notify *n) {return 0; }
+static inline void send_usb_audio_uevent(struct usb_device *dev) {}
+static inline int send_usb_notify_uevent
+			(struct otg_notify *n, char *envp_ext[]) {return 0; }
 static inline void *get_notify_data(struct otg_notify *n) {return NULL; }
 static inline void set_notify_data(struct otg_notify *n, void *data) {}
 static inline struct otg_notify *get_otg_notify(void) {return NULL; }

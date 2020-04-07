@@ -237,6 +237,18 @@ config FOLDER_HALL
 	help
 	  Enable FOLDER Hall Feature
 
+config LOGICAL_HALL
+	bool "LOGICAL HALL"
+	default n
+	help
+	  Enable LOGICAL Hall Feature
+
+config WACOM_HALL
+	bool "WACOM HALL"
+	default n
+	help
+	  Enable WACOM Hall Feature
+
 config KEYBOARD_GPIO
 	tristate "GPIO Buttons"
 	depends on GPIOLIB || COMPILE_TEST
@@ -782,13 +794,7 @@ config KEYBOARD_BCM
 	  To compile this driver as a module, choose M here: the
 	  module will be called bcm-keypad.
 
-config INPUT_NDT
-	tristate "NDT driver"
-	depends on I2C
-	help
-	  Say Y here if you want support for NDT controllers.
-          If unsure, say N.
-
 source "drivers/input/keyboard/stm/fsr1ad04/Kconfig"
+source "drivers/input/keyboard/stm/stm32l0/Kconfig"
 
 endif

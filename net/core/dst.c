@@ -91,9 +91,6 @@ void dst_init(struct dst_entry *dst, struct dst_ops *ops,
 	dst->next = NULL;
 	if (!(flags & DST_NOCOUNT))
 		dst_entries_add(ops, 1);
-
-	if (dev && strstr(dev->name, "rmnet"))
-		net_log("dst_init() : %s, 0x%p, 0x%p\n", dev->name, dev, dst);
 }
 EXPORT_SYMBOL(dst_init);
 
@@ -187,10 +184,8 @@ void dst_release(struct dst_entry *dst)
 		if (unlikely(newrefcnt < 0))
 			net_warn_ratelimited("%s: dst:%p refcnt:%d\n",
 					     __func__, dst, newrefcnt);
-		if (!newrefcnt) {
-			net_log("dst_release() : dst:%p\n", dst);
+		if (!newrefcnt)
 			call_rcu(&dst->rcu_head, dst_destroy_rcu);
-		}
 	}
 }
 EXPORT_SYMBOL(dst_release);
@@ -204,10 +199,8 @@ void dst_release_immediate(struct dst_entry *dst)
 		if (unlikely(newrefcnt < 0))
 			net_warn_ratelimited("%s: dst:%p refcnt:%d\n",
 					     __func__, dst, newrefcnt);
-		if (!newrefcnt) {
-			net_log("dst_release_immediate() : dst:%p\n", dst);
+		if (!newrefcnt)
 			dst_destroy(dst);
-		}
 	}
 }
 EXPORT_SYMBOL(dst_release_immediate);

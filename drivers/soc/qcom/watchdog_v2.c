@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2018, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2019, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -36,11 +36,7 @@
 #include <linux/cpumask.h>
 #include <uapi/linux/sched/types.h>
 
-#ifdef CONFIG_SEC_DEBUG
-#include <linux/sec_bsp.h>
 #include <linux/sec_debug.h>
-#include <linux/sec_debug_summary.h>
-#endif
 
 #define MODULE_NAME "msm_watchdog"
 #define WDT0_ACCSCSSNBARK_INT 0
@@ -106,6 +102,9 @@ struct msm_watchdog_data {
 	unsigned long long ping_start[NR_CPUS];
 	unsigned long long ping_end[NR_CPUS];
 	unsigned int cpu_scandump_sizes[NR_CPUS];
+
+	/* When single buffer is used to collect Scandump */
+	unsigned int scandump_size;
 };
 
 #ifdef CONFIG_SEC_DEBUG
@@ -375,10 +374,13 @@ EXPORT_SYMBOL(emerg_pet_watchdog);
 
 static void pet_watchdog(struct msm_watchdog_data *wdog_dd)
 {
-	int slack, i, count, prev_count = 0, last_count = 0;
+	int slack, i, count, prev_count = 0;
 	unsigned long long time_ns;
 	unsigned long long slack_ns;
 	unsigned long long bark_time_ns = wdog_dd->bark_time * 1000000ULL;
+#ifdef CONFIG_SEC_DEBUG
+	static int last_count;
+#endif
 
 	for (i = 0; i < 2; i++) {
 		count = (__raw_readl(wdog_dd->base + WDT0_STS) >> 1) & 0xFFFFF;
@@ -396,19 +398,17 @@ static void pet_watchdog(struct msm_watchdog_data *wdog_dd)
 	if (slack_ns < wdog_dd->min_slack_ns)
 		wdog_dd->min_slack_ns = slack_ns;
 	wdog_dd->last_pet = time_ns;
-#ifdef CONFIG_SEC_DEBUG
-	last_count = count;
 
+#ifdef CONFIG_SEC_DEBUG
 	pr_err("[%s] last_count : %x, new_count : %x, bark_time : %x, "
 	       "bite_time : %x\n", __func__, last_count, count,
 	       __raw_readl(wdog_dd->base + WDT0_BARK_TIME),
 	       __raw_readl(wdog_dd->base + WDT0_BITE_TIME));
 	sec_debug_save_last_pet(time_ns);
-
+	last_count = count;
 #ifdef CONFIG_SEC_DEBUG_PWDT
 	sec_debug_check_pwdt();
 #endif
-
 #endif
 }
 
@@ -609,13 +609,7 @@ static void configure_bark_dump(struct msm_watchdog_data *wdog_dd)
 	if (!cpu_buf)
 		goto out1;
 
-#ifdef CONFIG_SEC_DEBUG
-	sec_debug_summary_bark_dump((unsigned long)cpu_data,
-				(unsigned long)virt_to_phys(cpu_data),
-				(unsigned long)cpu_buf,
-				(unsigned long)virt_to_phys(cpu_buf),
-				MAX_CPU_CTX_SIZE);
-#endif
+	sec_debug_summary_bark_dump(cpu_data, cpu_buf, MAX_CPU_CTX_SIZE);
 
 	for_each_cpu(cpu, cpu_present_mask) {
 		cpu_data[cpu].addr = virt_to_phys(cpu_buf +
@@ -647,6 +641,38 @@ out0:
 	return;
 }
 
+static void register_scan_dump(struct msm_watchdog_data *wdog_dd)
+{
+	static void *dump_addr;
+	int ret;
+	struct msm_dump_entry dump_entry;
+	struct msm_dump_data *dump_data;
+
+	dump_data = kzalloc(sizeof(struct msm_dump_data), GFP_KERNEL);
+	if (!dump_data)
+		return;
+	dump_addr = kzalloc(wdog_dd->scandump_size, GFP_KERNEL);
+	if (!dump_addr)
+		goto err0;
+
+	dump_data->addr = virt_to_phys(dump_addr);
+	dump_data->len = wdog_dd->scandump_size;
+	strlcpy(dump_data->name, "KSCANDUMP", sizeof(dump_data->name));
+
+	dump_entry.id = MSM_DUMP_DATA_SCANDUMP;
+	dump_entry.addr = virt_to_phys(dump_data);
+	ret = msm_dump_data_register(MSM_DUMP_TABLE_APPS, &dump_entry);
+	if (ret) {
+		pr_err("Registering scandump region failed\n");
+		goto err1;
+	}
+	return;
+err1:
+	kfree(dump_addr);
+err0:
+	kfree(dump_data);
+}
+
 static void configure_scandump(struct msm_watchdog_data *wdog_dd)
 {
 	int ret;
@@ -656,6 +682,11 @@ static void configure_scandump(struct msm_watchdog_data *wdog_dd)
 	static dma_addr_t dump_addr;
 	static void *dump_vaddr;
 	unsigned int scandump_size;
+
+	if (wdog_dd->scandump_size) {
+		register_scan_dump(wdog_dd);
+		return;
+	}
 
 	for_each_cpu(cpu, cpu_present_mask) {
 		scandump_size = wdog_dd->cpu_scandump_sizes[cpu];
@@ -810,7 +841,7 @@ static void dump_pdata(struct msm_watchdog_data *pdata)
 								pdata->base);
 }
 
-#ifdef CONFIG_USER_RESET_DEBUG_TEST
+#ifdef CONFIG_SEC_USER_RESET_DEBUG_TEST
 void force_watchdog_bark(void)
 {
 	u64 timeout;
@@ -897,14 +928,22 @@ static int msm_wdog_dt_to_pdata(struct platform_device *pdev,
 	num_scandump_sizes = of_property_count_elems_of_size(node,
 							"qcom,scandump-sizes",
 							sizeof(u32));
-	if (num_scandump_sizes < 0 || num_scandump_sizes != NR_CPUS)
+	if ((num_scandump_sizes < 0) || ((num_scandump_sizes != 1) &&
+				(num_scandump_sizes != NR_CPUS))) {
 		dev_info(&pdev->dev, "%s scandump sizes property not correct\n",
 			__func__);
-	else
+	} else if (num_scandump_sizes == 1) {
+		if (of_property_read_u32(node, "qcom,scandump-sizes",
+					 &pdata->scandump_size))
+			dev_info(&pdev->dev,
+				 "No need to allocate memory for scandumps\n");
+	} else {
 		for_each_cpu(cpu, cpu_present_mask)
 			of_property_read_u32_index(node, "qcom,scandump-sizes",
 						   cpu,
 					&pdata->cpu_scandump_sizes[cpu]);
+	}
+
 	pdata->irq_ppi = irq_is_percpu(pdata->bark_irq);
 	dump_pdata(pdata);
 	return 0;
@@ -952,8 +991,7 @@ err:
 }
 
 static const struct dev_pm_ops msm_watchdog_dev_pm_ops = {
-	.suspend_noirq = msm_watchdog_suspend,
-	.resume_noirq = msm_watchdog_resume,
+	SET_NOIRQ_SYSTEM_SLEEP_PM_OPS(msm_watchdog_suspend, msm_watchdog_resume)
 };
 
 static struct platform_driver msm_watchdog_driver = {

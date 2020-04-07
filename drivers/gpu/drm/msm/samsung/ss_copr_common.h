@@ -19,6 +19,8 @@ enum COPR_VER {
 	COPR_VER_1P0 = 0, 	/* BEYOND0 */
 	COPR_VER_2P0,	 	/* STAR, CROWN */
 	COPR_VER_3P0, 		/* BEYOND1/2, WINNER - COPR_1121 */
+	COPR_VER_4P0, 		/* A91, S6E3FA9 */
+	COPR_VER_5P0, 		/* Hubble, S6E3HAB */
 };
 
 /* MAX COPR ROI is from copr ver. 3.0 */

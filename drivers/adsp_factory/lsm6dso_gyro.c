@@ -21,8 +21,7 @@
 #define ST_FAIL 0
 #define STARTUP_BIT_FAIL 2
 #define OIS_ST_BIT_SET 3
-#define ST_ZRO_MIN (-15) /* HQE request */
-#define ST_ZRO_MAX 15 /* HQE request */
+#define G_ZRL_DELTA_FAIL 4
 #define SELFTEST_REVISED 1
 
 static ssize_t gyro_vendor_show(struct device *dev,
@@ -98,7 +97,7 @@ static ssize_t gyro_selftest_show(struct device *dev,
 
 	while (!(data->ready_flag[MSG_TYPE_ST_SHOW_DATA] & 1 << MSG_GYRO) &&
 		cnt++ < TIMEOUT_CNT)
-		msleep(20);
+		msleep(25);
 
 	data->ready_flag[MSG_TYPE_ST_SHOW_DATA] &= ~(1 << MSG_GYRO);
 
@@ -120,39 +119,22 @@ static ssize_t gyro_selftest_show(struct device *dev,
 			data->msg_buf[MSG_GYRO][4]);
 
 		if (data->msg_buf[MSG_GYRO][5] == OIS_ST_BIT_SET)
-			pr_info("[FACTORY] %s - OIS_ST_BIT_SET fail\n",
-				__func__);
-
-		/* getting the register dump for fail case */
-		adsp_unicast(NULL, 0, MSG_ACCEL, 0, MSG_TYPE_GET_DHR_INFO);
-		while (!(data->ready_flag[MSG_TYPE_GET_DHR_INFO] & 1 << MSG_ACCEL) &&
-			cnt++ < TIMEOUT_CNT)
-			usleep_range(500, 550);
-
-		data->ready_flag[MSG_TYPE_GET_DHR_INFO] &= ~(1 << MSG_ACCEL);
-
-		if (cnt >= TIMEOUT_CNT)
-			pr_err("[FACTORY] %s - accel dhr_sensor_info Timeout!!!\n",
-			__func__);
+			pr_info("[FACTORY] %s - OIS_ST_BIT fail\n", __func__);
+		else if (data->msg_buf[MSG_GYRO][5] == G_ZRL_DELTA_FAIL)
+			pr_info("[FACTORY] %s - ZRL Delta fail\n", __func__);
 
 		return snprintf(buf, PAGE_SIZE, "%d,%d,%d\n",
 			data->msg_buf[MSG_GYRO][2],
 			data->msg_buf[MSG_GYRO][3],
 			data->msg_buf[MSG_GYRO][4]);
+	} else {
+		st_zro_res = ST_PASS;
 	}
 
 	if (!data->msg_buf[MSG_GYRO][5])
 		st_diff_res = ST_PASS;
 	else if (data->msg_buf[MSG_GYRO][5] == STARTUP_BIT_FAIL)
 		pr_info("[FACTORY] %s - Gyro Start Up Bit fail\n", __func__);
-
-	if((ST_ZRO_MIN <= data->msg_buf[MSG_GYRO][6])
-		&& (data->msg_buf[MSG_GYRO][6] <= ST_ZRO_MAX)
-		&& (ST_ZRO_MIN <= data->msg_buf[MSG_GYRO][7])
-		&& (data->msg_buf[MSG_GYRO][7] <= ST_ZRO_MAX)
-		&& (ST_ZRO_MIN <= data->msg_buf[MSG_GYRO][8])
-		&& (data->msg_buf[MSG_GYRO][8]<= ST_ZRO_MAX))
-		st_zro_res = ST_PASS;
 
 	pr_info("[FACTORY] %s - %d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\n",
 		__func__,

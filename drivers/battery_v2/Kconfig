@@ -112,6 +112,11 @@ config WIRELESS_AUTH
 	 Say Y to include support for swam
 	 samsung wireless authentication massage 
 
+config LSI_IFPMIC
+	 bool "support for lsi ifpmic"
+	 help
+	  Say Y to include support for lsi ifpmic
+
 # Fuel Gauge
 config FUELGAUGE_RT5033
 	tristate "RT5033 fuel gauge driver"
@@ -359,6 +364,57 @@ config FUELGAUGE_S2MU003
 	 Say Y to include support
 	 for S.LSI S2MU003 fuel gauge driver.
 
+config FUELGAUGE_S2MU106
+	tristate "S2MU106 fuel gauge driver"
+	default n
+	help
+	 Say Y to include support
+	 for S.LSI S2MU106 fuel gauge driver.
+	 Ths fuel-gauge supports current tracking and
+	 voltage tracking to model the battery SOC.
+
+config FUELGAUGE_S2MU106_USE_5MILLIOHM
+	tristate "S2MU106 fuel gauge with 5mohm resistor"
+	default n
+	depends on (FUELGAUGE_S2MU106) && I2C
+	help
+	 Say Y to use 5mohm current sensing resistor
+	 instead of 10mohm for S.LSI S2MU106 fuel gauge.
+
+config FUELGAUGE_S2MU107
+	tristate "S2MU107 fuel gauge driver"
+	default n
+	depends on I2C
+	help
+	 Say Y to include support
+	 for S.LSI S2MU107 fuel gauge driver.
+	 Ths fuel-gauge supports current tracking and
+	 voltage tracking to model the battery SOC.
+
+config FUELGAUGE_S2MU107_TEMP_COMPEN
+	tristate "S2MU107 fuel gauge temperature compensation"
+	default n
+	depends on (FUELGAUGE_S2MU107) && I2C
+	help
+	 Say Y to enable temperature compensation
+	 for S.LSI S2MU107 fuel gauge driver.
+
+config FUELGAUGE_S2MU107_BATCAP_LRN
+	tristate "S2MU107 fuel gauge battery capacity learning"
+	default n
+	depends on (FUELGAUGE_S2MU107) && I2C
+	help
+	 Say Y to enable battery capacity learning
+	 for S.LSI S2MU107 fuel gauge driver.
+
+config FUELGAUGE_S2MU107_USE_10MILLIOHM
+	tristate "S2MU107 fuel gauge with 10mohm resistor"
+	default n
+	depends on (FUELGAUGE_S2MU107) && I2C
+	help
+	 Say Y to use 10mohm current sensing resistor
+	 instead of 5mohm for S.LSI S2MU107 fuel gauge.
+
 config PREVENT_SOC_JUMP
 	tristate "prevent soc jump at full-charged"
 	default n
@@ -567,6 +623,32 @@ config CHARGER_S2MU003
 	  S2MU003 incluse pmic, led driver.
 	  You have to define MFD_S2MU003
 
+config CHARGER_S2MU106
+	tristate "S2MU106 charger support"
+#	depends on (MFD_S2MU106) && I2C
+	help
+	 Say Y here to enable support for the S2MU106 charger.
+	 S2MU106 charger is an AFC compatible charging IC.
+	 S2MU106 charger is dependent on MFD_S2MU106
+	 so it needs to be defined.
+
+config CHARGER_S2MU107
+    tristate "S2MU107 charger support"
+    depends on (MFD_S2MU107) && I2C
+    help
+     Say Y here to enable support for the S2MU107 charger.
+     S2MU107 charger is an AFC compatible charging IC.
+     S2MU107 charger is dependent on MFD_S2MU107
+     so it needs to be defined.
+
+config CHARGER_S2MU107_DIRECT
+	tristate "S2MU107 direct charger support"
+	depends on (MFD_S2MU107) && I2C
+	help
+	 Say Y here to enable support for the S2MU107 direct charger.
+	 S2MU107 direct charger is dependent on MFD_S2MU107
+	 so it needs to be defined.
+
 config CHARGER_RT5033
 	tristate "RT5033 charger driver"
 	default n
@@ -637,11 +719,33 @@ config WIRELESS_CHARGER_HIGH_VOLTAGE
 	  Say Y here to enable support for the wireless charger charger
 	  driver.
 
+config WIRELESS_NO_HV
+	tristate "wireless no hv"
+	depends on BATTERY_SAMSUNG && I2C
+	help
+	  Say Y here to disable HV wireless charging driver.
+
 config CHARGER_SM5705
 	tristate "SM5705 battery charger support"
 	depends on BATTERY_SAMSUNG
 	help
 	  Say Y here to enable support for the SM5705 charger
+
+config PM_S2MU106
+	tristate "S2MU106 power meter support"
+#	depends on (MFD_S2MU106) && I2C
+	help
+	 Say Y here to enable support for the S2MU106 power meter.
+	 S2MU106 power meter is dependent on MFD_S2MU106
+	 so it needs to be defined.
+
+config PM_S2MU107
+	tristate "S2MU107 power meter support"
+	depends on (MFD_S2MU107) && I2C
+	help
+	 Say Y here to enable support for the S2MU107 power meter.
+	 S2MU107 power meter is dependent on MFD_S2MU107
+	 so it needs to be defined.
 
 config WIRELESS_NO_HV
 	tristate "wireless no hv"
@@ -677,12 +781,32 @@ config WIRELESS_CHARGER_S2MIW03
 	  Say Y here to enable support for the S2MIW03 charger
 	  S2MIW03 wireless charger driver.
 
+config WIRELESS_CHARGER_MFC_S2MIW04
+	tristate "s2miw04 wireless battery charger support"
+	depends on BATTERY_SAMSUNG && I2C
+	help
+	  Say Y here to enable support for the S2MIW04 charger
+	  S2MIW04 wireless charger driver.
+
 config WIRELESS_CHARGER_MFC
 	tristate "MFC IC charger support"
 	depends on BATTERY_SAMSUNG && I2C
 	help
 	  Say Y here to enable support for the MFC IC
 	  MFC wireless charger driver.
+
+config WIRELESS_CHARGER_HAL_MFC
+	tristate "MFC IC charger support"
+	depends on BATTERY_SAMSUNG && I2C
+	help
+	  Say Y here to enable support for the MFC IC
+	  MFC wireless charger driver.	  
+
+config WIRELESS_IC_PARAM
+	tristate "WIRELESS IC info param support"
+	depends on BATTERY_SAMSUNG && I2C
+	help
+	  Say Y here to enable support for the WIRELESS IC info param
 
 config WIRELESS_FIRMWARE_UPDATE
 	tristate "p9220 battery charger support"
@@ -868,3 +992,9 @@ config PREVENT_USB_CONN_OVERHEAT
     default n
     help
 	  Say Y to enable CONFIG_PREVENT_USB_CONN_OVERHEAT
+
+config TX_5V_DISABLE
+    bool "disable TX in case of 5V"
+    default n
+    help
+	  Say Y to enable CONFIG_TX_5V_DISABLE

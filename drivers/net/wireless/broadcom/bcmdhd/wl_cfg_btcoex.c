@@ -24,7 +24,7 @@
  *
  * <<Broadcom-WL-IPTag/Open:>>
  *
- * $Id: wl_cfg_btcoex.c 794110 2018-12-12 05:03:21Z $
+ * $Id: wl_cfg_btcoex.c 814554 2019-04-11 23:06:22Z $
  */
 
 #include <net/rtnetlink.h>
@@ -45,7 +45,7 @@ extern void dhd_pktfilter_offload_enable(dhd_pub_t * dhd, char *arg, int enable,
 #endif // endif
 
 struct btcoex_info {
-	struct timer_list timer;
+	timer_list_compat_t timer;
 	u32 timer_ms;
 	u32 timer_on;
 	u32 ts_dhcp_start;	/* ms ts ecord time stats */
@@ -70,6 +70,9 @@ static struct btcoex_info *btcoex_info_loc = NULL;
 #define BT_DHCP_OPPR_WIN_TIME	2500
 /* T2 turn off SCO/SCO supperesion is (timeout) */
 #define BT_DHCP_FLAG_FORCE_TIME 5500
+
+#define	BTCOEXMODE	"BTCOEXMODE"
+#define	POWERMODE	"POWERMODE"
 
 enum wl_cfg80211_btcoex_status {
 	BT_DHCP_IDLE,
@@ -311,14 +314,9 @@ static void wl_cfg80211_bt_handler(struct work_struct *work)
 {
 	struct btcoex_info *btcx_inf;
 
-#if defined(STRICT_GCC_WARNINGS) && defined(__GNUC__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wcast-qual"
-#endif // endif
+	GCC_DIAGNOSTIC_PUSH_SUPPRESS_CAST();
 	btcx_inf = container_of(work, struct btcoex_info, work);
-#if defined(STRICT_GCC_WARNINGS) && defined(__GNUC__)
-#pragma GCC diagnostic pop
-#endif // endif
+	GCC_DIAGNOSTIC_POP();
 
 	if (btcx_inf->timer_on) {
 		btcx_inf->timer_on = 0;
@@ -398,9 +396,7 @@ void* wl_cfg80211_btcoex_init(struct net_device *ndev)
 	btco_inf->ts_dhcp_ok = 0;
 	/* Set up timer for BT  */
 	btco_inf->timer_ms = 10;
-	init_timer(&btco_inf->timer);
-	btco_inf->timer.data = (ulong)btco_inf;
-	btco_inf->timer.function = wl_cfg80211_bt_timerfunc;
+	init_timer_compat(&btco_inf->timer, wl_cfg80211_bt_timerfunc, btco_inf);
 
 	btco_inf->dev = ndev;
 
@@ -430,6 +426,7 @@ int wl_cfg80211_set_btcoex_dhcp(struct net_device *dev, dhd_pub_t *dhd, char *co
 
 	struct btcoex_info *btco_inf = btcoex_info_loc;
 	char powermode_val = 0;
+	uint8 cmd_len = 0;
 	char buf_reg66va_dhcp_on[8] = { 66, 00, 00, 00, 0x10, 0x27, 0x00, 0x00 };
 	char buf_reg41va_dhcp_on[8] = { 41, 00, 00, 00, 0x33, 0x00, 0x00, 0x00 };
 	char buf_reg68va_dhcp_on[8] = { 68, 00, 00, 00, 0x90, 0x01, 0x00, 0x00 };
@@ -443,9 +440,10 @@ int wl_cfg80211_set_btcoex_dhcp(struct net_device *dev, dhd_pub_t *dhd, char *co
 	char buf_flag7_default[8] =   { 7, 00, 00, 00, 0x0, 0x00, 0x00, 0x00};
 
 	/* Figure out powermode 1 or o command */
-	strlcpy((char *)&powermode_val, command + strlen("BTCOEXMODE") +1, sizeof(powermode_val));
+	cmd_len = sizeof(BTCOEXMODE);
+	powermode_val = command[cmd_len];
 
-	if (strnicmp((char *)&powermode_val, "1", strlen("1")) == 0) {
+	if (powermode_val == '1') {
 		WL_TRACE_HW4(("DHCP session starts\n"));
 
 #ifdef PKT_FILTER_SUPPORT
@@ -495,7 +493,8 @@ int wl_cfg80211_set_btcoex_dhcp(struct net_device *dev, dhd_pub_t *dhd, char *co
 
 					btco_inf->bt_state = BT_DHCP_START;
 					btco_inf->timer_on = 1;
-					mod_timer(&btco_inf->timer, btco_inf->timer.expires);
+					mod_timer(&btco_inf->timer,
+						timer_expires(&btco_inf->timer));
 					WL_TRACE(("enable BT DHCP Timer\n"));
 				}
 		}
@@ -503,7 +502,7 @@ int wl_cfg80211_set_btcoex_dhcp(struct net_device *dev, dhd_pub_t *dhd, char *co
 			WL_ERR(("was called w/o DHCP OFF. Continue\n"));
 		}
 	}
-	else if (strnicmp((char *)&powermode_val, "2", strlen("2")) == 0) {
+	else if (powermode_val == '2') {
 
 #ifdef PKT_FILTER_SUPPORT
 		dhd->dhcp_in_progress = 0;
@@ -565,7 +564,5 @@ int wl_cfg80211_set_btcoex_dhcp(struct net_device *dev, dhd_pub_t *dhd, char *co
 		WL_ERR(("Unkwown yet power setting, ignored\n"));
 	}
 
-	snprintf(command, 3, "OK");
-
-	return (strlen("OK"));
+	return (snprintf(command, sizeof("OK"), "OK") + 1);
 }

@@ -656,6 +656,7 @@
  */
 #define KEY_DATA			0x277
 
+#define KEY_DEX_ON			0x2bd
 #define KEY_WINK			0x2bf	/* Intelligence Key */
 
 #define KEY_ONSCREEN_KEYBOARD		0x278
@@ -767,6 +768,15 @@
 
 #define ABS_MISC		0x28
 
+/*
+ * 0x2e is reserved and should not be used in input drivers.
+ * It was used by HID as ABS_MISC+6 and userspace needs to detect if
+ * the next ABS_* event is correct or is just ABS_MISC + n.
+ * We define here ABS_RESERVED so userspace can rely on it and detect
+ * the situation described above.
+ */
+#define ABS_RESERVED		0x2e
+
 #define ABS_MT_SLOT		0x2f	/* MT slot being modified */
 #define ABS_MT_TOUCH_MAJOR	0x30	/* Major axis of touching ellipse */
 #define ABS_MT_TOUCH_MINOR	0x31	/* Minor axis (omit if circular) */
@@ -784,6 +794,8 @@
 #define ABS_MT_TOOL_Y		0x3d	/* Center Y tool position */
 
 #define ABS_MT_CUSTOM		0x3e	/* custom event */
+#define ABS_MT_CUSTOM2		0x3f	/* custom event only for sensor */
+#define ABS_MT_PALM		0x3e	/* palm touch */
 #define ABS_MT_GRIP		0x3f	/* grip touch */
 
 #define ABS_MAX			0x3f

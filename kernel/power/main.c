@@ -17,6 +17,7 @@
 #include <linux/seq_file.h>
 #ifdef CONFIG_SEC_PM
 #include <linux/input/qpnp-power-on.h>
+#include <linux/fb.h>
 #endif
 
 #ifdef CONFIG_CPU_FREQ_LIMIT_USERSPACE
@@ -27,6 +28,10 @@
 #include "power.h"
 
 DEFINE_MUTEX(pm_mutex);
+
+#ifdef CONFIG_SEC_PM
+static struct delayed_work ws_work;
+#endif
 
 #ifdef CONFIG_PM_SLEEP
 
@@ -59,6 +64,27 @@ int pm_notifier_call_chain(unsigned long val)
 {
 	return __pm_notifier_call_chain(val, -1, NULL);
 }
+
+#ifdef CONFIG_SEC_PM_DEBUG
+void *pm_notifier_call_chain_get_callback(int nr_calls)
+{
+	struct notifier_block *nb, *next_nb;
+	int nr_to_call = nr_calls;
+
+	nb = rcu_dereference_raw(pm_chain_head.head);
+
+	while (nb && nr_to_call) {
+		next_nb = rcu_dereference_raw(nb->next);
+		nb = next_nb;
+		nr_to_call--;
+	}
+
+	if (nb)
+		return (void *)nb->notifier_call;
+	else
+		return ERR_PTR(-ENODATA);
+}
+#endif /* CONFIG_SEC_PM_DEBUG */
 
 /* If set, devices may be suspended and resumed asynchronously. */
 int pm_async_enabled = 1;
@@ -843,6 +869,13 @@ struct cpufreq_limit_list_t cpufreq_limit_list[] = {
 		.handle = NULL,
 		.id_mask = DVFS_ARGOS_ID_MASK
 	},
+#ifdef CONFIG_USB_AUDIO_ENHANCED_DETECT_TIME
+	{
+		.name = "boost-host min",
+		.handle = NULL,
+		.id_mask = DVFS_BOOST_HOST_ID_MASK
+	},
+#endif
 };
 
 int set_freq_limit(unsigned long id, unsigned int freq)
@@ -984,22 +1017,18 @@ static ssize_t rtc_status_show(struct kobject *kobj,
 	poff_status = 0;
 	return sprintf(buf, "%d\n", status);
 }
-
-static ssize_t rtc_status_store(struct kobject *kobj,
-				   struct kobj_attribute *attr,
-				   const char *buf, size_t n)
-{
-	pr_warn("not support\n");
-	return n;
-}
-power_attr(rtc_status);
+power_attr_ro(rtc_status);
 #endif /* CONFIG_SEC_PM */
 
 #if defined(CONFIG_FOTA_LIMIT)
 static char fota_limit_str[] =
 #if defined(CONFIG_ARCH_SM8150)
 	"[START]\n"
+#if defined(CONFIG_SEC_BLOOMQ_PROJECT)
+	"/sys/power/cpufreq_max_limit 1171200\n"
+#else
 	"/sys/power/cpufreq_max_limit 1497600\n"
+#endif
 	"[STOP]\n"
 	"/sys/power/cpufreq_max_limit -1\n"
 	"[END]\n";
@@ -1082,6 +1111,37 @@ static int __init pm_start_workqueue(void)
 	return pm_wq ? 0 : -ENOMEM;
 }
 
+#ifdef CONFIG_SEC_PM
+static void handle_ws_work(struct work_struct *work)
+{
+	wakeup_sources_stats_active();
+	schedule_delayed_work(&ws_work, msecs_to_jiffies(5000));
+}
+
+static int fb_state_change(struct notifier_block *nb, unsigned long val,
+			   void *data)
+{
+	int *blank;
+
+	if (val != FB_EVENT_BLANK)
+		return 0;
+
+	blank = data;
+
+	if (*blank == FB_BLANK_UNBLANK) {
+		cancel_delayed_work_sync(&ws_work);
+ 	} else {
+		schedule_delayed_work(&ws_work, msecs_to_jiffies(5000));
+	}
+
+	return NOTIFY_OK;
+}
+
+static struct notifier_block fb_block = {
+	.notifier_call = fb_state_change,
+};
+#endif
+
 static int __init pm_init(void)
 {
 	int error = pm_start_workqueue();
@@ -1097,6 +1157,10 @@ static int __init pm_init(void)
 	if (error)
 		return error;
 	pm_print_times_init();
+#ifdef CONFIG_SEC_PM
+	msm_drm_register_notifier_client(&fb_block);
+	INIT_DELAYED_WORK(&ws_work, handle_ws_work);
+#endif
 	return pm_autosleep_init();
 }
 

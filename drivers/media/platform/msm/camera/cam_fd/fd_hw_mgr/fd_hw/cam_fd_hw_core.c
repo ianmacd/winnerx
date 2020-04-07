@@ -1160,6 +1160,10 @@ int cam_fd_hw_process_cmd(void *hw_priv, uint32_t cmd_type,
 			cmd_frame_results);
 		break;
 	}
+	case CAM_FD_HW_CMD_REGISTER_DUMP: {
+		cam_fd_soc_register_dump(fd_hw);
+		break;
+	}
 	default:
 		break;
 	}

@@ -35,8 +35,10 @@
 #define MFC_FLASH_FW_HEX_PATH		"mfc/mfc_fw_flash.bin"
 #define MFC_FW_SDCARD_BIN_PATH		"/sdcard/mfc_fw_flash.bin"
 
-#define MFC_FW_BIN_LSI_VERSION			0x1004
-#define MFC_FLASH_FW_HEX_LSI_PATH		"mfc/mfc_fw_flash_lsi.bin"
+/* for SPU FW update */
+#define MFC_FW_SPU_BIN_PATH		"/spu/mfc/mfc_fw_flash_p9320.bin"
+
+#define MFC_CHIP_ID_P9320		0x20
 
 /* REGISTER MAPS */
 #define MFC_CHIP_ID_L_REG					0x00
@@ -152,6 +154,17 @@
 #define MFC_TX_MAX_OP_FREQ_H_REG			0xD7 /* default 0x01 */
 
 /* RX Mode Communication Modulation FET Ctrl */
+#if defined(CONFIG_MFC_LDO_COMMAND)
+#define MFC_MST_LDO_CONFIG_1				0x7400
+#define MFC_MST_LDO_CONFIG_2				0x7409
+#define MFC_MST_LDO_CONFIG_3				0x7418
+#define MFC_MST_LDO_CONFIG_4				0x3014
+#define MFC_MST_LDO_CONFIG_5				0x3405
+#define MFC_MST_LDO_CONFIG_6				0x3010
+#define MFC_MST_LDO_TURN_ON				0x301c
+#define MFC_MST_LDO_CONFIG_8				0x343c
+#define MFC_MST_OVER_TEMP_INT				0x0024
+#endif
 #define MFC_MST_MODE_SEL_REG				0x69
 #define MFC_RX_OV_CLAMP_REG					0x6A
 #define MFC_RX_COMM_MOD_AFC_FET_REG			0x37
@@ -274,14 +287,18 @@
 #define	WPC_COM_LED_CONTROL				0x0B /* Data Value LED Enable(0x00), LED Disable(0xFF) */
 #define	WPC_COM_REQ_AFC_TX				0x0C /* Data Value (0x00) */
 #define	WPC_COM_COOLING_CTRL			0x0D /* Data Value ON(0x00), OFF(0xFF) */
+#define	WPC_COM_RX_ID					0x0E /* Received RX ID */
 #define	WPC_COM_CHG_LEVEL				0x0F /* Battery level */
 #define	WPC_COM_ENTER_PHM				0x18 /* GEAR entered PHM */
 #define	WPC_COM_DISABLE_TX				0x19 /* Turn off UNO of TX, OFF(0xFF) */
+#define	WPC_COM_OP_FREQ_SET				0xD1
 
 /* RX Data Value 2~5 Register (Data Sending), RX_Data_Value2_5_Out : Function and Description */
 #define	RX_DATA_VAL2_5V					0x05
 #define	RX_DATA_VAL2_10V				0x2C
 #define	RX_DATA_VAL2_12V				0x4B
+#define	RX_DATA_VAL2_12_5V				0x69
+#define	RX_DATA_VAL2_20V				0x9B
 
 /* MFC_TX_DATA_COM_REG (0x58) : TX Command */
 #define	WPC_TX_COM_UNKNOWN		0x00
@@ -317,10 +334,18 @@
 #define TX_ID_DREAM_STAND			0x31
 #define TX_ID_DREAM_DOWN			0x14
 #define TX_ID_UNO_TX				0x72
+#define TX_ID_UNO_TX_B0				0x80
+#define TX_ID_UNO_TX_B1				0x81
+#define TX_ID_UNO_TX_B2				0x82
+#define TX_ID_UNO_TX_MAX			0x9F
 
-#define TX_ID_AUTH_DUO_PAD			0xA0
-#define TX_ID_DAVINCI_PAD				0xA1
+#define TX_ID_AUTH_PAD				0xA0
+#define TX_ID_DAVINCI_PAD_V			0xA1
+#define TX_ID_DAVINCI_PAD_H			0xA2
+#define TX_ID_AUTH_PAD_ACLASS_END	0xAF
 #define TX_ID_AUTH_PAD_END			0xBF /* reserved 0xA1 ~ 0xBF for auth pad */
+#define TX_ID_NON_AUTH_PAD			0xF0
+#define TX_ID_NON_AUTH_PAD_END		0xFF
 
 /* value of WPC_TX_COM_CHG_ERR(0x05) */
 #define TX_CHG_ERR_OTP			0x12
@@ -340,6 +365,7 @@
 #define TX_RX_POWER_10W			0x64
 #define TX_RX_POWER_12W			0x78
 #define TX_RX_POWER_15W			0x96
+#define TX_RX_POWER_17_5W		0xAF
 #define TX_RX_POWER_20W			0xC8
 
 #define MFC_NUM_FOD_REG					12
@@ -526,68 +552,71 @@ enum {
 
 	/* F/W update error */
 	MFC_FWUP_ERR_WIRTE_KEY_ERR,
-	MFC_FWUP_ERR_CLK_TIMING_ERR1,
+	MFC_FWUP_ERR_CLK_TIMING_ERR1,  /* 5 */
 	MFC_FWUP_ERR_CLK_TIMING_ERR2,
-	MFC_FWUP_ERR_CLK_TIMING_ERR3, /* 5 */
+	MFC_FWUP_ERR_CLK_TIMING_ERR3,
 	MFC_FWUP_ERR_CLK_TIMING_ERR4,
 	MFC_FWUP_ERR_INFO_PAGE_EMPTY,
-	MFC_FWUP_ERR_HALT_M0_ERR,
+	MFC_FWUP_ERR_HALT_M0_ERR, /* 10 */
 	MFC_FWUP_ERR_FAIL,
-	MFC_FWUP_ERR_ADDR_READ_FAIL, /* 10 */
+	MFC_FWUP_ERR_ADDR_READ_FAIL,
 	MFC_FWUP_ERR_DATA_NOT_MATCH,
 	MFC_FWUP_ERR_OTP_LOADER_IN_RAM_ERR,
-	MFC_FWUP_ERR_CLR_MTP_STATUS_BYTE,
+	MFC_FWUP_ERR_CLR_MTP_STATUS_BYTE, /* 15 */
 	MFC_FWUP_ERR_MAP_RAM_TO_OTP_ERR,
-	MFC_FWUP_ERR_WRITING_TO_OTP_BUFFER, /* 15 */
+	MFC_FWUP_ERR_WRITING_TO_OTP_BUFFER,
 	MFC_FWUP_ERR_OTF_BUFFER_VALIDATION,
 	MFC_FWUP_ERR_READING_OTP_BUFFER_STATUS,
-	MFC_FWUP_ERR_TIMEOUT_ON_BUFFER_TO_OTP,
-	MFC_FWUP_ERR_MTP_WRITE_ERR, /* */
-	MFC_FWUP_ERR_PKT_CHECKSUM_ERR, /* 20 */
+	MFC_FWUP_ERR_TIMEOUT_ON_BUFFER_TO_OTP, /* 20 */
+	MFC_FWUP_ERR_MTP_WRITE_ERR,
+	MFC_FWUP_ERR_PKT_CHECKSUM_ERR,
 	MFC_FWUP_ERR_UNKNOWN_ERR,
 	MFC_FWUP_ERR_BUFFER_WRITE_IN_SECTOR,
-	MFC_FWUP_ERR_WRITING_FW_VERION,
+	MFC_FWUP_ERR_WRITING_FW_VERION, /* 25 */
 
 	/* F/W verification error */
 	MFC_VERIFY_ERR_WIRTE_KEY_ERR,
-	MFC_VERIFY_ERR_HALT_M0_ERR, /* 25 */
+	MFC_VERIFY_ERR_HALT_M0_ERR,
 	MFC_VERIFY_ERR_KZALLOC_ERR,
 	MFC_VERIFY_ERR_FAIL,
-	MFC_VERIFY_ERR_ADDR_READ_FAIL,
+	MFC_VERIFY_ERR_ADDR_READ_FAIL, /* 30 */
 	MFC_VERIFY_ERR_DATA_NOT_MATCH,
-	MFC_VERIFY_ERR_MTP_VERIFIER_IN_RAM_ERR, /* 30 */
+	MFC_VERIFY_ERR_MTP_VERIFIER_IN_RAM_ERR,
 	MFC_VERIFY_ERR_CLR_MTP_STATUS_BYTE,
 	MFC_VERIFY_ERR_MAP_RAM_TO_OTP_ERR,
-	MFC_VERIFY_ERR_UNLOCK_SYS_REG_ERR,
+	MFC_VERIFY_ERR_UNLOCK_SYS_REG_ERR, /* 35 */
 	MFC_VERIFY_ERR_LDO_CLK_2MHZ_ERR,
-	MFC_VERIFY_ERR_LDO_OUTPUT_5_5V_ERR, /* 35 */
+	MFC_VERIFY_ERR_LDO_OUTPUT_5_5V_ERR,
 	MFC_VERIFY_ERR_ENABLE_LDO_ERR,
 	MFC_VERIFY_ERR_WRITING_TO_MTP_VERIFY_BUFFER,
-	MFC_VERIFY_ERR_START_MTP_VERIFY_ERR,
+	MFC_VERIFY_ERR_START_MTP_VERIFY_ERR, /* 40 */
 	MFC_VERIFY_ERR_READING_MTP_VERIFY_STATUS,
-	MFC_VERIFY_ERR_CRC_BUSY, /* 40 */
+	MFC_VERIFY_ERR_CRC_BUSY,
 	MFC_VERIFY_ERR_READING_MTP_VERIFY_PASS_FAIL,
 	MFC_VERIFY_ERR_CRC_ERROR,
-	MFC_VERIFY_ERR_UNKOWN_ERR,
+	MFC_VERIFY_ERR_UNKOWN_ERR, /* 45 */
 	MFC_VERIFY_ERR_BUFFER_WRITE_IN_SECTOR,
 
 	MFC_REPAIR_ERR_HALT_M0_ERR,
 	MFC_REPAIR_ERR_MTP_REPAIR_IN_RAM,
 	MFC_REPAIR_ERR_CLR_MTP_STATUS_BYTE,
-	MFC_REPAIR_ERR_START_MTP_REPAIR_ERR,
+	MFC_REPAIR_ERR_START_MTP_REPAIR_ERR, /* 50 */
 	MFC_REPAIR_ERR_READING_MTP_REPAIR_STATUS,
 	MFC_REPAIR_ERR_READING_MTP_REPAIR_PASS_FAIL,
 	MFC_REPAIR_ERR_BUFFER_WRITE_IN_SECTOR,
 };
 
 enum {
-	MFC_VOUT_5V = 0,	/* CC CALL, CV CALL */
-	MFC_VOUT_5_5V,		/* CC-CV */
+	MFC_VOUT_5V = 0,
+	MFC_VOUT_5_5V,	// 1
 	MFC_VOUT_6V, // 2
 	MFC_VOUT_7V, // 3
 	MFC_VOUT_8V, // 4
 	MFC_VOUT_9V, // 5
 	MFC_VOUT_10V, // 6
+	MFC_VOUT_11V, // 7
+	MFC_VOUT_12V, // 8
+	MFC_VOUT_12_5V, // 9
 };
 
 /* PAD Vout */
@@ -626,18 +655,21 @@ enum {
 	MFC_AFC_CONF_5V_TX,				/* 8 */
 	MFC_AFC_CONF_10V_TX,			/* 9 */
 	MFC_AFC_CONF_12V_TX,			/* 10 */
-	MFC_CONFIGURATION,				/* 11 */
-	MFC_IDENTIFICATION,				/* 12 */
-	MFC_EXTENDED_IDENT,				/* 13 */
-	MFC_LED_CONTROL_ON,				/* 14 */
-	MFC_LED_CONTROL_OFF,			/* 15 */
-	MFC_FAN_CONTROL_ON,				/* 16 */
-	MFC_FAN_CONTROL_OFF,			/* 17 */
-	MFC_REQUEST_AFC_TX,				/* 18 */
-	MFC_REQUEST_TX_ID,				/* 19 */
-	MFC_DISABLE_TX,					/* 20 */
-	MFC_PHM_ON, 				/* 21 */
-	MFC_LED_CONTROL_DIMMING,			/* 22 */
+	MFC_AFC_CONF_12_5V_TX,			/* 11 */
+	MFC_AFC_CONF_20V_TX,			/* 12 */
+	MFC_CONFIGURATION,				/* 13 */
+	MFC_IDENTIFICATION,				/* 14 */
+	MFC_EXTENDED_IDENT,				/* 15 */
+	MFC_LED_CONTROL_ON,				/* 16 */
+	MFC_LED_CONTROL_OFF,			/* 17 */
+	MFC_FAN_CONTROL_ON,				/* 18 */
+	MFC_FAN_CONTROL_OFF,			/* 19 */
+	MFC_REQUEST_AFC_TX,				/* 20 */
+	MFC_REQUEST_TX_ID,				/* 21 */
+	MFC_DISABLE_TX,					/* 22 */
+	MFC_PHM_ON, 				/* 23 */
+	MFC_LED_CONTROL_DIMMING,			/* 24 */
+	MFC_SET_OP_FREQ,			/* 25 */	
 };
 
 enum {
@@ -645,13 +677,20 @@ enum {
 	MFC_SIZE,
 	MFC_DATA,
 	MFC_PACKET,	
+	MFC_FLICKER_TEST,
 };
 
 static const u8 mfc_idt_vout_val[] = {
- 0x0F, 0x14, 0x19, 0x23, 0x2D, 0x37, 0x41,
-};
-static const u8 mfc_lsi_vout_val[] = {
- 0x64, 0x6E, 0x78, 0x8C, 0xA0, 0xB4, 0xC8,
+	0x0F, /* MFC_VOUT_5V */
+	0x14, /* MFC_VOUT_5_5V */
+	0x19, /* MFC_VOUT_6V */
+	0x23, /* MFC_VOUT_7V */
+	0x2D, /* MFC_VOUT_8V */
+	0x37, /* MFC_VOUT_9V */
+	0x41, /* MFC_VOUT_10V */
+	0x4B, /* MFC_VOUT_11V */
+	0x55, /* MFC_VOUT_12V */
+	0x5A, /* MFC_VOUT_12_5V */
 };
 
 ssize_t mfc_show_attrs(struct device *dev,
@@ -694,7 +733,7 @@ enum mfc_ic_revision {
 };
 
 enum mfc_chip_id {
-	MFC_CHIP_IDT = 0,
+	MFC_CHIP_IDT = 1,
 	MFC_CHIP_LSI,
 };
 
@@ -987,6 +1026,10 @@ struct mfc_charger_platform_data {
 	u32 *fod_hero_5v_data;
 	u32 *fod_dream_data;
 	u32 *fod_dream_cv_data;
+	u32 *wireless20_vout_list;
+	u32 *wireless20_vrect_list;
+	u32 *wireless20_max_power_list;
+	u8 len_wc20_list;
 	int fod_data_check;
 	bool ic_on_mode;
 	int hw_rev_changed; /* this is only for noble/zero2 */
@@ -1010,6 +1053,7 @@ struct mfc_charger_platform_data {
 	u32 oc_fod1;
 	u32 phone_fod_threshold;
 	u32 gear_ping_freq;
+	bool wpc_vout_ctrl_lcd_on;
 };
 
 #define mfc_charger_platform_data_t \
@@ -1056,10 +1100,12 @@ struct mfc_charger_data {
 	struct delayed_work	wpc_vout_mode_work;
 	struct delayed_work	wpc_cm_fet_work;
 	struct delayed_work wpc_i2c_error_work;
-	struct delayed_work	wpc_rx_det_work;
+	struct delayed_work	wpc_rx_type_det_work;
+	struct delayed_work	wpc_rx_connection_work;
 	struct delayed_work wpc_tx_op_freq_work;
 	struct delayed_work wpc_tx_phm_work;
 	struct delayed_work wpc_vrect_check_work;
+	struct delayed_work wpc_rx_power_work;	
 	struct delayed_work wpc_cs100_work;
 
 	struct alarm phm_alarm;
@@ -1070,20 +1116,31 @@ struct mfc_charger_data {
 	int pad_vout;
 	int is_mst_on; /* mst */
 	int chip_id;
+	u8 chip_id_now;
 	int fw_cmd;
 	int vout_mode;
+	u32 vout_by_txid;
+	u32 vrect_by_txid;
+	u32 max_power_by_txid;
 	int is_full_status;
 	int mst_off_lock;
 	bool is_otg_on;
 	int led_cover;
 	bool is_probed;
 	bool is_afc_tx;
+	bool pad_ctrl_by_lcd;
 	bool tx_id_done;
 	bool is_suspend;
 	int tx_id;
 	int tx_id_cnt;
+	bool initial_vrect;
+
+	int flicker_delay;
+	int flicker_vout_threshold;
+
 	/* wireless tx */
 	int tx_status;
+	bool initial_wc_check;
 	bool wc_tx_enable;
 	int wc_rx_type;
 	bool wc_rx_connected;
@@ -1096,8 +1153,4 @@ struct mfc_charger_data {
 	int i2c_error_count;
 	unsigned long gear_start_time;
 };
-
-#define is_sleep_mode_active(pad_id) ( \
-    pad_id == TX_ID_DAVINCI_PAD)
-
 #endif /* __WIRELESS_CHARGER_MFC_H */

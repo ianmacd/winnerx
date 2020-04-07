@@ -350,6 +350,7 @@ static void destroy_krinst_obj(struct krinst_obj *node)
 {
 	node->inst = NULL;
 
+	kobject_del(&node->obj);
 	kobject_put(&node->obj);
 }
 
@@ -419,40 +420,55 @@ EXPORT_SYMBOL(kair_tpdf_cleaning);
  **/
 int kair_build_tpdf_cascade(struct kair_class *vessel)
 {
+	unsigned int weight_sum;
+
 #if KAIR_TPDF_CASCADE_LEVEL > 1
-	struct tpdf *__l1, *__l2, *__l3;
+	struct tpdf *tpdf_inf, *tpdf_fin, *tpdf_ins;
 
-	__l3 = kmalloc(sizeof(struct tpdf), GFP_KERNEL);
-	if (!__l3)
+	tpdf_inf = kmalloc(sizeof(struct tpdf), GFP_KERNEL);
+	if (!tpdf_inf)
+		goto l3_nomem;
+
+	tpdf_fin = kmalloc(sizeof(struct tpdf), GFP_KERNEL);
+	if (!tpdf_fin)
+		goto l2_nomem;
+
+	tpdf_ins = kmalloc(sizeof(struct tpdf), GFP_KERNEL);
+	if (!tpdf_ins)
+		goto l1_nomem;
+
+	kair_l3_pdf_init(tpdf_inf);
+	kair_l2_pdf_init(tpdf_fin);
+	kair_l1_pdf_init(tpdf_ins);
+
+	kair_tpdf_cascading(vessel, tpdf_inf);
+	kair_tpdf_cascading(vessel, tpdf_fin);
+	kair_tpdf_cascading(vessel, tpdf_ins);
+
+	weight_sum = tpdf_inf->weight + tpdf_fin->weight + tpdf_ins->weight;
+	goto exit;
+
+l1_nomem:
+	kfree(tpdf_fin);
+l2_nomem:
+	kfree(tpdf_inf);
+l3_nomem:
 		return -ENOMEM;
 
-	kair_l3_pdf_init(__l3);
-	kair_tpdf_cascading(vessel, __l3);
-
-	__l2 = kmalloc(sizeof(struct tpdf), GFP_KERNEL);
-	if (!__l2)
-		return -ENOMEM;
-
-	kair_l2_pdf_init(__l2);
-	kair_tpdf_cascading(vessel, __l2);
-
-	__l1 = kmalloc(sizeof(struct tpdf), GFP_KERNEL);
-	if (!__l1)
-		return -ENOMEM;
-
-	kair_l1_pdf_init(__l1);
-	kair_tpdf_cascading(vessel, __l1);
+exit:
 #else
-	struct tpdf *__l;
+	struct tpdf *tpdf_ins;
 
-	__l = kmalloc(sizeof(struct tpdf), GFP_KERNEL);
-	if (!__l)
+	tpdf_ins = kmalloc(sizeof(struct tpdf), GFP_KERNEL);
+	if (!tpdf_ins)
 		return -ENOMEM;
 
-	kair_l1_pdf_init(__l);
-	kair_tpdf_cascading(vessel, __l);
+	kair_l1_pdf_init(tpdf_ins);
+	kair_tpdf_cascading(vessel, tpdf_ins);
+	weight_sum = tpdf_ins->weight;
 #endif
 
+	vessel->capa_denom = ilog2(weight_sum + 1);
 	return 0; 
 }
 EXPORT_SYMBOL(kair_build_tpdf_cascade);
@@ -866,12 +882,13 @@ static unsigned int kair_cap_soft_bettor(struct kair_class *self,
 					 unsigned int cap_legacy)
 {
 	struct tpdf *level;
-	unsigned int new_cap = mult_frac(cap_legacy,
+	unsigned int min_cap = mult_frac(cap_legacy,
 					 self->kairistic.theta_numer,
 					 self->kairistic.theta_denom);
 	unsigned int max_cap = mult_frac(cap_legacy,
 					 self->kairistic.gamma_numer,
 					 self->kairistic.gamma_denom);
+	unsigned int new_cap = 0;
 
 	if (list_empty(&self->tpdf_cascade))
 		return cap_legacy;
@@ -883,8 +900,9 @@ static unsigned int kair_cap_soft_bettor(struct kair_class *self,
 		if (level->irand == KAIR_DIVERGING) {
 			new_cap = cap_legacy;
 		} else {
-			new_cap = (level->irand > self->stats.rand_neutral) ?
-					max_cap : new_cap;
+			new_cap += level->weight *
+					((level->irand > self->stats.rand_neutral) ?
+					 max_cap >> self->capa_denom : min_cap >> self->capa_denom);
 		}
 	}
 
@@ -906,7 +924,7 @@ static unsigned int kair_cap_strict_bettor(struct kair_class *self,
 					 self->kairistic.gamma_denom);
 	unsigned int skew;
 	unsigned int run_hmny;
-	unsigned int cap_unit = (max_cap - new_cap) >> KAIR_CAPA_DENOM_SHIFT;
+	unsigned int cap_unit = (max_cap - new_cap) >> self->capa_denom;
 
 	s32 cap_delta = 0;
 
@@ -966,13 +984,37 @@ static int kair_initializer(struct kair_class *self)
 }
 
 /**
+ * """ KAIR default instance stopper """
+ * A part of suspend sequence. Reset TPDF as well.
+ * @self : instance itself
+ **/
+static void kair_stopper(struct kair_class *self)
+{
+	struct tpdf *cur;
+
+	if (!list_empty(&self->tpdf_cascade)) {
+		list_for_each_entry(cur, &self->tpdf_cascade, pos) {
+			if (!is_kair_window_infty(cur)) {
+				memset(cur->qtbl, 0, sizeof(int) * cur->qlvl);
+
+				tfifo_free(&cur->cache);
+				tfifo_alloc(&cur->cache, kair_window_size(cur));
+
+				cur->pc_cnt = 0;
+			}
+		}
+	}
+}
+
+/**
  * """ KAIR default instance finalizer """
  * Making the kair instance ready for the removal. for now, releasing resources
  * occupied by the multi-leveled TPDF cascade structure.
  **/
 static void kair_finalizer(struct kair_class *self)
 {
-	destroy_krinst_obj(self->extif);
+	if (self->extif)
+		destroy_krinst_obj(self->extif);
 
 	kair_tpdf_cleaning(self);
 }
@@ -1008,9 +1050,11 @@ struct kair_class *kair_obj_creator(const char *alias,
 		.kairistic	= *kairistic,
 
 		.tpdf_cascade	= LIST_HEAD_INIT(vessel->tpdf_cascade),
+		.capa_denom	= 0,
 		.stats		= {0, 0L, KAIR_DEF_RAND_NEUTRAL, 0},
 
 		.initializer	= kair_initializer,
+		.stopper	= kair_stopper,
 		.finalizer	= kair_finalizer,
 		.job_learner	= kair_job_probability_collapse,
 		.job_inferer	= kair_search_nearest_job_tpdf,

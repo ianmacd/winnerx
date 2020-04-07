@@ -32,7 +32,8 @@
 #include <linux/slab.h>
 #include <asm/unaligned.h>
 
-#include <linux/sec_bsp.h>
+#include <linux/sec_debug.h>
+#include <linux/sec_bootstat.h>
 
 /* This defines are for PSTORE */
 #define SS_LOGGER_LEVEL_HEADER		(1)
@@ -41,7 +42,7 @@
 #define SS_LOGGER_LEVEL_MAX		(4)
 #define SS_LOGGER_SKIP_COUNT		(4)
 #define SS_LOGGER_STRING_PAD		(1)
-#define SS_LOGGER_HEADER_SIZE		(68)
+#define SS_LOGGER_HEADER_SIZE		(80)
 
 #define SS_LOG_ID_MAIN			(0)
 #define SS_LOG_ID_RADIO			(1)
@@ -685,7 +686,7 @@ static inline void __ss_logger_level_text(char *buffer, size_t count)
 
 			/* FIXME: print without a module and a function name */
 			printk(KERN_INFO "%s\n", logger.buffer);
-#ifdef CONFIG_SEC_BSP
+#ifdef CONFIG_SEC_BOOTSTAT
 			if (count > 5 &&
 			    !strncmp(logger.buffer, "!@Boot", 6 /*strlen("!@Boot")*/))
 				sec_boot_stat_add(logger.buffer);
@@ -778,19 +779,25 @@ MODULE_PARM_DESC(mem_size,
 
 static char *platform_log_buf;
 static size_t platform_log_idx;
-static inline void emit_sec_platform_log_char(char c)
-{
-	platform_log_buf[platform_log_idx & (size_t)(mem_size - 1)] = c;
-	platform_log_idx++;
-}
 
-static inline void ss_hook_logger(
-			 const char *buf, size_t size)
+static inline void ss_hook_logger(const char *buf, size_t size)
 {
-	size_t i;
+	size_t f_len, s_len, remain_space;
+	size_t idx;
 
-	for (i = 0; i < size; i++)
-		emit_sec_platform_log_char(buf[i]);
+	if (unlikely(!platform_log_buf))
+		return;
+
+	idx = platform_log_idx % mem_size;
+	remain_space = mem_size - idx;
+	f_len = min(size, remain_space);
+	memcpy_toio(&(platform_log_buf[idx]), buf, f_len);
+
+	s_len = size - f_len;
+	if (unlikely(s_len))
+		memcpy_toio(platform_log_buf, &buf[f_len], s_len);
+
+	platform_log_idx += size;
 }
 
 struct ss_plog_platform_data {
@@ -857,7 +864,10 @@ static int ss_plog_probe(struct platform_device *pdev)
 		goto fail_out;
 	}
 
-	va = ioremap_nocache((phys_addr_t)mem_address, (size_t)mem_size);
+	if (sec_debug_is_enabled())
+		va = ioremap_wc((phys_addr_t)mem_address, (size_t)mem_size);
+	else
+		va = ioremap_cache((phys_addr_t)mem_address, (size_t)mem_size);
 	if (unlikely(!va)) {
 		pr_err("Failed to remap plaform log region\n");
 		err = -ENOMEM;

@@ -663,6 +663,12 @@ int fts_fw_update_on_probe(struct fts_ts_info *info)
 
 	if (info->checksum_result)
 		retval = FTS_NEED_FW_UPDATE;
+	else if (info->ic_name_of_ic != info->ic_name_of_bin)
+		retval = FTS_NOT_UPDATE;
+	else if (info->project_id_of_ic != info->project_id_of_bin)
+		retval = FTS_NEED_FW_UPDATE;
+	else if (info->module_version_of_ic != info->module_version_of_bin)
+		retval = FTS_NOT_UPDATE;
 	else if ((info->fw_main_version_of_ic < info->fw_main_version_of_bin)
 			|| ((info->config_version_of_ic < info->config_version_of_bin))
 			|| ((info->fw_version_of_ic < info->fw_version_of_bin)))

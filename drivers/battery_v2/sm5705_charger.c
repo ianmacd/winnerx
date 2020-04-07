@@ -762,6 +762,7 @@ static int sm5705_chg_set_property(struct power_supply *psy, enum power_supply_p
 			sm5705_set_charge_current(charger, charger->charging_current);
 		}
 		break;
+	case POWER_SUPPLY_PROP_CAPACITY:
 	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT:
 		break;
 #if defined(CONFIG_BATTERY_SWELLING)
@@ -824,6 +825,10 @@ static int sm5705_chg_set_property(struct power_supply *psy, enum power_supply_p
 	case POWER_SUPPLY_PROP_CHARGE_OTG_CONTROL:
 		pr_info("POWER_SUPPLY_PROP_CHARGE_OTG_CONTROL - otg_en=%d\n", val->intval);
 		psy_chg_set_charge_otg_control(charger, val->intval);
+		break;
+	case POWER_SUPPLY_PROP_BOOST_CURRENT:
+		pr_info("POWER_SUPPLY_PROP_BOOST_CURRENT - boost=%d\n", val->intval);
+		sm5705_charger_set_otg_boost(val->intval);
 		break;
 #endif
 	default:
@@ -1135,6 +1140,11 @@ static int sm5705_otg_set_property(struct power_supply *psy, enum power_supply_p
 #endif
 		power_supply_changed(charger->psy_otg);
 		break;
+	case POWER_SUPPLY_PROP_VOLTAGE_MAX:
+		pr_info("POWER_SUPPLY_PROP_VOLTAGE_MAX - %s\n", (val->intval) ? "ON" : "OFF");
+
+		psy_do_property("sm5705-charger", set, POWER_SUPPLY_PROP_BOOST_CURRENT, value);
+		break;
 	default:
 		return -EINVAL;
 	}
@@ -1143,6 +1153,7 @@ static int sm5705_otg_set_property(struct power_supply *psy, enum power_supply_p
 }
 static enum power_supply_property sm5705_otg_props[] = {
 	POWER_SUPPLY_PROP_ONLINE,
+	POWER_SUPPLY_PROP_VOLTAGE_MAX,
 };
 
 /**
@@ -1837,7 +1848,7 @@ static int sm5705_charger_probe(struct platform_device *pdev)
 	charger->pdata = _get_sm5705_charger_platform_data(pdev, charger);
 	if (charger->pdata == NULL) {
 		pr_err("fail to get charger platform data\n");
-		return -ENOENT;
+		goto err_free;
 	}
 
 	ret = _init_sm5705_charger_info(pdev, sm5705, charger);

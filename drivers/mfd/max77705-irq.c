@@ -321,6 +321,7 @@ static irqreturn_t max77705_irq_thread(int irq, void *data)
 		case MAX77705_PASS3:
 		case MAX77705_PASS4:
 		case MAX77705_PASS5:
+#if defined(CONFIG_SEC_FACTORY)
 			ret = max77705_bulk_read(max77705->muic, MAX77705_USBC_REG_UIC_INT,
 					3, &irq_reg[USBC_INT]);
 			ret = max77705_read_reg(max77705->muic, MAX77705_USBC_REG_VDM_INT_M,
@@ -328,6 +329,12 @@ static irqreturn_t max77705_irq_thread(int irq, void *data)
 			if (irq_vdm_mask == 0xF0)
 				ret = max77705_read_reg(max77705->muic, MAX77705_USBC_REG_VDM_INT,
 						&irq_reg[VDM_INT]);
+#else
+			ret = max77705_bulk_read(max77705->muic, MAX77705_USBC_REG_UIC_INT,
+					4, &irq_reg[USBC_INT]);
+			ret = max77705_read_reg(max77705->muic, MAX77705_USBC_REG_VDM_INT_M,
+					&irq_vdm_mask);
+#endif
 			if(irq_reg[USBC_INT] & BIT_VBUSDetI) {
 				ret = max77705_read_reg(max77705->muic, REG_BC_STATUS, &bc_status0);
 				ret = max77705_read_reg(max77705->muic, REG_CC_STATUS0, &cc_status0);

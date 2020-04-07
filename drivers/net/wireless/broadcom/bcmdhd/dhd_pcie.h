@@ -24,7 +24,7 @@
  *
  * <<Broadcom-WL-IPTag/Open:>>
  *
- * $Id: dhd_pcie.h 806894 2019-02-26 05:59:10Z $
+ * $Id: dhd_pcie.h 816392 2019-04-24 14:39:02Z $
  */
 
 #ifndef dhd_pcie_h
@@ -528,10 +528,7 @@ extern int dhdpcie_get_oob_irq_level(void);
 
 #if defined(CONFIG_ARCH_EXYNOS)
 #define SAMSUNG_PCIE_VENDOR_ID 0x144d
-#if defined(CONFIG_MACH_UNIVERSAL5433)
-#define SAMSUNG_PCIE_DEVICE_ID 0xa5e3
-#define SAMSUNG_PCIE_CH_NUM
-#elif defined(CONFIG_MACH_UNIVERSAL7420) || defined(CONFIG_SOC_EXYNOS7420)
+#if defined(CONFIG_MACH_UNIVERSAL7420) || defined(CONFIG_SOC_EXYNOS7420)
 #define SAMSUNG_PCIE_DEVICE_ID 0xa575
 #define SAMSUNG_PCIE_CH_NUM 1
 #elif defined(CONFIG_SOC_EXYNOS8890)
@@ -598,13 +595,8 @@ extern int dhdpcie_get_oob_irq_level(void);
 #define DHD_HP2P_RING    1
 
 #ifdef USE_EXYNOS_PCIE_RC_PMPATCH
-#ifdef CONFIG_MACH_UNIVERSAL5433
-extern int exynos_pcie_pm_suspend(void);
-extern int exynos_pcie_pm_resume(void);
-#else
 extern int exynos_pcie_pm_suspend(int ch_num);
 extern int exynos_pcie_pm_resume(int ch_num);
-#endif /* CONFIG_MACH_UNIVERSAL5433 */
 #endif /* USE_EXYNOS_PCIE_RC_PMPATCH */
 
 #ifdef CONFIG_ARCH_TEGRA

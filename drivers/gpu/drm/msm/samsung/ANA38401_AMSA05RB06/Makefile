@@ -9,3 +9,4 @@ ccflags-y += -Idrivers/gpu/drm/msm/samsung
 
 obj-y  += ss_dsi_panel_ANA38401_AMSA05RB06.o
 obj-y  += ss_dsi_smart_dimming_ANA38401_AMSA05RB06.o
+obj-y  += ss_dsi_interpolation_ANA38401_AMSA05RB06.o

@@ -21,8 +21,9 @@
 struct fscrypt_ctx;
 
 /* iv sector for security/pfe/pfk_fscrypt.c and f2fs */
-#define PG_DUN(i, p)                                            \
-	(((((u64)(i)->i_ino) & 0xffffffff) << 32) | ((p)->index & 0xffffffff))
+#define FSCRYPT_DUN(i,pg_index) \
+	((((i)->i_ino & 0xffffffff) << 32) | ((pg_index) & 0xffffffff))
+#define FSCRYPT_PG_DUN(i,p)	FSCRYPT_DUN(i, (p)->index)
 
 struct fscrypt_info;
 
@@ -261,13 +262,20 @@ static inline int fscrypt_encrypt_symlink(struct inode *inode,
 }
 
 /* inline.c */
+#define fscrypt_set_bio_cryptd(inode, bio) fscrypt_set_bio_cryptd_dun(inode, bio, 0)
 #ifdef CONFIG_FS_INLINE_ENCRYPTION
-extern void fscrypt_set_bio_cryptd(const struct inode *inode, struct bio *bio);
+extern void fscrypt_set_bio_cryptd_dun(const struct inode *inode, struct bio *bio, u64 dun);
 extern void *fscrypt_get_bio_cryptd(const struct inode *inode);
 extern int fscrypt_inline_encrypted(const struct inode *inode);
 extern int fscrypt_submit_bh(int op, int op_flags, struct buffer_head *bh, struct inode *inode);
+extern unsigned long long fscrypt_get_dun(const struct inode *, pgoff_t pg_idx);
+
+static inline unsigned long long __fscrypt_make_dun(const struct inode *inode, pgoff_t pg_idx)
+{
+	return FSCRYPT_DUN(inode, pg_idx);
+}
 #else
-static inline void fscrypt_set_bio_cryptd(const struct inode *inode, struct bio *bio)
+static inline void fscrypt_set_bio_cryptd_dun(const struct inode *inode, struct bio *bio, u64 dun)
 {
 }
 
@@ -284,6 +292,16 @@ static inline int fscrypt_inline_encrypted(const struct inode *inode)
 static inline int fscrypt_submit_bh(int op, int op_flags, struct buffer_head *bh, struct inode *inode)
 {
 	return -EOPNOTSUPP;
+}
+
+static inline unsigned long long fscrypt_get_dun(const struct inode *, pgoff_t p)
+{
+	return 0;
+}
+
+static inline unsigned long long __fscrypt_make_dun(const struct inode *inode, pgoff_t pg_idx)
+{
+	return 0;
 }
 #endif
 

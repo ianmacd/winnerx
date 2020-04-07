@@ -24,7 +24,7 @@
  *
  * <<Broadcom-WL-IPTag/Open:>>
  *
- * $Id: bcmutils.h 795094 2018-12-17 08:56:58Z $
+ * $Id: bcmutils.h 813798 2019-04-08 10:20:21Z $
  */
 
 #ifndef	_bcmutils_h_
@@ -177,6 +177,8 @@ extern void *pktoffset(osl_t *osh, void *p,  uint offset);
 #define DSCP_EF		0x2E
 /* CS6: Network Control (RFC2474) */
 #define DSCP_CS6	0x30
+/* CS7: Network Control (RFC2474) */
+#define DSCP_CS7	0x38
 
 extern uint pktsetprio(void *pkt, bool update_vtag);
 extern uint pktsetprio_qms(void *pkt, uint8* up_table, bool update_vtag);

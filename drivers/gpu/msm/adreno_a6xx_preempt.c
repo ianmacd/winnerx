@@ -146,6 +146,8 @@ static void _a6xx_preemption_fault(struct adreno_device *adreno_dev)
 	struct kgsl_device *device = KGSL_DEVICE(adreno_dev);
 	unsigned int status;
 
+	KGSL_DRV_WARN(device, "Preemption timed out\n");
+
 	/*
 	 * If the power is on check the preemption status one more time - if it
 	 * was successful then just transition to the complete state
@@ -153,7 +155,7 @@ static void _a6xx_preemption_fault(struct adreno_device *adreno_dev)
 	if (kgsl_state_is_awake(device)) {
 		adreno_readreg(adreno_dev, ADRENO_REG_CP_PREEMPT, &status);
 
-		if (status == 0) {
+		if (!(status & 0x1)) {
 			adreno_set_preempt_state(adreno_dev,
 				ADRENO_PREEMPT_COMPLETE);
 
@@ -163,7 +165,7 @@ static void _a6xx_preemption_fault(struct adreno_device *adreno_dev)
 	}
 
 	KGSL_DRV_ERR(device,
-		"Preemption timed out: cur=%d R/W=%X/%X, next=%d R/W=%X/%X\n",
+		"Preemption Fault: cur=%d R/W=%X/%X, next=%d R/W=%X/%X\n",
 		adreno_dev->cur_rb->id,
 		adreno_get_rptr(adreno_dev->cur_rb), adreno_dev->cur_rb->wptr,
 		adreno_dev->next_rb->id,
@@ -318,7 +320,7 @@ void a6xx_preemption_trigger(struct adreno_device *adreno_dev)
 	 * free when the GPU is already powered on, whereas an OOB requires an
 	 * unconditional handshake with the GMU.
 	 */
-	if (gmu_core_isenabled(device))
+	if (gmu_core_gpmu_isenabled(device))
 		gmu_core_regrmw(device, A6XX_GMU_AO_SPARE_CNTL, 0x0, 0x2);
 
 	/*
@@ -435,7 +437,7 @@ void a6xx_preemption_callback(struct adreno_device *adreno_dev, int bit)
 	 * We can now safely clear the preemption keepalive bit, allowing
 	 * power collapse to resume its regular activity.
 	 */
-	if (gmu_core_isenabled(KGSL_DEVICE(adreno_dev)))
+	if (gmu_core_gpmu_isenabled(KGSL_DEVICE(adreno_dev)))
 		gmu_core_regrmw(KGSL_DEVICE(adreno_dev),
 				A6XX_GMU_AO_SPARE_CNTL, 0x2, 0x0);
 
@@ -692,9 +694,9 @@ static void a6xx_preemption_iommu_close(struct adreno_device *adreno_dev)
 }
 #endif
 
-static void a6xx_preemption_close(struct kgsl_device *device)
+static void _preemption_close(struct adreno_device *adreno_dev)
 {
-	struct adreno_device *adreno_dev = ADRENO_DEVICE(device);
+	struct kgsl_device *device = KGSL_DEVICE(adreno_dev);
 	struct adreno_preemption *preempt = &adreno_dev->preempt;
 	struct adreno_ringbuffer *rb;
 	unsigned int i;
@@ -711,6 +713,15 @@ static void a6xx_preemption_close(struct kgsl_device *device)
 		kgsl_sharedmem_free(&rb->secure_preemption_desc);
 	}
 }
+
+void a6xx_preemption_close(struct adreno_device *adreno_dev)
+{
+	if (!test_bit(ADRENO_DEVICE_PREEMPTION, &adreno_dev->priv))
+		return;
+
+	_preemption_close(adreno_dev);
+}
+
 
 int a6xx_preemption_init(struct adreno_device *adreno_dev)
 {
@@ -753,7 +764,7 @@ int a6xx_preemption_init(struct adreno_device *adreno_dev)
 
 err:
 	if (ret)
-		a6xx_preemption_close(device);
+		_preemption_close(adreno_dev);
 
 	return ret;
 }
@@ -763,7 +774,7 @@ void a6xx_preemption_context_destroy(struct kgsl_context *context)
 	struct kgsl_device *device = context->device;
 	struct adreno_device *adreno_dev = ADRENO_DEVICE(device);
 
-	if (!adreno_is_preemption_enabled(adreno_dev))
+	if (!ADRENO_FEATURE(adreno_dev, ADRENO_PREEMPTION))
 		return;
 
 	gpumem_free_entry(context->user_ctxt_record);
@@ -778,7 +789,7 @@ int a6xx_preemption_context_init(struct kgsl_context *context)
 	struct adreno_device *adreno_dev = ADRENO_DEVICE(device);
 	uint64_t flags = 0;
 
-	if (!adreno_is_preemption_enabled(adreno_dev))
+	if (!ADRENO_FEATURE(adreno_dev, ADRENO_PREEMPTION))
 		return 0;
 
 	if (context->flags & KGSL_CONTEXT_SECURE)

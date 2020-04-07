@@ -13,6 +13,7 @@
 
 #include <linux/module.h>
 #include <linux/fs.h>
+#include <linux/pagemap.h>
 #include <linux/exportfs.h>
 #include <linux/mm.h>
 #include <linux/debugfs.h>
@@ -115,7 +116,7 @@ void __cleancache_init_fs(struct super_block *sb)
 {
 	int pool_id = CLEANCACHE_NO_BACKEND;
 
-	if (cleancache_ops && sb_rdonly(sb)) {
+	if (cleancache_ops) {
 		pool_id = cleancache_ops->init_fs(PAGE_SIZE);
 		if (pool_id < 0)
 			pool_id = CLEANCACHE_NO_POOL;
@@ -222,6 +223,11 @@ void __cleancache_put_page(struct page *page)
 		cleancache_puts++;
 		return;
 	}
+
+#ifdef CONFIG_SDP
+	if (mapping_sensitive(page->mapping))
+		return;
+#endif
 
 	VM_BUG_ON_PAGE(!PageLocked(page), page);
 	pool_id = page->mapping->host->i_sb->cleancache_poolid;

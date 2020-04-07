@@ -47,13 +47,92 @@ int ptn36502_config(int config, int is_DFP)
 		pr_err("%s: Invalid redrv_data->i2c\n", __func__);
 		return -1;
 	}
-#ifdef CONFIG_SEC_GTS5L_PROJECT
+#if defined(CONFIG_SEC_GTS6L_PROJECT) || defined(CONFIG_SEC_GTS6LWIFI_PROJECT) || defined(CONFIG_SEC_GTS6LX_PROJECT)
 	is_front = gpio_get_value(redrv_data->con_sel);
 #else
 	is_front = !gpio_get_value(redrv_data->con_sel);
 #endif
 	pr_info("%s: config(%s)(%s)(%s)\n", __func__, REDRV_MODE_Print[config], (is_DFP ? "DFP":"UFP"), (is_front ? "FRONT":"REAR"));
 
+#ifdef CONFIG_COMBO_REDRIVER_PTN36502_WITHOUT_AUX
+	switch (config)
+	{
+	case INIT_MODE:
+		i2c_smbus_write_byte_data(redrv_data->i2c, Device_Control, 0x00);
+		i2c_smbus_write_byte_data(redrv_data->i2c, USB_TXRX_Control, redrv_data->usbControl_US.data);
+		pr_info("%s: usbControl_US as (%x)\n", __func__, redrv_data->usbControl_US.data);
+		value = i2c_smbus_read_byte_data(redrv_data->i2c, USB_TXRX_Control);
+		pr_info("%s: read 0x04 command as (%x)\n", __func__, value);
+		i2c_smbus_write_byte_data(redrv_data->i2c, DS_TXRX_Control, redrv_data->usbControl_DS.data);
+		i2c_smbus_write_byte_data(redrv_data->i2c, DP_Lane0_Control, 0x29);
+		i2c_smbus_write_byte_data(redrv_data->i2c, DP_Lane1_Control, 0x29);
+		i2c_smbus_write_byte_data(redrv_data->i2c, DP_Lane2_Control, 0x29);
+		i2c_smbus_write_byte_data(redrv_data->i2c, DP_Lane3_Control, 0x29);
+		i2c_smbus_write_byte_data(redrv_data->i2c, DP_Link_Control, 0x0e);
+		i2c_smbus_write_byte_data(redrv_data->i2c, Mode_Control, 0x00);
+		break;
+	case USB3_ONLY_MODE:
+		if (is_DFP)
+			i2c_smbus_write_byte_data(redrv_data->i2c, Mode_Control, is_front ? 0x41:0x61);
+		else
+			i2c_smbus_write_byte_data(redrv_data->i2c, Mode_Control, is_front ? 0xa1:0x81);
+		value = i2c_smbus_read_byte_data(redrv_data->i2c, Mode_Control);
+		pr_info("%s: read 0x0b command as (%x)\n", __func__, value);
+		break;
+	case DP2_LANE_USB3_MODE:
+		i2c_smbus_write_byte_data(redrv_data->i2c, Device_Control, 0x80);
+		if (is_DFP)
+			i2c_smbus_write_byte_data(redrv_data->i2c, Mode_Control, is_front ? 0x4a:0x6a);
+		else
+			i2c_smbus_write_byte_data(redrv_data->i2c, Mode_Control, is_front ? 0x8a:0xaa);
+		i2c_smbus_write_byte_data(redrv_data->i2c, DP_Link_Control, 0x06);
+		break;
+	case DP4_LANE_MODE:
+		i2c_smbus_write_byte_data(redrv_data->i2c, Device_Control, 0x80);
+		if (is_DFP)
+		{
+			i2c_smbus_write_byte_data(redrv_data->i2c, Mode_Control, is_front ? 0x48:0x68);
+			i2c_smbus_write_byte_data(redrv_data->i2c, Mode_Control, is_front ? 0x4b:0x6b);
+		}
+		else 
+		{
+			i2c_smbus_write_byte_data(redrv_data->i2c, Mode_Control, is_front ? 0x88:0xa8);
+			i2c_smbus_write_byte_data(redrv_data->i2c, Mode_Control, is_front ? 0x8b:0xab);
+		}
+		i2c_smbus_write_byte_data(redrv_data->i2c, DP_Link_Control, 0x06);
+		break;
+	case AUX_THRU_MODE:
+		i2c_smbus_write_byte_data(redrv_data->i2c, 0x0d, 0x80);
+		i2c_smbus_write_byte_data(redrv_data->i2c, 0x0b, 0x00);
+		i2c_smbus_write_byte_data(redrv_data->i2c, 0x0b, 0x0b);
+		i2c_smbus_write_byte_data(redrv_data->i2c, 0x06, 0x0e);
+		break;
+	case AUX_CROSS_MODE:
+		i2c_smbus_write_byte_data(redrv_data->i2c, 0x0d, 0x80);
+		i2c_smbus_write_byte_data(redrv_data->i2c, 0x0b, 0x00);
+		i2c_smbus_write_byte_data(redrv_data->i2c, 0x0b, 0x2b);
+		i2c_smbus_write_byte_data(redrv_data->i2c, 0x06, 0x0e);
+		break;
+	case SAFE_STATE:
+		if (redrv_data->usbControl_data_update) {
+			i2c_smbus_write_byte_data(redrv_data->i2c, USB_TXRX_Control, redrv_data->usbControl_US.data);
+			i2c_smbus_write_byte_data(redrv_data->i2c, DS_TXRX_Control, redrv_data->usbControl_DS.data);
+			redrv_data->usbControl_data_update = 0;
+		}
+		i2c_smbus_write_byte_data(redrv_data->i2c, Device_Control, 0x00);
+		value = i2c_smbus_read_byte_data(redrv_data->i2c, Device_Control);
+		pr_info("%s: read 0x0d command as (%x)\n", __func__, value);
+		i2c_smbus_write_byte_data(redrv_data->i2c, Mode_Control, 0x40);
+		value = i2c_smbus_read_byte_data(redrv_data->i2c, Mode_Control);
+		pr_info("%s: read 0x0b command as (%x)\n", __func__, value);
+		break;
+	case CHECK_EXIST:
+		pr_err("%s: dummy\n", __func__);
+		break;
+	default:
+		pr_err("uknown %d\n", config);
+	}
+#else
 	switch (config) {
 	case INIT_MODE:
 		i2c_smbus_write_byte_data(redrv_data->i2c, Device_Control, 0x81);//chip reset
@@ -142,7 +221,7 @@ int ptn36502_config(int config, int is_DFP)
 	default:
 		pr_err("uknown %d\n", config);
 	}
-
+#endif
 	return 0;
 }
 EXPORT_SYMBOL(ptn36502_config);
@@ -152,6 +231,7 @@ static int ptn36502_set_gpios(struct device *dev)
 {
 	struct device_node *np = dev->of_node;
 	int ret = 0;
+	int scl, sda;
 
 	if (!redrv_data) {
 		pr_err("%s: Invalid redrv_data\n", __func__);
@@ -163,6 +243,8 @@ static int ptn36502_set_gpios(struct device *dev)
 	redrv_data->con_sel = 0;
 
 //	redrv_data->combo_redriver_en = of_get_named_gpio(np, "combo,ptn_en", 0);
+	scl = of_get_named_gpio(np, "combo,redriver_scl", 0);
+	sda = of_get_named_gpio(np, "combo,redriver_sda", 0);
 	redrv_data->redriver_en = of_get_named_gpio(np, "combo,redriver_en", 0);
 	redrv_data->con_sel = of_get_named_gpio(np, "combo,con_sel", 0);
 	
@@ -180,20 +262,27 @@ static int ptn36502_set_gpios(struct device *dev)
 	msleep(1000);
 */
 
+	if (scl > 0 && gpio_is_valid(scl))
+		gpio_direction_output(scl,1);
+	else
+		pr_info("%s: scl(%d) gpio is invalid\n", __func__, scl);
+	
+	if (sda > 0 && gpio_is_valid(sda))
+		gpio_direction_output(sda, 1);
+	else
+		pr_info("%s: sda(%d) gpio is invalid\n", __func__, sda);
+
 	if (gpio_is_valid(redrv_data->redriver_en)) {
 		ret = gpio_request(redrv_data->redriver_en, "ap7341d_redriver_en");
 		pr_info("%s: ap7341d_redriver_en ret gpio_request (%d)\n", __func__, ret);
 		ret = gpio_direction_output(redrv_data->redriver_en, 1);
 		pr_info("%s: ap7341d_redriver_en ret gpio_direction_output (%d)\n", __func__, ret);
+		msleep(1000);
+		pr_info("%s: after set values (%d)\n", __func__, gpio_get_value(redrv_data->redriver_en));
 	} else {
 		pr_info("%s: ap7341d_redriver_en gpio is invalid\n", __func__);
 		return 0;
 	}
-
-	msleep(1000);
-
-	pr_info("%s: after set values (%d) (%d)\n",
-		__func__, gpio_get_value(redrv_data->combo_redriver_en), gpio_get_value(redrv_data->redriver_en));
 
 	return 0;
 }
@@ -205,7 +294,11 @@ static void init_usb_control(void)
 	redrv_data->usbControl_US.BITS.DeEmpha = 0;
 	pr_info("%s: usbControl_US (%x)\n", __func__, redrv_data->usbControl_US.data);
 
+#if defined(CONFIG_SEC_GTS6L_PROJECT) || defined(CONFIG_SEC_GTS6LWIFI_PROJECT) || defined(CONFIG_SEC_GTS6LX_PROJECT)
+	redrv_data->usbControl_DS.BITS.RxEq = 3;
+#else
 	redrv_data->usbControl_DS.BITS.RxEq = 2;
+#endif
 	redrv_data->usbControl_DS.BITS.Swing = 1;
 	redrv_data->usbControl_DS.BITS.DeEmpha = 1;
 	pr_info("%s: usbControl_DS (%x)\n", __func__, redrv_data->usbControl_DS.data);

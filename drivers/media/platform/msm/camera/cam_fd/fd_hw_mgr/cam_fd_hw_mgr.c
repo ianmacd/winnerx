@@ -1352,10 +1352,10 @@ static int cam_fd_mgr_hw_flush_req(void *hw_mgr_priv,
 						"Failed in HW Stop %d", rc);
 					goto unlock_dev_flush_req;
 				}
-				hw_device->ready_to_process = true;
 			}
 
 unlock_dev_flush_req:
+			hw_device->ready_to_process = true;
 			mutex_unlock(&hw_device->lock);
 			break;
 		}
@@ -1435,11 +1435,11 @@ static int cam_fd_mgr_hw_flush_ctx(void *hw_mgr_priv,
 				CAM_ERR(CAM_FD, "Failed in HW Stop %d", rc);
 				goto unlock_dev_flush_ctx;
 			}
-			hw_device->ready_to_process = true;
 		}
 
 unlock_dev_flush_ctx:
-	mutex_unlock(&hw_device->lock);
+		hw_device->ready_to_process = true;
+		mutex_unlock(&hw_device->lock);
 	}
 	mutex_unlock(&hw_mgr->frame_req_mutex);
 
@@ -1523,6 +1523,9 @@ static int cam_fd_mgr_hw_stop(void *hw_mgr_priv, void *mgr_stop_args)
 
 	CAM_DBG(CAM_FD, "FD Device ready_to_process = %d",
 		hw_device->ready_to_process);
+
+	if (!hw_device->ready_to_process)
+		hw_device->ready_to_process = true;
 
 	if (hw_device->hw_intf->hw_ops.deinit) {
 		hw_deinit_args.hw_ctx = hw_ctx;
@@ -1629,6 +1632,16 @@ static int cam_fd_mgr_hw_prepare_update(void *hw_mgr_priv,
 	if (rc || !frame_req) {
 		CAM_ERR(CAM_FD, "Get frame_req failed, rc=%d, hw_ctx=%pK",
 			rc, hw_ctx);
+#if 0
+		if (hw_device->ready_to_process == false) {
+			struct cam_fd_hw_frame_done_args frame_done_args;
+			rc = hw_device->hw_intf->hw_ops.process_cmd(
+				hw_device->hw_intf->hw_priv,
+				CAM_FD_HW_CMD_REGISTER_DUMP,
+				&frame_done_args,
+				sizeof(struct cam_fd_hw_frame_done_args));
+		}
+#endif
 		return -ENOMEM;
 	}
 

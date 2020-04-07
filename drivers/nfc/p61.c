@@ -732,7 +732,8 @@ static int p61_parse_dt(struct device *dev,
 	struct device_node *np = dev->of_node;
 	struct device_node *spi_device_node;
 	struct platform_device *spi_pdev;
-	struct pinctrl *isdbt_pinctrl;
+	struct pinctrl *ese_pinctrl;
+	int ese_det_gpio;
 
 	if (!of_property_read_string(np, "p61-ap_vendor",
 		&p61_dev->ap_vendor)) {
@@ -744,15 +745,28 @@ static int p61_parse_dt(struct device *dev,
         if (!IS_ERR_OR_NULL(spi_device_node)) {
                 spi_pdev = of_find_device_by_node(spi_device_node);
 
-                isdbt_pinctrl = devm_pinctrl_get_select(&spi_pdev->dev
+                ese_pinctrl = devm_pinctrl_get_select(&spi_pdev->dev
                                 , "sleep");
 
-                if (IS_ERR(isdbt_pinctrl))
+                if (IS_ERR(ese_pinctrl))
                         pr_info("spi pin configuration is failed\n");
 		else
 			pr_info("spi pin configuration is success\n");
         } else {
 		pr_info("target does not use spi pinctrl\n");
+	}
+
+	ese_det_gpio = of_get_named_gpio(np, "ese-det-gpio", 0);
+	if (!gpio_is_valid(ese_det_gpio)) {
+		pr_info("%s : ese-det-gpio is not set", __func__);
+	} else {
+		gpio_request(ese_det_gpio, "ese_det_gpio");
+		gpio_direction_input(ese_det_gpio);
+		if (!gpio_get_value(ese_det_gpio)) {
+			pr_info("%s : ese is not supported", __func__);
+			return -ENODEV;
+		}
+		pr_info("%s : ese is supported", __func__);
 	}
 
 	return 0;

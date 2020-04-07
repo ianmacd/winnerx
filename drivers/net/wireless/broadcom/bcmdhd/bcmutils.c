@@ -24,7 +24,7 @@
  *
  * <<Broadcom-WL-IPTag/Open:>>
  *
- * $Id: bcmutils.c 806092 2019-02-21 08:19:13Z $
+ * $Id: bcmutils.c 813798 2019-04-08 10:20:21Z $
  */
 
 #include <bcm_cfg.h>
@@ -338,6 +338,7 @@ pktsetprio(void *pkt, bool update_vtag)
 			priority = PRIO_8021D_BE;
 			break;
 		case DSCP_CS6:
+		case DSCP_CS7:
 			priority = PRIO_8021D_NC;
 			break;
 		default:

@@ -540,7 +540,7 @@ typedef union {
 #define SEC_UVDM_RX_HEADER_NAK	0x1
 
 #define HOST_DRIVER_RECOGNITION_WAIT_MS	2000
-#define USB_PHY_SUSPEND_WAIT_MS		5000
+#define USB_PHY_SUSPEND_WAIT_MS		12000
 #define USB_PHY_RESUME_WAIT_MS		3000
 
 #define MAXIM_ENABLE_ALTERNATE_SRCCAP 0x1
@@ -618,6 +618,7 @@ void max77705_sec_unstructured_message_handler(struct max77705_usbc_platform_dat
 int max_uvdm_in_request_message(void *data);
 void max77705_vdm_process_set_samsung_alternate_mode(void *data, int mode);
 extern void max77705_vdm_process_set_identity_req(void *data);
+extern void max77705_vdm_process_set_DP_configure_mode_req(void *data, uint8_t W_DATA);
 extern void max77705_vdm_process_set_Dex_enter_mode_req(void *data);
 extern int max77705_sec_uvdm_in_request_message(void *data);
 extern int max77705_sec_uvdm_out_request_message(void *data, int size);

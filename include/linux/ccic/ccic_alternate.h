@@ -526,16 +526,17 @@ void send_dex_fan_unstructured_vdm_message(void * data, int cmd);
 void set_usb_phy_completion(int kind);
 int send_samsung_unstructured_vdm_message(void * data, const char *buf, size_t size);
 ssize_t send_samsung_unstructured_long_uvdm_message(void *data, void *buf, size_t size);
-int samsung_uvdm_in_request_message(void *data);
-ssize_t samsung_uvdm_out_request_message(void *data, size_t size);
-int samsung_uvdm_ready(void);
-void samsung_uvdm_close(void);
+extern int samsung_uvdm_in_request_message(void *data);
+extern int samsung_uvdm_out_request_message(void *data, int size);
+extern int samsung_uvdm_ready(void);
+extern void samsung_uvdm_close(void);
 //void receive_samsung_unstructured_vdm_message(void * data, int size);
 void set_enable_alternate_mode(int mode);
 void set_clear_discover_mode(void);
 void set_host_turn_on_event(int mode);
 int get_diplayport_status(void);
 void ccic_send_dock_uevent(u32 vid, u32 pid, int state);
+int process_check_accessory(void *data);
 #else
 inline void send_alternate_message(void * data, int cmd) {}
 inline void receive_alternate_message(void * data, VDM_MSG_IRQ_STATUS_Type *VDM_MSG_IRQ_State) {}
@@ -558,5 +559,6 @@ inline void set_clear_discover_mode(void) {}
 inline void set_host_turn_on_event(int mode) {}
 inline int get_diplayport_status(void) {}
 inline void ccic_send_dock_uevent(u32 vid, u32 pid, int state) {}
+inline int process_check_accessory(void *data) {}
 #endif
 #endif

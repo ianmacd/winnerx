@@ -414,7 +414,6 @@ static bool cam_res_mgr_gpio_is_shared(uint gpio)
 	bool found = false;
 	struct cam_res_mgr_dt *dt = &cam_res->dt;
 
-	mutex_lock(&cam_res->gpio_res_lock);
 	CAM_INFO(CAM_RES, "E, for gpio:%d", gpio);
 	for (; index < dt->num_shared_gpio; index++) {
 		if (gpio == dt->shared_gpio[index]) {
@@ -425,7 +424,6 @@ static bool cam_res_mgr_gpio_is_shared(uint gpio)
 	}
 	CAM_INFO(CAM_RES, "GPIO->FOUND = %d", found);
 	CAM_INFO(CAM_RES, "X, for gpio:%d", gpio);
-	mutex_unlock(&cam_res->gpio_res_lock);
 	return found;
 }
 
@@ -446,77 +444,83 @@ int cam_res_mgr_gpio_request(struct device *dev, uint gpio,
 				break;
 			}
 		}
-		mutex_unlock(&cam_res->gpio_res_lock);
-	}
 
-	/*
-	 * found equal to false has two situation:
-	 * 1. shared gpio not enabled
-	 * 2. shared gpio enabled, but not find this gpio
-	 *    from the gpio_res_list
-	 * These two situation both need request gpio.
-	 */
-	if (!found) {
-		CAM_INFO(CAM_RES, "GPIO NOT FOUND IN THE LIST");
-		rc = gpio_request_one(gpio, flags, label);
-		if (rc) {
-			CAM_ERR(CAM_RES, "gpio %d:%s request fails",
-				gpio, label);
-			return rc;
-		}
-	}
-
-	/*
-	 * If the gpio is in the shared list, and not find
-	 * from gpio_res_list, then insert a cam_gpio_res
-	 * to gpio_res_list.
-	 */
-	if (!found && cam_res
-		&& cam_res->shared_gpio_enabled &&
-		cam_res_mgr_gpio_is_shared(gpio)) {
-
-		CAM_INFO(CAM_RES, "GPIO NOT FOUND IN THE LIST BUT IT SHARED GPIO");
-		gpio_res = kzalloc(sizeof(struct cam_gpio_res), GFP_KERNEL);
-		if (!gpio_res)
-			return -ENOMEM;
-
-		gpio_res->gpio = gpio;
-		gpio_res->power_on_count = 0;
-		INIT_LIST_HEAD(&gpio_res->list);
-		INIT_LIST_HEAD(&gpio_res->dev_list);
-
-		mutex_lock(&cam_res->gpio_res_lock);
-		CAM_INFO(CAM_RES, "ABOUT TO ADD GPIO INTO DEVICE LIST");
-		rc = cam_res_mgr_add_device(dev, gpio_res);
-		if (rc) {
-			kfree(gpio_res);
-			mutex_unlock(&cam_res->gpio_res_lock);
-			return rc;
-		}
-
-		list_add_tail(&gpio_res->list, &cam_res->gpio_res_list);
-		mutex_unlock(&cam_res->gpio_res_lock);
-	}
-
-	if (found && cam_res
-		&& cam_res->shared_gpio_enabled) {
-		struct cam_dev_res *dev_res = NULL;
-
-		found = 0;
-		CAM_INFO(CAM_RES, "GPIO FOUND IN GPIO LIST");
-		mutex_lock(&cam_res->gpio_res_lock);
-		list_for_each_entry(dev_res, &gpio_res->dev_list, list) {
-			if (dev_res->dev == dev) {
-				found = 1;
-				break;
+		/*
+		* found equal to false has two situation:
+		* 1. shared gpio not enabled
+		* 2. shared gpio enabled, but not find this gpio
+		*    from the gpio_res_list
+		* These two situation both need request gpio.
+		*/
+		if (!found) {
+			CAM_INFO(CAM_RES, "GPIO NOT FOUND IN THE LIST");
+			rc = gpio_request_one(gpio, flags, label);
+			if (rc) {
+				CAM_ERR(CAM_RES, "gpio %d:%s request fails",
+					gpio, label);
+				mutex_unlock(&cam_res->gpio_res_lock);			
+				return rc;
 			}
 		}
 
-		if (!found) {
-			CAM_INFO(CAM_RES, "ABOUT TO ADD INTO DEVICE LIST");
+		/*
+		* If the gpio is in the shared list, and not find
+		* from gpio_res_list, then insert a cam_gpio_res
+		* to gpio_res_list.
+		*/
+		if (!found && cam_res_mgr_gpio_is_shared(gpio)) {
+			CAM_INFO(CAM_RES, "GPIO NOT FOUND IN THE LIST BUT IT SHARED GPIO");
+			gpio_res = kzalloc(sizeof(struct cam_gpio_res), GFP_KERNEL);
+			if (!gpio_res){
+				CAM_ERR(CAM_RES, "gpio %d:%s memory allocation is failed",
+                                        gpio, label);
+				mutex_unlock(&cam_res->gpio_res_lock);
+				return -ENOMEM;
+			}
+
+			gpio_res->gpio = gpio;
+			gpio_res->power_on_count = 0;
+			INIT_LIST_HEAD(&gpio_res->list);
+			INIT_LIST_HEAD(&gpio_res->dev_list);
+
+			CAM_INFO(CAM_RES, "ABOUT TO ADD GPIO INTO DEVICE LIST");
 			rc = cam_res_mgr_add_device(dev, gpio_res);
+			if (rc) {
+				kfree(gpio_res);
+				CAM_ERR(CAM_RES, "gpio %d:%s unable to add device in the resource list",
+                                        gpio, label);
+				mutex_unlock(&cam_res->gpio_res_lock);
+				return rc;
+			}
+			list_add_tail(&gpio_res->list, &cam_res->gpio_res_list);
+		}
+
+		if (found) {
+			struct cam_dev_res *dev_res = NULL;
+
+			found = 0;
+			CAM_INFO(CAM_RES, "GPIO FOUND IN GPIO LIST");
+			list_for_each_entry(dev_res, &gpio_res->dev_list, list) {
+				if (dev_res->dev == dev) {
+					found = 1;
+					break;
+				}
+			}
+
+			if (!found){
+				CAM_INFO(CAM_RES, "ABOUT TO ADD INTO DEVICE LIST");
+				rc = cam_res_mgr_add_device(dev, gpio_res);
+			}
 		}
 		mutex_unlock(&cam_res->gpio_res_lock);
+	}
+	else{
+		rc = gpio_request_one(gpio, flags, label);
+		if (rc) {
+			CAM_ERR(CAM_RES, "gpio %d:%s request fails",
+					gpio, label);
+			return rc;
+		}
 	}
 	CAM_INFO(CAM_RES, "RC: %d", rc);
 	CAM_INFO(CAM_RES, "X request gpio:%d", gpio);

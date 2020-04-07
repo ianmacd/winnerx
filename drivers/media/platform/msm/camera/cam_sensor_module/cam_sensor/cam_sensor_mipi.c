@@ -10,7 +10,9 @@
  * GNU General Public License for more details.
  */
 
+#if !defined(CONFIG_SEC_GTS5L_PROJECT) && !defined(CONFIG_SEC_GTS5LWIFI_PROJECT) && !defined(CONFIG_SEC_GTS6L_PROJECT) && !defined(CONFIG_SEC_GTS6X_PROJECT) && !defined(CONFIG_SEC_GTS6LWIFI_PROJECT)
 #define CONFIG_CAMERA_DYNAMIC_MIPI 1
+#endif
 #if defined(CONFIG_CAMERA_DYNAMIC_MIPI)
 #include <linux/platform_device.h>
 #include <linux/module.h>
@@ -26,6 +28,7 @@ static struct mutex g_mipi_mutex;
 static bool g_init_notifier;
 extern char mipi_string[20];
 extern char tof_freq[10];
+char band_info[20] = "\n";
 
 /* CP notity format (HEX raw format)
  * 10 00 AA BB 27 01 03 XX YY YY YY YY ZZ ZZ ZZ ZZ
@@ -128,6 +131,28 @@ int cam_mipi_select_mipi_by_rf_channel(const struct cam_mipi_channel *channel_li
 
 	cam_mipi_get_rf_channel(&input_ch);
 
+#if 1 //adaptive mipi test <[0]rat, [1~3]band, [4~8]channel>
+	if (band_info != NULL) {
+		uint32_t value = 0;
+		char temp[10] = "\n";
+		memcpy(temp, &band_info[0], 1);
+		kstrtouint(temp, 10, &value);
+		if (value > 0) {
+			input_ch.rat = value;
+
+			memset(temp, 0, sizeof(temp));
+			memcpy(temp, &band_info[1], 3);
+			kstrtouint(temp, 10, &value);
+			input_ch.band = value;
+
+			memset(temp, 0, sizeof(temp));
+			memcpy(temp, &band_info[4], 5);
+			kstrtouint(temp, 10, &value);
+			input_ch.channel = value;
+		}
+	}
+#endif
+
 	key.rat_band = CAM_RAT_BAND(input_ch.rat, input_ch.band);
 	key.channel_min = input_ch.channel;
 	key.channel_max = input_ch.channel;
@@ -156,6 +181,11 @@ void cam_mipi_init_setting(struct cam_sensor_ctrl_t *s_ctrl)
 {
 	const struct cam_mipi_sensor_mode *cur_mipi_sensor_mode;
 
+#if defined(CONFIG_CAMERA_FRS_DRAM_TEST)
+	extern long rear_frs_test_mode;
+
+	if (rear_frs_test_mode == 0) {
+#endif
 	if (s_ctrl->sensordata->slave_info.sensor_id == FRONT_SENSOR_ID_IMX374) {
 		s_ctrl->mipi_info = sensor_imx374_setfile_A_mipi_sensor_mode;
 		cur_mipi_sensor_mode = &(s_ctrl->mipi_info[0]);
@@ -166,9 +196,30 @@ void cam_mipi_init_setting(struct cam_sensor_ctrl_t *s_ctrl)
 	} else if (s_ctrl->sensordata->slave_info.sensor_id == SENSOR_ID_IMX316) {
 		s_ctrl->mipi_info = sensor_imx316_front_setfile_tx_sensor_mode;
 		cur_mipi_sensor_mode = &(s_ctrl->mipi_info[0]);
+	} else if (s_ctrl->sensordata->slave_info.sensor_id == SENSOR_ID_SAK2L4) {
+		CAM_INFO(CAM_SENSOR, "[dynamic_mipi] sensor_mode : %d", s_ctrl->sensor_mode);
+		if (s_ctrl->sensor_mode == 0) {
+			s_ctrl->mipi_info = sensor_sak2l4sx_setfile_tx_sensor_full_mode;
+		} else if (s_ctrl->sensor_mode == 1) {
+			s_ctrl->mipi_info = sensor_sak2l4sx_setfile_tx_sensor_4K2K_mode;
+		} else if (s_ctrl->sensor_mode == 2) {
+			s_ctrl->mipi_info = sensor_sak2l4sx_setfile_tx_sensor_SSM_mode;
+		} else if (s_ctrl->sensor_mode == 3) {
+			s_ctrl->mipi_info = sensor_sak2l4sx_setfile_tx_sensor_full_mode;
+		} else {
+			s_ctrl->mipi_info = sensor_sak2l4sx_setfile_tx_sensor_full_mode;
+		}
+
+		cur_mipi_sensor_mode = &(s_ctrl->mipi_info[0]);
+	} else if (s_ctrl->sensordata->slave_info.sensor_id == SENSOR_ID_IMX516) {
+		s_ctrl->mipi_info = sensor_imx516_rear_setfile_tx_sensor_mode;
+		cur_mipi_sensor_mode = &(s_ctrl->mipi_info[0]);
 	} else {
 		CAM_ERR(CAM_SENSOR, "[dynamic_mipi] Not support adaptive mipi : 0x%x", s_ctrl->sensordata->slave_info.sensor_id);
 	}
+#if defined(CONFIG_CAMERA_FRS_DRAM_TEST)
+	}
+#endif
 
 	s_ctrl->mipi_clock_index_cur = CAM_MIPI_NOT_INITIALIZED;
 	s_ctrl->mipi_clock_index_new = CAM_MIPI_NOT_INITIALIZED;
@@ -198,6 +249,11 @@ void cam_mipi_update_info(struct cam_sensor_ctrl_t *s_ctrl)
 			CAM_ERR(CAM_SENSOR, "sensor setting size is out of bound");
 		}
 	}
+#if defined(CONFIG_SEC_FACTORY)
+#if defined(CONFIG_SEC_D2XQ_PROJECT) || defined(CONFIG_SEC_D2Q_PROJECT) || defined(CONFIG_SEC_D2XQ2_PROJECT)
+	s_ctrl->mipi_clock_index_new = 0;//only for factory
+#endif
+#endif
 }
 
 void cam_mipi_get_clock_string(struct cam_sensor_ctrl_t *s_ctrl)
@@ -223,6 +279,23 @@ void cam_mipi_get_clock_string(struct cam_sensor_ctrl_t *s_ctrl)
  		}
 		CAM_INFO(CAM_SENSOR, "[TOF_FREQ_DBG] tof_freq : %s", tof_freq);
 	}
+#elif defined(CONFIG_SEC_D2XQ_PROJECT) || defined(CONFIG_SEC_D2Q_PROJECT) || defined(CONFIG_SEC_D2XQ2_PROJECT)
+	if (s_ctrl->sensordata->slave_info.sensor_id == SENSOR_ID_IMX516) {
+		if (strcmp(mipi_string, "96_19 VGA Mhz") == 0) {
+			scnprintf(tof_freq, sizeof(tof_freq), "96");
+		} else if (strcmp(mipi_string, "101_20 VGA Mhz") == 0) {
+			scnprintf(tof_freq, sizeof(tof_freq), "101");
+		} else if (strcmp(mipi_string, "100_20 VGA Mhz") == 0) {
+			scnprintf(tof_freq, sizeof(tof_freq), "100");
+		} else {
+			scnprintf(tof_freq, sizeof(tof_freq), "100");
+		}
+#if defined(CONFIG_SEC_FACTORY)
+		scnprintf(tof_freq, sizeof(tof_freq), "100");//only for factory
 #endif
+		CAM_INFO(CAM_SENSOR, "[TOF_FREQ_DBG] tof_freq : %s", tof_freq);
+	}
+#endif
+
 }
 #endif

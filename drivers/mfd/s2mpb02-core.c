@@ -22,6 +22,7 @@
 #include <linux/mfd/s2mpb02.h>
 #include <linux/mfd/s2mpb02-private.h>
 #include <linux/regulator/machine.h>
+#include <linux/debugfs.h>
 
 #ifdef	CONFIG_OF
 #include <linux/of_device.h>
@@ -125,6 +126,39 @@ int s2mpb02_update_reg(struct i2c_client *i2c, u8 reg, u8 val, u8 mask)
 	return ret;
 }
 EXPORT_SYMBOL_GPL(s2mpb02_update_reg);
+
+#ifdef CONFIG_DEBUG_FS
+static int s2mpb02_regdump_show(struct seq_file *s, void *unused)
+{
+	struct s2mpb02_dev *s2mpb02_dev = s->private;
+	u8 i, val = 0;
+
+	for (i = S2MPB02_REG_ID; i <= S2MPB02_REG_LDO_DSCH3; i++) {
+		s2mpb02_read_reg(s2mpb02_dev->i2c, i, &val);
+		seq_printf(s, "0x%x: 0x%x\n", i, val);
+	}
+
+	return 0;
+}
+
+static int s2mpb02_regdump_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, s2mpb02_regdump_show, inode->i_private);
+}
+
+static const struct file_operations s2mpb02_regdump_operations = {
+	.open           = s2mpb02_regdump_open,
+	.read           = seq_read,
+	.llseek         = seq_lseek,
+	.release        = single_release,
+};
+
+static void s2mpb02_debugfs_init(struct s2mpb02_dev *s2mpb02)
+{
+	debugfs_create_file("s2mpb02_regdump", 0440,
+			NULL, s2mpb02, &s2mpb02_regdump_operations);
+}
+#endif
 
 #ifdef	CONFIG_OF
 static int of_s2mpb02_dt(struct device *dev,
@@ -270,6 +304,9 @@ static int s2mpb02_i2c_probe(struct i2c_client *i2c,
 		goto err_irq_init;
 
 	device_init_wakeup(s2mpb02->dev, pdata->wakeup);
+#ifdef CONFIG_DEBUG_FS
+	s2mpb02_debugfs_init(s2mpb02);
+#endif
 
 	return ret;
 

@@ -17,7 +17,6 @@
 #define FTS_SUPPORT_TA_MODE
 
 #undef FTS_SUPPORT_TOUCH_KEY
-#define FTS_SUPPORT_SPONGELIB
 #define USE_OPEN_CLOSE
 #define SEC_TSP_FACTORY_TEST
 
@@ -37,15 +36,7 @@
 #endif
 #define TOUCH_PRINT_INFO_DWORK_TIME	30000	/* 30s */
 
-/*
- * fts_input_feature_support
- *
- * bit value should be made a promise with InputFramework.
- *	bit	: feature
- *	0	: AOT -Doubletap wakeup in whole screen when LCD off.
- */
-#define INPUT_FEATURE_SUPPORT_AOT	(1 << 0)
-
+#define FTS_TS_LOCATION_DETECT_SIZE	6
 
 #define FIRMWARE_IC			"fts_ic"
 #define FTS_MAX_FW_PATH			64
@@ -100,6 +91,7 @@
 #define FTS_CMD_SET_GET_COVERTYPE			0x38
 #define FTS_CMD_WRITE_WAKEUP_GESTURE			0x39
 #define FTS_CMD_WRITE_COORDINATE_FILTER			0x3A
+#define FTS_CMD_SET_FOD_FINGER_MERGE			0x3B
 
 #define FTS_READ_ONE_EVENT				0x60
 #define FTS_READ_ALL_EVENT				0x61
@@ -114,7 +106,12 @@
 
 #define FTS_CMD_SPONGE_OFFSET_MODE			0x00
 #define FTS_CMD_SPONGE_OFFSET_AOD_RECT			0x02
-#define FTS_CMD_SPONGE_LP_DUMP				0x01F0
+#define FTS_CMD_SPONGE_OFFSET_UTC			0x10
+#define FTS_CMD_SPONGE_PRESS_PROPERTY			0x14
+#define FTS_CMD_SPONGE_FOD_INFO				0x15
+#define FTS_CMD_SPONGE_FOD_POSITION			0x19
+#define FTS_CMD_SPONGE_FOD_RECT				0x4B
+#define FTS_CMD_SPONGE_LP_DUMP				0xF0
 
 #define FTS_EVENT_STATUS_REPORT				0x43
 #define FTS_EVENT_ERROR_REPORT				0xF3
@@ -206,9 +203,16 @@
 /* gesture type */
 #define FTS_SPONGE_EVENT_SWIPE_UP			0
 #define FTS_SPONGE_EVENT_DOUBLETAP			1
-#define FTS_SPONGE_EVENT_PRESSURE			2
+#define FTS_SPONGE_EVENT_PRESS				3
+#define FTS_SPONGE_EVENT_SINGLETAP			4
 
 /* gesture ID */
+#define FTS_SPONGE_EVENT_GESTURE_ID_AOD			0
+#define FTS_SPONGE_EVENT_GESTURE_ID_DOUBLETAP_TO_WAKEUP	1
+#define FTS_SPONGE_EVENT_GESTURE_ID_FOD_LONG		0
+#define FTS_SPONGE_EVENT_GESTURE_ID_FOD_NORMAL		1
+#define FTS_SPONGE_EVENT_GESTURE_ID_FOD_RELEASE		2
+#define FTS_SPONGE_EVENT_GESTURE_ID_FOD_OUT		3
 
 #define FTS_ENABLE					1
 #define FTS_DISABLE					0
@@ -216,7 +220,20 @@
 /* sponge mode */
 #define FTS_MODE_SPAY					(1 << 1)
 #define FTS_MODE_AOD					(1 << 2)
-#define FTS_MODE_DOUBLETAP_WAKEUP			(1 << 2)
+#define FTS_MODE_SINGLETAP				(1 << 3)
+#define FTS_MODE_PRESS					(1 << 4)
+#define FTS_MODE_DOUBLETAP_WAKEUP			(1 << 5)
+
+typedef enum {
+	SPONGE_EVENT_TYPE_SPAY			= 0x04,
+	SPONGE_EVENT_TYPE_SINGLE_TAP		= 0x08,
+	SPONGE_EVENT_TYPE_AOD_PRESS		= 0x09,
+	SPONGE_EVENT_TYPE_AOD_LONGPRESS		= 0x0A,
+	SPONGE_EVENT_TYPE_AOD_DOUBLETAB		= 0x0B,
+	SPONGE_EVENT_TYPE_FOD			= 0x0F,
+	SPONGE_EVENT_TYPE_FOD_RELEASE		= 0x10,
+	SPONGE_EVENT_TYPE_FOD_OUT		= 0x11,
+} SPONGE_EVENT_TYPE;
 
 #define FTS_MAX_X_RESOLUTION	1599
 #define FTS_MAX_Y_RESOLUTION	2559
@@ -274,10 +291,11 @@ struct fts_sponge_information {
 	u8 sponge_model_name[32];
 } __packed;
 
-#define FTS_CMD_EDGE_HANDLER		0x00
-#define FTS_CMD_EDGE_AREA		0x01
-#define FTS_CMD_DEAD_ZONE		0x02
-#define FTS_CMD_LANDSCAPE_MODE		0x03
+#define FTS_CMD_EDGE_AREA		0x07
+#define FTS_CMD_DEAD_ZONE		0x08
+#define FTS_CMD_LANDSCAPE_MODE		0x09
+#define FTS_CMD_LANDSCAPE_TOP_BOTTOM	0x0A
+#define FTS_CMD_EDGE_HANDLER		0x0C
 
 enum grip_write_mode {
 	G_NONE				= 0,
@@ -300,9 +318,12 @@ enum grip_set_data {
 struct fts_finger {
 	u8 id;
 	u8 ttype;
+	u8 prev_ttype;
 	u8 action;
 	u16 x;
 	u16 y;
+	u16 p_x;
+	u16 p_y;
 	u8 z;
 	u8 hover_flag;
 	u8 glove_flag;
@@ -535,9 +556,13 @@ struct fts_i2c_platform_data {
 	bool support_sidegesture;
 	bool support_dex;
 	bool enable_settings_aot;
+	bool sync_reportrate_120;
 	bool enable_vbus_noti;
+	bool support_fod;
 	int max_x;
 	int max_y;
+	int display_x;
+	int display_y;
 	u8 panel_revision;	/* to identify panel info */
 	const char *firmware_name;
 	const char *project_name;
@@ -576,6 +601,9 @@ struct fts_i2c_platform_data {
 	int bringup;
 
 	bool chip_on_board;
+	u32 area_indicator;
+	u32 area_navigation;
+	u32 area_edge;
 #ifdef CONFIG_INPUT_SEC_SECURE_TOUCH
 	int ss_touch_num;
 #endif
@@ -697,6 +725,11 @@ struct fts_ts_info {
 	unsigned int scrub_id;
 	unsigned int scrub_x;
 	unsigned int scrub_y;
+	u8 press_prop;
+	int fod_x;
+	int fod_y;
+	int fod_vi_size;
+
 #if defined(CONFIG_INPUT_SEC_SECURE_TOUCH)
 	atomic_t st_enabled;
 	atomic_t st_pending_irqs;
@@ -711,6 +744,7 @@ struct fts_ts_info {
 	struct mutex irq_mutex;
 	struct mutex device_mutex;
 	struct mutex eventlock;
+	struct mutex sponge_mutex;
 	bool reinit_done;
 	bool info_work_done;
 
@@ -730,8 +764,11 @@ struct fts_ts_info {
 	u16 grip_landscape_deadzone;
 	u16 grip_landscape_top_deadzone;
 	u16 grip_landscape_bottom_deadzone;
+	u16 grip_landscape_top_gripzone;
+	u16 grip_landscape_bottom_gripzone;
 
 	u16 rect_data[4];
+	u16 fod_rect_data[4];
 	u8 ito_test[4];
 	u8 check_multi;
 	unsigned int multi_count;
@@ -769,10 +806,8 @@ struct fts_ts_info {
 	int (*fts_get_version_info)(struct fts_ts_info *info);
 	int (*fts_get_sysinfo_data)(struct fts_ts_info *info, u8 sysinfo_addr, u8 read_cnt, u8 *data);
 
-#ifdef FTS_SUPPORT_SPONGELIB
 	int (*fts_read_from_sponge)(struct fts_ts_info *info, u16 offset, u8 *data, int length);
 	int (*fts_write_to_sponge)(struct fts_ts_info *info, u16 offset, u8 *data, int length);
-#endif
 };
 
 int fts_fw_update_on_probe(struct fts_ts_info *info);

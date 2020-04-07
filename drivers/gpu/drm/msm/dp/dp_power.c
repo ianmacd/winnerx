@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2018, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2019, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -214,13 +214,13 @@ error:
 
 static int dp_power_pinctrl_set(struct dp_power_private *power, bool active)
 {
-	int rc = -EFAULT;
+	int rc = 0;
 	struct pinctrl_state *pin_state;
 	struct dp_parser *parser;
 
 	parser = power->parser;
 
-	if (IS_ERR_OR_NULL(parser->pinctrl.pin))
+	if (IS_ERR_OR_NULL(parser->pinctrl.pin) || power->dp_power.sim_mode)
 		return 0;
 
 	if (parser->no_aux_switch && parser->lphw_hpd) {
@@ -237,9 +237,6 @@ static int dp_power_pinctrl_set(struct dp_power_private *power, bool active)
 		}
 	}
 
-	if (parser->no_aux_switch)
-		return 0;
-
 	pin_state = active ? parser->pinctrl.state_active
 				: parser->pinctrl.state_suspend;
 	if (!IS_ERR_OR_NULL(pin_state)) {
@@ -249,10 +246,6 @@ static int dp_power_pinctrl_set(struct dp_power_private *power, bool active)
 			pr_err("can not set %s pins\n",
 			       active ? "dp_active"
 			       : "dp_sleep");
-	} else {
-		pr_err("invalid '%s' pinstate\n",
-		       active ? "dp_active"
-		       : "dp_sleep");
 	}
 
 	return rc;
@@ -779,32 +772,21 @@ void secdp_config_gpios_factory(int aux_sel, bool on)
 
 	if (on) {
 		secdp_aux_pullup_vreg_enable(true);
+		secdp_power_set_gpio(aux_sel);
 
 #ifdef CONFIG_COMBO_REDRIVER_PTN36502
-		if (parser->aux_sw_redrv)
-			secdp_power_set_gpio(aux_sel);	
-
 		if (aux_sel == 1)
 			secdp_redriver_aux_ctrl(REDRIVER_SWITCH_CROSS);
 		else if (aux_sel == 0)
 			secdp_redriver_aux_ctrl(REDRIVER_SWITCH_THROU);
 		else
 			pr_err("unknown <%d>\n", aux_sel);
-#else
-		/* set aux_sel, aux_en */
-		secdp_power_set_gpio(aux_sel);
 #endif
 	} else {
 #ifdef CONFIG_COMBO_REDRIVER_PTN36502
 		secdp_redriver_aux_ctrl(REDRIVER_SWITCH_RESET);
-
-		if (parser->aux_sw_redrv)
-			secdp_power_unset_gpio();
-#else
-		/* unset aux_sel, aux_en */
-		secdp_power_unset_gpio();
 #endif
-
+		secdp_power_unset_gpio();
 		secdp_aux_pullup_vreg_enable(false);
 	}
 }
@@ -838,6 +820,32 @@ enum plug_orientation secdp_get_plug_orientation(void)
 
 	/*cannot be here*/
 	return ORIENTATION_NONE;
+}
+
+bool secdp_get_clk_status(enum dp_pm_type type)
+{
+	struct dp_power_private *power = g_secdp_power;
+	bool ret = false;
+
+	switch (type) {
+	case DP_CORE_PM:
+		ret = power->core_clks_on;
+		break;
+	case DP_STREAM0_PM:
+		ret = power->strm0_clks_on;
+		break;
+	case DP_STREAM1_PM:
+		ret = power->strm1_clks_on;
+		break;
+	case DP_LINK_PM:
+		ret = power->link_clks_on;
+		break;
+	default:
+		pr_err("invalid type:%d\n", type);
+		break;
+	}
+
+	return ret;
 }
 #endif
 

@@ -115,10 +115,12 @@ static int muic_handle_usb_notification(struct notifier_block *nb,
 	case EXTERNAL_NOTIFY_POWERROLE:
 		pr_info("%s: POWER ROLE(%d)\n", __func__, devicetype);
 		/* devicetype 1 >> BC1.2 off */
-		if (devicetype)
+		if (devicetype) {
 			pmuic->is_powerrole_state = true;
-		else
+		}
+		else {
 			pmuic->is_powerrole_state = false;
+		}
 		break;
 	default:
 		break;

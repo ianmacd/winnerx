@@ -69,6 +69,7 @@ enum self_display_data_flag {
 	FLAG_SELF_ACLK = 5,
 	FLAG_SELF_DCLK = 6,
 	FLAG_SELF_VIDEO = 7,
+	FLAG_SELF_MASK_CRC = 8,
 	FLAG_SELF_DISP_MAX,
 };
 

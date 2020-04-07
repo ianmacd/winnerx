@@ -125,7 +125,7 @@
 	.endm
 
 	.macro ropp_load_mk
-#ifdef CONFIG_UH_RKP
+#ifdef CONFIG_UH
 	push	x0, x1
 	push	x2, x3
 	push	x4, x5

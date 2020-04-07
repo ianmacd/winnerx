@@ -39,11 +39,19 @@
 
 #define DSI_CTRL_DEFAULT_LABEL "MDSS DSI CTRL"
 
+#if defined(CONFIG_DISPLAY_SAMSUNG)
+#define DSI_CTRL_TX_TO_MS     500
+#else
 #define DSI_CTRL_TX_TO_MS     200
+#endif
 
 #define TO_ON_OFF(x) ((x) ? "ON" : "OFF")
 
 #define CEIL(x, y)              (((x) + ((y)-1)) / (y))
+
+#define TICKS_IN_MICRO_SECOND    1000000
+
+extern int err_flag;
 struct dsi_ctrl_list_item {
 	struct dsi_ctrl *ctrl;
 	struct list_head list;
@@ -56,6 +64,7 @@ static const enum dsi_ctrl_version dsi_ctrl_v1_4 = DSI_CTRL_VERSION_1_4;
 static const enum dsi_ctrl_version dsi_ctrl_v2_0 = DSI_CTRL_VERSION_2_0;
 static const enum dsi_ctrl_version dsi_ctrl_v2_2 = DSI_CTRL_VERSION_2_2;
 static const enum dsi_ctrl_version dsi_ctrl_v2_3 = DSI_CTRL_VERSION_2_3;
+static const enum dsi_ctrl_version dsi_ctrl_v2_4 = DSI_CTRL_VERSION_2_4;
 
 static const struct of_device_id msm_dsi_of_match[] = {
 	{
@@ -73,6 +82,10 @@ static const struct of_device_id msm_dsi_of_match[] = {
 	{
 		.compatible = "qcom,dsi-ctrl-hw-v2.3",
 		.data = &dsi_ctrl_v2_3,
+	},
+	{
+		.compatible = "qcom,dsi-ctrl-hw-v2.4",
+		.data = &dsi_ctrl_v2_4,
 	},
 	{}
 };
@@ -476,6 +489,7 @@ static int dsi_ctrl_init_regmap(struct platform_device *pdev,
 		break;
 	case DSI_CTRL_VERSION_2_2:
 	case DSI_CTRL_VERSION_2_3:
+	case DSI_CTRL_VERSION_2_4:
 		ptr = msm_ioremap(pdev, "disp_cc_base", ctrl->name);
 		if (IS_ERR(ptr)) {
 			pr_err("disp_cc base address not found for [%s]\n",
@@ -578,6 +592,7 @@ static int dsi_ctrl_clocks_init(struct platform_device *pdev,
 	if (IS_ERR(hs_link->byte_clk)) {
 		rc = PTR_ERR(hs_link->byte_clk);
 		pr_err("failed to get byte_clk, rc=%d\n", rc);
+		hs_link->byte_clk = NULL;
 		goto fail;
 	}
 
@@ -585,6 +600,7 @@ static int dsi_ctrl_clocks_init(struct platform_device *pdev,
 	if (IS_ERR(hs_link->pixel_clk)) {
 		rc = PTR_ERR(hs_link->pixel_clk);
 		pr_err("failed to get pixel_clk, rc=%d\n", rc);
+		hs_link->pixel_clk = NULL;
 		goto fail;
 	}
 
@@ -592,6 +608,7 @@ static int dsi_ctrl_clocks_init(struct platform_device *pdev,
 	if (IS_ERR(lp_link->esc_clk)) {
 		rc = PTR_ERR(lp_link->esc_clk);
 		pr_err("failed to get esc_clk, rc=%d\n", rc);
+		lp_link->esc_clk = NULL;
 		goto fail;
 	}
 
@@ -605,6 +622,7 @@ static int dsi_ctrl_clocks_init(struct platform_device *pdev,
 	if (IS_ERR(rcg->byte_clk)) {
 		rc = PTR_ERR(rcg->byte_clk);
 		pr_err("failed to get byte_clk_rcg, rc=%d\n", rc);
+		rcg->byte_clk = NULL;
 		goto fail;
 	}
 
@@ -612,6 +630,7 @@ static int dsi_ctrl_clocks_init(struct platform_device *pdev,
 	if (IS_ERR(rcg->pixel_clk)) {
 		rc = PTR_ERR(rcg->pixel_clk);
 		pr_err("failed to get pixel_clk_rcg, rc=%d\n", rc);
+		rcg->pixel_clk = NULL;
 		goto fail;
 	}
 
@@ -819,6 +838,7 @@ static int dsi_ctrl_update_link_freqs(struct dsi_ctrl *dsi_ctrl,
 	int rc = 0;
 	u32 num_of_lanes = 0;
 	u32 bpp;
+	u32 refresh_rate = TICKS_IN_MICRO_SECOND;
 	u64 h_period, v_period, bit_rate, pclk_rate, bit_rate_per_lane,
 	    byte_clk_rate;
 	struct dsi_host_common_cfg *host_cfg = &config->common_config;
@@ -840,9 +860,17 @@ static int dsi_ctrl_update_link_freqs(struct dsi_ctrl *dsi_ctrl,
 		num_of_lanes = split_link->lanes_per_sublink;
 
 	if (config->bit_clk_rate_hz_override == 0) {
-		h_period = DSI_H_TOTAL_DSC(timing);
-		v_period = DSI_V_TOTAL(timing);
-		bit_rate = h_period * v_period * timing->refresh_rate * bpp;
+		if (config->panel_mode == DSI_OP_CMD_MODE) {
+			h_period = DSI_H_ACTIVE_DSC(timing);
+			h_period += timing->overlap_pixels;
+			v_period = timing->v_active;
+			do_div(refresh_rate, timing->mdp_transfer_time_us);
+		} else {
+			h_period = DSI_H_TOTAL_DSC(timing);
+			v_period = DSI_V_TOTAL(timing);
+			refresh_rate = timing->refresh_rate;
+		}
+		bit_rate = h_period * v_period * refresh_rate * bpp;
 	} else {
 		bit_rate = config->bit_clk_rate_hz_override * num_of_lanes;
 	}
@@ -1310,6 +1338,7 @@ kickoff:
 		if (msg->tx_buf[0] == 0x2a || msg->tx_buf[0] == 0x2b)
 			SDE_ATRACE_BEGIN("dsi_message_tx_wait");
 #endif
+		SDE_EVT32(hw_flags, ret, 0x1111);
 		ret = wait_for_completion_timeout(
 				&dsi_ctrl->irq_info.cmd_dma_done,
 				msecs_to_jiffies(DSI_CTRL_TX_TO_MS));
@@ -1340,21 +1369,32 @@ kickoff:
 						DSI_SINT_CMD_MODE_DMA_DONE);
 				pr_err("[DSI_%d]Command transfer failed\n",
 						dsi_ctrl->cell_index);
+				/* 
+				*  when we remove panic on tx_timeout we need to make err_flag 0 
+				*  otherwise it will make crtc_commit thread to be in a while loop
+				*  complete_commit(struct msm_commit *c) if (err_flag) { while (1) msleep(20);
+				*/
+				err_flag = 0;
+				SDE_EVT32(0xbad, 0x1);
 #if defined(CONFIG_DISPLAY_SAMSUNG)
 				/* check physical display connection */
-				if (gpio_is_valid(vdd->ub_con_det_gpio)) {
-					pr_err("[SDE] ub_con_det_gpio(%d) level=%d\n",
-							vdd->ub_con_det_gpio,
-							gpio_get_value(vdd->ub_con_det_gpio));
+				if (gpio_is_valid(vdd->ub_con_det.gpio)) {
+					pr_err("[SDE] ub_con_det.gpio(%d) level=%d\n",
+							vdd->ub_con_det.gpio,
+							gpio_get_value(vdd->ub_con_det.gpio));
 				}
 #endif
 
-#if 1 // case 03745287
+/* 
+*  when we remove panic on tx_timeout we need to make err_flag 0
+*  otherwise it will make crtc_commit thread to be in a while loop
+*  complete_commit(struct msm_commit *c) if (err_flag) { while (1) msleep(20);
+*/
+#if 0 // case 03745287
 				if (!dsi_ctrl->esd_check_underway) {
-					SDE_DBG_DUMP("sde", "dsi0_ctrl",
-							"dsi0_phy", "dsi1_ctrl", "dsi1_phy",
-							"vbif", "dbg_bus","dsi_dbg_bus",
-							"vbif_dbg_bus", "panic");
+					/* For retry rx operation */
+					if (!msg->rx_len)
+						SDE_DBG_DUMP("all", "dbg_bus", "vbif_dbg_bus", "panic");
 				}
 #endif
 			}
@@ -1505,6 +1545,15 @@ static int dsi_message_rx(struct dsi_ctrl *dsi_ctrl,
 		rc = dsi_message_tx(dsi_ctrl, msg, flags);
 		if (rc) {
 			pr_err("Message transmission failed, rc=%d\n", rc);
+
+#if defined(CONFIG_DISPLAY_SAMSUNG)
+			{
+				struct dsi_display *display = dsi_ctrl->irq_info.irq_err_cb.event_usr_ptr;
+
+				if (work_busy(&display->lp_rx_timeout_work))
+					usleep_range(20000, 20000);
+			}
+#endif
 			goto error;
 		}
 		/*
@@ -1645,6 +1694,18 @@ static int dsi_disable_ulps(struct dsi_ctrl *dsi_ctrl)
 	}
 
 	return rc;
+}
+
+static void dsi_ctrl_enable_error_interrupts(struct dsi_ctrl *dsi_ctrl)
+{
+	if (dsi_ctrl->host_config.panel_mode == DSI_OP_VIDEO_MODE &&
+			!dsi_ctrl->host_config.u.video_engine.bllp_lp11_en &&
+			!dsi_ctrl->host_config.u.video_engine.eof_bllp_lp11_en)
+		dsi_ctrl->hw.ops.enable_error_interrupts(&dsi_ctrl->hw,
+				0xFF00A0);
+	else
+		dsi_ctrl->hw.ops.enable_error_interrupts(&dsi_ctrl->hw,
+				0xFF00E0);
 }
 
 static int dsi_ctrl_drv_state_init(struct dsi_ctrl *dsi_ctrl)
@@ -2257,7 +2318,9 @@ int dsi_ctrl_setup(struct dsi_ctrl *dsi_ctrl)
 	}
 
 	dsi_ctrl->hw.ops.enable_status_interrupts(&dsi_ctrl->hw, 0x0);
-	dsi_ctrl->hw.ops.enable_error_interrupts(&dsi_ctrl->hw, 0xFF00E0);
+
+	dsi_ctrl_enable_error_interrupts(dsi_ctrl);
+
 	dsi_ctrl->hw.ops.ctrl_en(&dsi_ctrl->hw, true);
 
 	mutex_unlock(&dsi_ctrl->ctrl_lock);
@@ -2380,6 +2443,12 @@ static void dsi_ctrl_handle_error_status(struct dsi_ctrl *dsi_ctrl,
 	if (error & 0x3000E00)
 		pr_err("dsi PHY contention error: 0x%lx\n", error);
 
+	/* ignore TX timeout if blpp_lp11 is disabled */
+	if (dsi_ctrl->host_config.panel_mode == DSI_OP_VIDEO_MODE &&
+			!dsi_ctrl->host_config.u.video_engine.bllp_lp11_en &&
+			!dsi_ctrl->host_config.u.video_engine.eof_bllp_lp11_en)
+		error &= ~DSI_HS_TX_TIMEOUT;
+
 	/* TX timeout error */
 	if (error & 0xE0) {
 		if (error & 0xA0) {
@@ -2414,8 +2483,6 @@ static void dsi_ctrl_handle_error_status(struct dsi_ctrl *dsi_ctrl,
 	/* DSI FIFO UNDERFLOW error */
 	if (error & 0xF00000) {
 		pr_err("dsi FIFO UNDERFLOW error: 0x%lx\n", error);
-		SDE_DBG_DUMP_WQ("sde", "dsi0_ctrl", "dsi0_phy", "dsi1_ctrl", "dsi1_phy",
-			"vbif", "dbg_bus","dsi_dbg_bus", "vbif_dbg_bus", "panic");
 		if (cb_info.event_cb) {
 			cb_info.event_idx = DSI_FIFO_UNDERFLOW;
 			(void)cb_info.event_cb(cb_info.event_usr_ptr,
@@ -2779,7 +2846,8 @@ int dsi_ctrl_host_init(struct dsi_ctrl *dsi_ctrl, bool is_splash_enabled)
 	}
 
 	dsi_ctrl->hw.ops.enable_status_interrupts(&dsi_ctrl->hw, 0x0);
-	dsi_ctrl->hw.ops.enable_error_interrupts(&dsi_ctrl->hw, 0xFF00E0);
+
+	dsi_ctrl_enable_error_interrupts(dsi_ctrl);
 
 	pr_debug("[DSI_%d]Host initialization complete, continuous splash status:%d\n",
 		dsi_ctrl->cell_index, is_splash_enabled);
@@ -2980,10 +3048,12 @@ int dsi_ctrl_update_host_config(struct dsi_ctrl *ctrl,
 
 	pr_debug("[DSI_%d]Host config updated\n", ctrl->cell_index);
 	memcpy(&ctrl->host_config, config, sizeof(ctrl->host_config));
-	ctrl->mode_bounds.x = ctrl->host_config.video_timing.h_active *
-			ctrl->horiz_index;
+	ctrl->mode_bounds.x = (ctrl->host_config.video_timing.h_active +
+			ctrl->host_config.video_timing.overlap_pixels) *
+						 ctrl->horiz_index;
 	ctrl->mode_bounds.y = 0;
-	ctrl->mode_bounds.w = ctrl->host_config.video_timing.h_active;
+	ctrl->mode_bounds.w = ctrl->host_config.video_timing.h_active +
+				ctrl->host_config.video_timing.overlap_pixels;
 	ctrl->mode_bounds.h = ctrl->host_config.video_timing.v_active;
 	memcpy(&ctrl->roi, &ctrl->mode_bounds, sizeof(ctrl->mode_bounds));
 	ctrl->modeupdated = true;

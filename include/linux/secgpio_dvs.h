@@ -7,8 +7,6 @@
 
 #include <linux/types.h>
 
-#define SECGPIO_SLEEP_DEBUGGING
-
 enum gdvs_phone_status {
 	PHONE_INIT = 0,
 	PHONE_SLEEP,

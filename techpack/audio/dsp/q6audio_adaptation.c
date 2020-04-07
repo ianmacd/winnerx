@@ -59,6 +59,7 @@ enum {
 	LOOPBACK_DISABLE = 0,
 	LOOPBACK_ENABLE,
 	LOOPBACK_NODELAY,
+	LOOPBACK_ZERO_DELAY,
 	LOOPBACK_MAX,
 };
 
@@ -485,6 +486,35 @@ int adm_set_sb_rotation(int port_id, int copp_idx,
 	return ret;
 }
 
+int adm_set_interview_operating_mode(int port_id, int copp_idx,
+			long *param)
+{
+	struct adm_param_interview_operating_mode cmd;
+	struct param_hdr_v3 param_hdr;
+	int ret  = 0;
+
+	memset(&param_hdr, 0, sizeof(param_hdr));
+	param_hdr.module_id = MODULE_ID_PP_SS_REC;
+	param_hdr.instance_id = 0x8000;
+	param_hdr.param_id = PARAM_ID_PP_SS_REC_SETPARAMS;
+	param_hdr.param_size = sizeof(cmd);
+	/* Interview solution bypass paramerters */
+	cmd.onoff = (unsigned int)param[0];
+
+	pr_info("%s: Enter, port_id(0x%x), copp_idx(%d), enable(%d)\n",
+		  __func__, port_id, copp_idx, cmd.onoff);
+
+	ret = adm_pack_and_set_one_pp_param(port_id, copp_idx, param_hdr,
+					    (uint8_t *) &cmd);
+	if (ret)
+		pr_err("%s: Failed to set interview mode params, err %d\n",
+		       __func__, ret);
+
+	pr_debug("%s: Exit, ret=%d\n", __func__, ret);
+
+	return ret;
+}
+
 static int sec_audio_sound_alive_get(struct snd_kcontrol *kcontrol,
 			struct snd_ctl_elem_value *ucontrol)
 {
@@ -600,6 +630,12 @@ static int sec_audio_sb_rotation_get(struct snd_kcontrol *kcontrol,
 }
 
 static int sec_audio_dolby_atmos_get(struct snd_kcontrol *kcontrol,
+			struct snd_ctl_elem_value *ucontrol)
+{
+	return 0;
+}
+
+static int sec_audio_interview_mode_get(struct snd_kcontrol *kcontrol,
 			struct snd_ctl_elem_value *ucontrol)
 {
 	return 0;
@@ -877,6 +913,36 @@ static int sec_audio_dolby_atmos_put(struct snd_kcontrol *kcontrol,
 	return ret;
 }
 
+static int sec_audio_interview_mode_put(struct snd_kcontrol *kcontrol,
+			struct snd_ctl_elem_value *ucontrol)
+{
+	int ret = 0;
+	int port_id, copp_idx;
+
+	port_id = afe_port.voice_tracking_id;
+	copp_idx = sec_get_copp_idx(port_id, SESSION_TYPE_TX);
+	if (copp_idx) {
+		pr_err("%s: Could not get copp idx for port_id=%d\n",
+			__func__, port_id);
+
+		ret = -EINVAL;
+		goto done;
+	}
+
+	ret = adm_set_interview_operating_mode(port_id, copp_idx,
+		(long *)ucontrol->value.integer.value);
+	if (ret) {
+		pr_err("%s: Error setting interview mode, err=%d\n",
+			  __func__, ret);
+
+		ret = -EINVAL;
+		goto done;
+	}
+
+done:
+	return ret;
+}
+
 /****************************************************************************/
 /*//////////////////////////// VOICE SOLUTION //////////////////////////////*/
 /****************************************************************************/
@@ -1139,8 +1205,8 @@ void voice_sec_loopback_start_cmd(u32 session_id)
 {
 	int ret = 0;
 
-	if (loopback_mode == LOOPBACK_ENABLE ||
-	    loopback_mode == LOOPBACK_NODELAY) {
+	if (loopback_mode > LOOPBACK_DISABLE &&
+	    loopback_mode < LOOPBACK_MAX) {
 		ret = voice_sec_set_loopback_cmd(session_id, loopback_mode);
 		if (ret < 0) {
 			pr_err("%s: send packet loopback cmd failed(%d)\n",
@@ -1157,8 +1223,8 @@ void voice_sec_loopback_end_cmd(u32 session_id)
 	int ret = 0;
 
 	if ((loopback_mode == LOOPBACK_DISABLE) &&
-	    (loopback_prev_mode == LOOPBACK_ENABLE ||
-	     loopback_prev_mode == LOOPBACK_NODELAY)) {
+	    (loopback_prev_mode > LOOPBACK_DISABLE &&
+	     loopback_prev_mode < LOOPBACK_MAX)) {
 		ret = voice_sec_set_loopback_cmd(session_id, loopback_mode);
 		if (ret < 0) {
 			pr_err("%s: packet loopback disable cmd failed(%d)\n",
@@ -1932,6 +1998,220 @@ int sec_voice_ref_lch_mute(short enable)
 	return ret;
 }
 
+static int sec_voice_send_aec_effect_cmd(struct voice_data *v, int enable)
+{
+	struct cvp_set_aec_effect_cmd cvp_aec_effect_cmd;
+	uint32_t topology = VOICE_TX_SOLOMONVOICE_SM;
+	uint32_t module_id = TX_VOICE_SOLOMONVOICE;
+	u16 cvp_handle;
+	int ret = 0;
+
+	if (v == NULL) {
+		pr_err("%s: v is NULL\n", __func__);
+		return -EINVAL;
+	}
+
+	if (this_cvp.apr == NULL) {
+		this_cvp.apr = apr_register("ADSP", "CVP",
+					q6audio_adaptation_cvp_callback,
+					SEC_ADAPTATAION_VOICE_SRC_PORT,
+					&this_cvp);
+	}
+
+	topology = voice_get_topology(CVP_VOC_TX_TOPOLOGY_CAL);
+
+	switch (topology) {
+	case VPM_TX_SM_LVVEFQ_COPP_TOPOLOGY:
+	case VPM_TX_DM_LVVEFQ_COPP_TOPOLOGY:
+	case VPM_TX_QM_LVVEFQ_COPP_TOPOLOGY:
+	case VPM_TX_SM_LVSAFQ_COPP_TOPOLOGY:
+	case VPM_TX_DM_LVSAFQ_COPP_TOPOLOGY:
+		module_id = VOICE_MODULE_LVVEFQ_TX;
+		break;
+	case VOICE_TX_DIAMONDVOICE_FVSAM_SM:
+	case VOICE_TX_DIAMONDVOICE_FVSAM_DM:
+	case VOICE_TX_DIAMONDVOICE_FVSAM_QM:
+	case VOICE_TX_DIAMONDVOICE_FRSAM_DM:
+		module_id = VOICE_FVSAM_MODULE;
+		break;
+	case VOICE_TX_SOLOMONVOICE_SM:
+	case VOICE_TX_SOLOMONVOICE_DM:
+	case VOICE_TX_SOLOMONVOICE_QM:
+		module_id = TX_VOICE_SOLOMONVOICE;
+		break;
+	default:
+		pr_err("%s: undefined topology(0x%x)\n",
+			__func__, topology);
+		break;
+	}
+	
+	cvp_handle = voice_get_cvp_handle(v);
+	/* fill in the header */
+	cvp_aec_effect_cmd.hdr.hdr_field = APR_HDR_FIELD(APR_MSG_TYPE_SEQ_CMD,
+				APR_HDR_LEN(APR_HDR_SIZE),
+				APR_PKT_VER);
+	cvp_aec_effect_cmd.hdr.pkt_size = APR_PKT_SIZE(APR_HDR_SIZE,
+		sizeof(cvp_aec_effect_cmd) - APR_HDR_SIZE);
+	cvp_aec_effect_cmd.hdr.src_port = SEC_ADAPTATAION_VOICE_SRC_PORT;
+	cvp_aec_effect_cmd.hdr.dest_port = cvp_handle;
+	cvp_aec_effect_cmd.hdr.token = 0;
+	cvp_aec_effect_cmd.hdr.opcode =
+		q6common_is_instance_id_supported() ? VSS_ICOMMON_CMD_SET_UI_PROPERTY_V2 :
+				VSS_ICOMMON_CMD_SET_UI_PROPERTY;
+	cvp_aec_effect_cmd.cvp_set_aec_effect.module_id = module_id;
+	cvp_aec_effect_cmd.cvp_set_aec_effect.instance_id = 0x8000;
+	cvp_aec_effect_cmd.cvp_set_aec_effect.param_id = VOICE_NREC_MODE_DYNAMIC_PARAM;
+	cvp_aec_effect_cmd.cvp_set_aec_effect.param_size = 4;
+	cvp_aec_effect_cmd.cvp_set_aec_effect.reserved = 0;
+	cvp_aec_effect_cmd.cvp_set_aec_effect.enable = enable;
+	cvp_aec_effect_cmd.cvp_set_aec_effect.reserved_field = 0;
+
+	pr_info("%s: module=0x%x, eanble(%d)\n", __func__,
+					module_id,
+					cvp_aec_effect_cmd.cvp_set_aec_effect.enable);
+
+	atomic_set(&this_cvp.state, 1);
+	ret = apr_send_pkt(this_cvp.apr, (uint32_t *) &cvp_aec_effect_cmd);
+	if (ret < 0) {
+		pr_err("%s: Failed to send cvp_aec_effect_cmd\n",
+			__func__);
+		goto fail;
+	}
+
+	ret = wait_event_timeout(this_cvp.wait,
+				(atomic_read(&this_cvp.state) == 0),
+				msecs_to_jiffies(TIMEOUT_MS));
+	if (!ret) {
+		pr_err("%s: wait_event timeout\n", __func__);
+		goto fail;
+	}
+	return 0;
+
+fail:
+	return ret;
+}
+
+int sec_voice_aec_effect(short enable)
+{
+	struct voice_data *v = NULL;
+	int ret = 0;
+	struct voice_session_itr itr;
+
+	pr_debug("%s: Enter\n", __func__);
+
+	voice_itr_init(&itr, ALL_SESSION_VSID);
+	while (voice_itr_get_next_session(&itr, &v)) {
+		if (v != NULL) {
+			mutex_lock(&v->lock);
+			if (is_voc_state_active(v->voc_state) &&
+				(v->lch_mode != VOICE_LCH_START) &&
+				!v->disable_topology)
+				ret = sec_voice_send_aec_effect_cmd(v, enable);
+			mutex_unlock(&v->lock);
+		} else {
+			pr_err("%s: invalid session\n", __func__);
+			ret = -EINVAL;
+			break;
+		}
+	}
+	pr_debug("%s: Exit, ret=%d\n", __func__, ret);
+
+	return ret;
+}
+
+static int sec_voice_remote_mic_vol_cmd(struct voice_data *v, int index)
+{
+	struct cvp_set_voice_remote_mic_cmd cvp_voice_remote_mic_cmd;
+	int ret = 0;
+	u16 cvp_handle;
+
+	if (v == NULL) {
+		pr_err("%s: v is NULL\n", __func__);
+		return -EINVAL;
+	}
+
+	if (this_cvp.apr == NULL) {
+		this_cvp.apr = apr_register("ADSP", "CVP",
+					q6audio_adaptation_cvp_callback,
+					SEC_ADAPTATAION_VOICE_SRC_PORT,
+					&this_cvp);
+	}
+	cvp_handle = voice_get_cvp_handle(v);
+
+	/* fill in the header */
+	cvp_voice_remote_mic_cmd.hdr.hdr_field = APR_HDR_FIELD(APR_MSG_TYPE_SEQ_CMD,
+				APR_HDR_LEN(APR_HDR_SIZE),
+				APR_PKT_VER);
+	cvp_voice_remote_mic_cmd.hdr.pkt_size = APR_PKT_SIZE(APR_HDR_SIZE,
+		sizeof(cvp_voice_remote_mic_cmd) - APR_HDR_SIZE);
+	cvp_voice_remote_mic_cmd.hdr.src_port = SEC_ADAPTATAION_VOICE_SRC_PORT;
+	cvp_voice_remote_mic_cmd.hdr.dest_port = cvp_handle;
+	cvp_voice_remote_mic_cmd.hdr.token = 0;
+	cvp_voice_remote_mic_cmd.hdr.opcode =
+		q6common_is_instance_id_supported() ? VSS_ICOMMON_CMD_SET_UI_PROPERTY_V2 :
+				VSS_ICOMMON_CMD_SET_UI_PROPERTY;
+	cvp_voice_remote_mic_cmd.cvp_set_voice_remote_mic.module_id = VOICE_VOICEMODE_MODULE;
+	cvp_voice_remote_mic_cmd.cvp_set_voice_remote_mic.instance_id =
+		INSTANCE_ID_0;
+	cvp_voice_remote_mic_cmd.cvp_set_voice_remote_mic.param_id = 
+		DIAMONDVOICE_REMOTEVOL_PARAM;
+	cvp_voice_remote_mic_cmd.cvp_set_voice_remote_mic.param_size = 4;
+	cvp_voice_remote_mic_cmd.cvp_set_voice_remote_mic.reserved = 0;
+	cvp_voice_remote_mic_cmd.cvp_set_voice_remote_mic.enable = index;
+	cvp_voice_remote_mic_cmd.cvp_set_voice_remote_mic.reserved_field = 0;
+
+	pr_info("%s: remote mic volume index = %d\n", __func__,
+					cvp_voice_remote_mic_cmd.cvp_set_voice_remote_mic.enable);
+
+	atomic_set(&this_cvp.state, 1);
+	ret = apr_send_pkt(this_cvp.apr, (uint32_t *) &cvp_voice_remote_mic_cmd);
+	if (ret < 0) {
+		pr_err("%s: Failed to send cvp_spkmode_cmd\n", __func__);
+		goto fail;
+	}
+
+	ret = wait_event_timeout(this_cvp.wait,
+				(atomic_read(&this_cvp.state) == 0),
+				msecs_to_jiffies(TIMEOUT_MS));
+	if (!ret) {
+		pr_err("%s: wait_event timeout\n", __func__);
+		goto fail;
+	}
+
+	return 0;
+
+fail:
+	return ret;
+}
+
+int sec_voice_remote_mic_vol(short index)
+{
+	struct voice_data *v = NULL;
+	int ret = 0;
+	struct voice_session_itr itr;
+
+	pr_debug("%s: Enter\n", __func__);
+
+	voice_itr_init(&itr, ALL_SESSION_VSID);
+	while (voice_itr_get_next_session(&itr, &v)) {
+		if (v != NULL) {
+			mutex_lock(&v->lock);
+			if (is_voc_state_active(v->voc_state) &&
+				(v->lch_mode != VOICE_LCH_START) &&
+				!v->disable_topology)
+				ret = sec_voice_remote_mic_vol_cmd(v, index);
+			mutex_unlock(&v->lock);
+		} else {
+			pr_err("%s: invalid session\n", __func__);
+			ret = -EINVAL;
+			break;
+		}
+	}
+	pr_debug("%s: Exit, ret=%d\n", __func__, ret);
+
+	return ret;
+}
+
 int sec_voice_get_loopback_enable(void)
 {
 	return loopback_mode;
@@ -2088,6 +2368,52 @@ static int sec_voice_ref_lch_mute_put(struct snd_kcontrol *kcontrol,
 
 	return sec_voice_ref_lch_mute(enable);
 }
+
+static const char * const aec_switch[] = {
+	"OFF", "ON"
+};
+
+static const struct soc_enum sec_aec_effect_enum[] = {
+	SOC_ENUM_SINGLE_EXT(2, aec_switch),
+};
+
+static int sec_voice_aec_effect_get(struct snd_kcontrol *kcontrol,
+			struct snd_ctl_elem_value *ucontrol)
+{
+	return 0;
+}
+
+static int sec_voice_aec_effect_put(struct snd_kcontrol *kcontrol,
+			struct snd_ctl_elem_value *ucontrol)
+{
+	int enable = ucontrol->value.integer.value[0];
+
+	pr_debug("%s: enable=%d\n", __func__, enable);
+
+	return sec_voice_aec_effect(enable);
+}
+
+static int sec_voice_remote_mic_vol_get(struct snd_kcontrol *kcontrol,
+			struct snd_ctl_elem_value *ucontrol)
+{
+	return 0;
+}
+
+static int sec_voice_remote_mic_vol_put(struct snd_kcontrol *kcontrol,
+			struct snd_ctl_elem_value *ucontrol)
+{
+	int volumeindex = ucontrol->value.integer.value[0];
+
+	if ((volumeindex < 0) || (volumeindex > 15)) {
+		pr_err("%s: volumeindex=%d is wrong value\n", __func__, volumeindex);
+		return -EINVAL;
+	}
+
+	pr_debug("%s: volumeindex=%d\n", __func__, volumeindex);
+
+	return sec_voice_remote_mic_vol(volumeindex);
+}
+
 /*******************************************************/
 /*/////////////////////// COMMON //////////////////////*/
 /*******************************************************/
@@ -2142,6 +2468,13 @@ static const struct snd_kcontrol_new samsung_solution_mixer_controls[] = {
 	SOC_SINGLE_EXT("SB FM RX Volume", SND_SOC_NOPM, 0, 65535, 0,
 				sec_audio_sb_fm_rx_vol_get,
 				sec_audio_sb_fm_rx_vol_put),
+	SOC_ENUM_EXT("DSP AEC Effect", sec_aec_effect_enum[0],
+				sec_voice_aec_effect_get, sec_voice_aec_effect_put),
+	SOC_SINGLE_EXT("Remote Mic Vol Index", SND_SOC_NOPM, 0, 65535, 0,
+				sec_voice_remote_mic_vol_get,
+				sec_voice_remote_mic_vol_put),
+	SOC_SINGLE_EXT("Interview Mode", SND_SOC_NOPM, 0, 1, 0,
+				sec_audio_interview_mode_get, sec_audio_interview_mode_put),
 };
 
 static int q6audio_adaptation_platform_probe(struct snd_soc_platform *platform)
@@ -2197,6 +2530,18 @@ static int samsung_q6audio_adaptation_probe(struct platform_device *pdev)
 			&afe_port.amp_tx_id);
 	if (ret)
 		pr_debug("%s : Unable to find amp-tx-port\n", __func__);
+
+	ret = of_property_read_u32(pdev->dev.of_node,
+			"adaptation,amp-rx-topology",
+			&afe_port.rx_topology);
+	if (ret)
+		pr_debug("%s : Unable to find amp-rx-topology\n", __func__);
+
+	ret = of_property_read_u32(pdev->dev.of_node,
+			"adaptation,amp-tx-topology",
+			&afe_port.tx_topology);
+	if (ret)
+		pr_debug("%s : Unable to find amp-tx-topology\n", __func__);
 
 	return snd_soc_register_platform(&pdev->dev, &q6audio_adaptation);
 }

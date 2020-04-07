@@ -276,6 +276,21 @@ static void dp_catalog_ctrl_update_vx_px_v420(struct dp_catalog_ctrl *ctrl,
 
 	value0 = vm_voltage_swing[v_level][p_level];
 	value1 = vm_pre_emphasis[v_level][p_level];
+#ifdef SECDP_SELF_TEST
+	if (secdp_self_test_status(ST_VOLTAGE_TUN) >= 0) {
+		u8 val = secdp_self_test_get_arg(ST_VOLTAGE_TUN)[v_level*4 + p_level];
+
+		pr_info("value0 : 0x%02d => 0x%02d\n", value0, val);
+		value0 = val;
+	}
+
+	if (secdp_self_test_status(ST_PREEM_TUN) >= 0) {
+		u8 val = secdp_self_test_get_arg(ST_PREEM_TUN)[v_level*4 + p_level];
+		
+		pr_info("value0 : 0x%02d => 0x%02d\n", value1, val);
+		value1 = val;
+	}
+#endif
 
 	/* program default setting first */
 	io_data = catalog->io->dp_ln_tx0;

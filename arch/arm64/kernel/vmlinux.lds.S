@@ -105,7 +105,8 @@ SECTIONS
 		*(.discard)
 		*(.discard.*)
 		*(.interp .dynamic)
-		*(.dynsym .dynstr .hash)
+		*(.dynsym .dynstr .hash .gnu.hash)
+		*(.eh_frame)
 	}
 
 	. = KIMAGE_VADDR + TEXT_OFFSET;
@@ -139,39 +140,6 @@ SECTIONS
 
 	. = ALIGN(SEGMENT_ALIGN);
 	_etext = .;			/* End of text section */
-
-#ifdef CONFIG_UH_RKP
-	. = ALIGN(PAGE_SIZE);
-	.rkp.bitmap : {
-		rkp_pgt_bitmap = .;
-		*(.rkp.bitmap)
-	}
-	. = ALIGN(PAGE_SIZE);
-	.rkp.dblmap : {
-		rkp_map_bitmap = .;
-		*(.rkp.dblmap)
-	}
-	. = ALIGN(PAGE_SIZE);
-#endif
-#ifdef CONFIG_UH_RKP
-	bm_pte = .;
-	. += PAGE_SIZE;
-	. = ALIGN(PAGE_SIZE);
-	bm_pmd = .;
-	. += PAGE_SIZE;
-	. = ALIGN(PAGE_SIZE);
-	bm_pud = .;
-	. += PAGE_SIZE;
-#endif
-#ifdef CONFIG_RKP_KDP
-	 /* Creating a new section to store task credentials */
-	. = ALIGN(PAGE_SIZE);
-	.rkp.prot.page : {
-		__rkp_ro_start = .;
-	}
-	. = __rkp_ro_start + 0x4000;
-	. = ALIGN(PAGE_SIZE);
-#endif /* CONFIG_RKP_KDP*/
 
 	RO_DATA(PAGE_SIZE)		/* everything from this point to     */
 	EXCEPTION_TABLE(8)		/* __init_begin will be marked RO NX */
@@ -215,12 +183,12 @@ SECTIONS
 
 	PERCPU_SECTION(L1_CACHE_BYTES)
 
-	.rela : ALIGN(8) {
+	.rela.dyn : ALIGN(8) {
 		*(.rela .rela*)
 	}
 
-	__rela_offset	= ABSOLUTE(ADDR(.rela) - KIMAGE_VADDR);
-	__rela_size	= SIZEOF(.rela);
+	__rela_offset	= ABSOLUTE(ADDR(.rela.dyn) - KIMAGE_VADDR);
+	__rela_size	= SIZEOF(.rela.dyn);
 
 	. = ALIGN(SEGMENT_ALIGN);
 	__initdata_end = .;
@@ -255,6 +223,7 @@ SECTIONS
 	BSS_SECTION(0, 0, 0)
 
 	. = ALIGN(PAGE_SIZE);
+#ifndef CONFIG_UH_RKP
 	idmap_pg_dir = .;
 	. += IDMAP_DIR_SIZE;
 	swapper_pg_dir = .;
@@ -268,6 +237,7 @@ SECTIONS
 #ifdef CONFIG_UNMAP_KERNEL_AT_EL0
 	tramp_pg_dir = .;
 	. += PAGE_SIZE;
+#endif
 #endif
 
 	__pecoff_data_size = ABSOLUTE(. - __initdata_begin);

@@ -376,6 +376,12 @@ config USB_CONFIGFS_CONN_GADGET
 	help
 	  USB Sidesync function support
 
+config USB_CONN_GADGET_NDOP
+        bool "Conn gadget that do not support DexLive"
+        depends on USB_CONFIGFS_CONN_GADGET
+        help
+          Next SideSync
+
 config USB_CONFIGFS_EEM
 	bool "Ethernet Emulation Model (EEM)"
 	depends on USB_CONFIGFS
@@ -625,6 +631,7 @@ config USB_CONFIGFS_F_GSI
 	bool "USB GSI function"
 	select USB_F_GSI
 	select USB_RNDIS
+	select USB_U_ETHER
 	depends on USB_CONFIGFS
 	help
 	  The GSI function supports the IPA Generic Software Interface found

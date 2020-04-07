@@ -142,6 +142,12 @@ struct sx9320_p {
 	s32 diff_avg_ch2;
 	int diff_cnt_ch2;
 	s32 useful_avg_ch2;
+
+	s32 max_diff_ch2;
+	s32 max_normal_diff_ch2;
+
+	int irq_count_ch2;
+	int abnormal_mode_ch2;	
 #endif	
 };
 
@@ -328,10 +334,10 @@ static void sx9320_send_event(struct sx9320_p *data, int ch, u8 state)
 	else if (ch == REF_SENSOR) {
 		if (state == ACTIVE) {
 			data->state_ch2 = ACTIVE;
-			pr_info("[SX9320]: %s - ch2 touched\n", __func__);
+			pr_info("[SX9320_CH2]: %s - ch2 touched\n", __func__);
 		} else {
 			data->state_ch2 = IDLE;
-			pr_info("[SX9320]: %s - ch2 released\n", __func__);
+			pr_info("[SX9320_CH2]: %s - ch2 released\n", __func__);
 		}	
 	}
 #endif
@@ -435,7 +441,7 @@ static void sx9320_get_data_ch2(struct sx9320_p *data)
 
 	mutex_unlock(&data->read_mutex);
 
-	pr_info("[SX9320]: %s - [CH2] Capmain: %d, Useful: %d, avg: %d, diff: %d, Offset: %u\n",
+	pr_info("[SX9320_CH2]: %s - Capmain: %d, Useful: %d, avg: %d, diff: %d, Offset: %u\n",
 		__func__, data->capMain_ch2, data->useful_ch2, data->avg_ch2,
 		data->diff_ch2, data->offset_ch2);
 }
@@ -558,7 +564,7 @@ static void sx9320_check_status(struct sx9320_p *data, int enable)
 	} else {
 		sx9320_send_event(data, REF_SENSOR, IDLE);
 	}
-#endif	
+#endif
 }
 
 static void sx9320_set_enable(struct sx9320_p *data, int enable)
@@ -658,7 +664,7 @@ static ssize_t sx9320_register_write_store(struct device *dev,
 	int regist = 0, val = 0;
 	struct sx9320_p *data = dev_get_drvdata(dev);
 
-	if (sscanf(buf, "%3d,%3d", &regist, &val) != 2) {
+	if (sscanf(buf, "%4x,%4x", &regist, &val) != 2) {
 		pr_err("[SX9320]: %s - The number of data are wrong\n",
 			__func__);
 		return -EINVAL;
@@ -1188,6 +1194,61 @@ static ssize_t sx9320_ch_count_show(struct device *dev,
 	return snprintf(buf, PAGE_SIZE, "2\n");
 }
 
+static ssize_t sx9320_irq_count_ch2_store(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct sx9320_p *data = dev_get_drvdata(dev);
+
+	u8 onoff;
+	int ret;
+
+	ret = kstrtou8(buf, 10, &onoff);
+	if (ret < 0) {
+		pr_err("[SX9320_CH2]: %s - kstrtou8 failed.(%d)\n", __func__, ret);
+		return count;
+	}
+
+	mutex_lock(&data->read_mutex);
+
+	if (onoff == 0) {
+		data->abnormal_mode_ch2 = OFF;
+	} else if (onoff == 1) {
+		data->abnormal_mode_ch2 = ON;
+		data->irq_count_ch2 = 0;
+		data->max_diff_ch2 = 0;
+		data->max_normal_diff_ch2 = 0;
+	} else {
+		pr_err("[SX9320_CH2]: %s - unknown value %d\n", __func__, onoff);
+	}
+
+	mutex_unlock(&data->read_mutex);
+
+	pr_info("[SX9320_CH2]: %s - %d\n", __func__, onoff);
+
+	return count;
+}
+
+static ssize_t sx9320_irq_count_ch2_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct sx9320_p *data = dev_get_drvdata(dev);
+
+	int result = 0;
+	s32 max_diff_val = 0;
+
+	if (data->irq_count_ch2) {
+		result = -1;
+		max_diff_val = data->max_diff_ch2;
+	} else {
+		max_diff_val = data->max_normal_diff_ch2;
+	}
+
+	pr_info("[SX9320_CH2]: %s - called\n", __func__);
+
+	return snprintf(buf, PAGE_SIZE, "%d,%d,%d\n",
+		result, data->irq_count_ch2, max_diff_val);
+}
+
 static ssize_t sx9320_gain_ch2_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
@@ -1196,7 +1257,7 @@ static ssize_t sx9320_gain_ch2_show(struct device *dev,
 	u8 gain_ch2 = 0;
 
 	sx9320_i2c_read(data, SX9320_PROXCTRL0_REG, &gain_ch2);
-	gain_ch2 = (gain_ch2 >> 2) & 0x03; 
+	gain_ch2 = (gain_ch2 >> 3) & 0x07; 
 
 	switch (gain_ch2) {
 	case 0x01:
@@ -1240,9 +1301,9 @@ static ssize_t sx9320_normal_ch2_threshold_show(struct device *dev,
 {
 	struct sx9320_p *data = dev_get_drvdata(dev);
 	u8 hysteresis = 0;
-	u8 threshold = 0;
+	u16 threshold = 0;
 
-	sx9320_i2c_read(data, SX9320_PROXCTRL6_REG, &threshold);
+	sx9320_i2c_read(data, SX9320_PROXCTRL6_REG, (u8*)&threshold);
 	threshold = threshold * threshold / 2;
 	hysteresis = data->hyst;
 
@@ -1299,6 +1360,22 @@ static ssize_t sx9320_sampling_freq_ch2_show(struct device *dev,
 
 	return snprintf(buf, PAGE_SIZE, "%skHz\n", table[sampling_freq_ch2]);
 }
+
+static ssize_t sx9320_rawfilt_ch2_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct sx9320_p *data = dev_get_drvdata(dev);
+	u8 rawfilt_ch2;
+
+	sx9320_i2c_read(data, SX9320_PROXCTRL0_REG, &rawfilt_ch2);
+	rawfilt_ch2 = rawfilt_ch2 & 0x07; 
+
+	if (rawfilt_ch2 == 0)
+		return snprintf(buf, PAGE_SIZE, "0\n");
+
+	return snprintf(buf, PAGE_SIZE, "1-1/%d\n", 1 << rawfilt_ch2);
+}
+
 #endif
 
 static DEVICE_ATTR(menual_calibrate, 0664,
@@ -1348,6 +1425,8 @@ static DEVICE_ATTR(normal_threshold_ch2, 0444,
 static DEVICE_ATTR(diff_avg_ch2, 0444, sx9320_diff_avg_ch2_show, NULL);
 static DEVICE_ATTR(useful_avg_ch2, 0444, sx9320_useful_avg_ch2_show, NULL);
 static DEVICE_ATTR(sampling_freq_ch2, 0444, sx9320_sampling_freq_ch2_show, NULL);
+static DEVICE_ATTR(rawfilt_ch2, 0444, sx9320_rawfilt_ch2_show, NULL);
+static DEVICE_ATTR(irq_count_ch2, 0664, sx9320_irq_count_ch2_show, sx9320_irq_count_ch2_store);
 #endif
 
 static struct device_attribute *sensor_attrs[] = {
@@ -1388,6 +1467,8 @@ static struct device_attribute *sensor_attrs[] = {
 	&dev_attr_diff_avg_ch2,
 	&dev_attr_useful_avg_ch2,
 	&dev_attr_sampling_freq_ch2,
+	&dev_attr_rawfilt_ch2,
+	&dev_attr_irq_count_ch2,
 #endif
 	NULL,
 };
@@ -1493,17 +1574,24 @@ static void sx9320_touch_process(struct sx9320_p *data, u8 flag)
 	}
 #ifdef CONFIG_SENSORS_SX9320_2CH
 	sx9320_get_data_ch2(data);
+	if (data->abnormal_mode_ch2) {
+		if (status) {
+			if (data->max_diff_ch2 < data->diff_ch2)
+				data->max_diff_ch2 = data->diff_ch2;
+			data->irq_count_ch2++;
+		}
+	}
 	if (data->state_ch2 == IDLE) {
 		if (status & (PHX_STATUS_REG << REF_SENSOR))
 			sx9320_send_event(data, REF_SENSOR, ACTIVE);
 		else
-			pr_info("[SX9320]: %s - 0x%x already released\n",
+			pr_info("[SX9320_CH2]: %s - 0x%x already released\n",
 				__func__, status);
 	} else {
 		if (!(status & (PHX_STATUS_REG << REF_SENSOR)))
 			sx9320_send_event(data, REF_SENSOR, IDLE);
 		else
-			pr_info("[SX9320]: %s - 0x%x still touched\n",
+			pr_info("[SX9320_CH2]: %s - 0x%x still touched\n",
 				__func__, status);
 	}	
 #endif
@@ -1580,9 +1668,19 @@ static void sx9320_debug_work_func(struct work_struct *work)
 			sx9320_get_data(data);
 			if (data->max_normal_diff < data->diff)
 				data->max_normal_diff = data->diff;
+
+#ifdef CONFIG_SENSORS_SX9320_2CH
+		} if (data->abnormal_mode_ch2) {
+			sx9320_get_data_ch2(data);
+			if (data->max_normal_diff_ch2 < data->diff_ch2)
+				data->max_normal_diff_ch2 = data->diff_ch2;
+#endif
 		} else {
 			if (data->debug_count >= GRIP_LOG_TIME) {
 				sx9320_get_data(data);
+#ifdef CONFIG_SENSORS_SX9320_2CH
+				sx9320_get_data_ch2(data);
+#endif
 				data->debug_count = 0;
 			} else {
 				data->debug_count++;

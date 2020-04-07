@@ -1,4 +1,4 @@
-/* Copyright (c) 2015-2018, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2015-2019, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -201,6 +201,9 @@ static void sde_hw_lm_setup_dim_layer(struct sde_hw_mixer *ctx,
 	int stage_off;
 	u32 val = 0, alpha = 0;
 
+	if (dim_layer->stage == SDE_STAGE_BASE)
+		return;
+
 	stage_off = _stage_offset(ctx, dim_layer->stage);
 	if (stage_off < 0) {
 		SDE_ERROR("invalid stage_off:%d for dim layer\n", stage_off);
@@ -266,7 +269,9 @@ static void _setup_mixer_ops(struct sde_mdss_cfg *m,
 			IS_SM8150_TARGET(m->hwversion) ||
 			IS_SDMSHRIKE_TARGET(m->hwversion) ||
 			IS_SM6150_TARGET(m->hwversion) ||
-			IS_SDMMAGPIE_TARGET(m->hwversion))
+			IS_SDMMAGPIE_TARGET(m->hwversion) ||
+			IS_SDMTRINKET_TARGET(m->hwversion) ||
+			IS_ATOLL_TARGET(m->hwversion))
 		ops->setup_blend_config = sde_hw_lm_setup_blend_config_sdm845;
 	else
 		ops->setup_blend_config = sde_hw_lm_setup_blend_config;

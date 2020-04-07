@@ -81,6 +81,8 @@ struct partition {
 	__le32 nr_sects;		/* nr of sectors in partition */
 } __attribute__((packed));
 
+#define FSYNC_TIME_GROUP_MAX 4
+#define IO_SIZE_GROUP_MAX 8
 struct disk_stats {
 	unsigned long sectors[2];	/* READs and WRITEs */
 	unsigned long ios[2];
@@ -91,6 +93,7 @@ struct disk_stats {
 	unsigned long discard_sectors;
 	unsigned long discard_ios;
 	unsigned long flush_ios;
+	unsigned long size_cnt[3][IO_SIZE_GROUP_MAX]; /* READs, WRITEs and DISCARDs */
 };
 
 #define PARTITION_META_INFO_VOLNAMELTH	64
@@ -144,6 +147,7 @@ struct hd_struct {
 #define GENHD_FL_NATIVE_CAPACITY		128
 #define GENHD_FL_BLOCK_EVENTS_ON_EXCL_WRITE	256
 #define GENHD_FL_NO_PART_SCAN			512
+#define GENHD_FL_NO_RANDOMIZE			1024
 #ifdef CONFIG_USB_STORAGE_DETECT
 #define GENHD_IF_USB	1
 #endif
@@ -179,6 +183,9 @@ struct accumulated_stats {
 	struct timespec uptime;
 	unsigned long sectors[3];	/* READ, WRITE, DISCARD */
 	unsigned long ios[3];
+	unsigned long size_cnt[3][IO_SIZE_GROUP_MAX];
+	unsigned long fsync_time_cnt[FSYNC_TIME_GROUP_MAX];
+	unsigned long iot;		/* sec */
 };
 
 struct gendisk {
@@ -215,6 +222,7 @@ struct gendisk {
 	atomic_t sync_io;		/* RAID */
 	struct disk_events *ev;
 	struct accumulated_stats accios;
+	unsigned long hiotime[3]; /* LOW, MID AND HIGH */
 #ifdef  CONFIG_BLK_DEV_INTEGRITY
 	struct kobject integrity_kobj;
 #endif	/* CONFIG_BLK_DEV_INTEGRITY */

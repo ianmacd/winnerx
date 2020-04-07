@@ -40,6 +40,7 @@ enum SM5705_CHARGER_OP_EVENT_TYPE {
                                                            ((otg & 0x1) << SM5705_CHARGER_OP_EVENT_OTG)           | \
                                                            ((pwr_shar & 0x1) << SM5705_CHARGER_OP_EVENT_PWR_SHAR))
 int sm5705_charger_oper_push_event(int event_type, bool enable);
+int sm5705_charger_set_otg_boost(bool enable);
 int sm5705_charger_oper_table_init(struct i2c_client *i2c);
 int sm5705_charger_oper_get_current_status(void);
 int sm5705_charger_oper_get_current_op_mode(void);

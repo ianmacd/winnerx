@@ -1338,7 +1338,7 @@ static int wm_coeff_write_control(struct wm_coeff_ctl *ctl,
 	if (ret)
 		return ret;
 
-	scratch = kmemdup(buf, len, GFP_KERNEL | GFP_DMA);
+	scratch = kmalloc(PAGE_SIZE, GFP_KERNEL | GFP_DMA);
 	if (!scratch)
 		return -ENOMEM;
 
@@ -1352,12 +1352,14 @@ static int wm_coeff_write_control(struct wm_coeff_ctl *ctl,
 		break;
 	}
 
-	temp = scratch;
+	temp = (void *)buf;
 	while (len > 0) {
 		if (len < to_write)
 			to_write = len;
 
-		ret = regmap_raw_write(dsp->regmap, reg, temp, to_write);
+		memcpy(scratch, temp, to_write);
+
+		ret = regmap_raw_write(dsp->regmap, reg, scratch, to_write);
 		if (ret) {
 			adsp_err(dsp, "Failed to write %zu bytes to %x: %d\n",
 				 to_write, reg, ret);
@@ -4228,6 +4230,7 @@ static int wm_adsp_of_parse_firmware(struct wm_adsp *dsp,
 	struct device_node *fws = of_get_child_by_name(np, "firmware");
 	struct device_node *fw = NULL;
 	const char **ctl_names;
+	const char *tmp;
 	int ret;
 	int i;
 
@@ -4275,6 +4278,10 @@ static int wm_adsp_of_parse_firmware(struct wm_adsp *dsp,
 
 		dsp->firmwares[i].fullname =
 			of_property_read_bool(fw, "cirrus,full-name");
+
+		ret = of_property_read_string(fw, "cirrus,fw-name", &tmp);
+		if (ret == 0)
+			ctl_names[i] = tmp;
 
 		wm_adsp_of_parse_caps(dsp, fw, &dsp->firmwares[i]);
 
@@ -4910,8 +4917,10 @@ static int wm_adsp_parse_buffer_coeff(struct wm_coeff_ctl *ctl)
 		usleep_range(1000, 2000);
 	}
 
-	if (!val)
+	if (!val) {
+		adsp_err(ctl->dsp, "Failed to acquire host buffer\n");
 		return -EIO;
+	}
 
 	buf = kzalloc(sizeof(*buf), GFP_KERNEL);
 	if (!buf)
@@ -5096,8 +5105,6 @@ int wm_adsp_compr_trigger(struct snd_compr_stream *stream, int cmd)
 		if (ret < 0)
 			break;
 
-		wm_adsp_buffer_clear(compr->buf);
-
 		/* Trigger the IRQ at one fragment of data */
 		ret = wm_adsp_buffer_write(compr->buf,
 					   HOST_BUFFER_FIELD(high_water_mark),
@@ -5109,6 +5116,8 @@ int wm_adsp_compr_trigger(struct snd_compr_stream *stream, int cmd)
 		}
 		break;
 	case SNDRV_PCM_TRIGGER_STOP:
+		if (wm_adsp_compr_attached(compr))
+			wm_adsp_buffer_clear(compr->buf);
 		break;
 	default:
 		ret = -EINVAL;

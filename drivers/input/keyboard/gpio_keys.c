@@ -640,12 +640,17 @@ static irqreturn_t gpio_keys_gpio_isr(int irq, void *dev_id)
 			 * handler to run.
 			 */
 			input_report_key(bdata->input, button->code, 1);
+			pr_info("%s %s: %d (%d)\n", SECLOG, __func__, button->code, 1);
 		}
 	}
 
-	mod_delayed_work(system_wq,
-			 &bdata->work,
-			 msecs_to_jiffies(bdata->software_debounce));
+	if (bdata->software_debounce) {
+		mod_delayed_work(system_wq,
+				&bdata->work,
+				msecs_to_jiffies(bdata->software_debounce));
+	} else {
+		gpio_keys_gpio_work_func(&bdata->work.work);
+	}
 
 	return IRQ_HANDLED;
 }

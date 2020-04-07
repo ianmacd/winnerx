@@ -256,8 +256,7 @@ static int dev_monitor_inetaddr_event(struct notifier_block *this,
 
 		addr_info = get_dev_info(&dev_info, dev, AF_INET);
 		if (addr_info) {
-			if ((addr_info->addr.addr4 == ifa->ifa_local) &&
-					(addr_info->prefixlen != ifa->ifa_prefixlen)) {
+			if (addr_info->addr.addr4 == ifa->ifa_local) {
 				pr_err("%s %s: %pI4/%d, updated:%pI4/%d\n", __func__, dev->name,
 						&addr_info->addr.addr4, addr_info->prefixlen,
 						&ifa->ifa_local, ifa->ifa_prefixlen);
@@ -331,8 +330,8 @@ static int dev_monitor_inet6addr_event(struct notifier_block *this,
 
 		addr_info = get_dev_info(&dev_info, dev, AF_INET6);
 		if (addr_info) {
-			if (ipv6_addr_equal(&addr_info->addr.addr6, &ifa->addr) &&
-					!ipv6_prefix_equal(&addr_info->addr.addr6, &ifa->addr, ifa->prefix_len)) {
+			if (ipv6_addr_equal(&addr_info->addr.addr6, &ifa->addr) ||
+				ipv6_prefix_equal(&addr_info->addr.addr6, &ifa->addr, ifa->prefix_len)) {
 				pr_err("%s %s: %pI6/%d, updated:%pI6/%d\n", __func__, dev->name,
 						&addr_info->addr.addr6, addr_info->prefixlen,
 						&ifa->addr, ifa->prefix_len);

@@ -529,4 +529,9 @@ config PWM_ZX
 	  To compile this driver as a module, choose M here: the module
 	  will be called pwm-zx.
 
+config PWM_GPCLK
+	tristate "Qualcomm GP CLK control driver"
+	depends on OF
+	help
+	  Qualcomm GP CLK control driver
 endif

@@ -799,10 +799,9 @@ static int pci_pm_suspend_noirq(struct device *dev)
 		}
 	}
 
-	/* if d3hot is not supported bail out */ 
-	if (pci_dev->no_d3hot) 
-		return 0; 
-
+	/* if d3hot is not supported bail out */
+	if (pci_dev->no_d3hot)
+		return 0;
 	if (!pci_dev->state_saved) {
 		pci_save_state(pci_dev);
 		if (pci_power_manageable(pci_dev))
@@ -1213,10 +1212,9 @@ static int pci_pm_runtime_suspend(struct device *dev)
 		return 0;
 	}
 
-	/* if d3hot is not supported bail out */ 
-	if (pci_dev->no_d3hot) 
-		return 0; 
-
+	/* if d3hot is not supported bail out */
+	if (pci_dev->no_d3hot)
+		return 0;
 	if (!pci_dev->state_saved) {
 		pci_save_state(pci_dev);
 		pci_finish_runtime_suspend(pci_dev);

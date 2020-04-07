@@ -522,6 +522,16 @@ config ARM64_ERRATUM_1286807
 	  invalidated has been observed by other observers. The
 	  workaround repeats the TLBI+DSB operation.
 
+config ARM64_ERRATUM_1188873
+	bool "Cortex-A76: MRC read following MRRC read of specific Generic Timer in AArch32 might give incorrect result"
+	default y
+	help
+	  This option adds work arounds for ARM Cortex-A76 erratum 1188873
+
+	  Affected Cortex-A76 cores (r0p0, r1p0, r2p0) could cause
+	  register corruption when accessing the timer registers from
+	  AArch32 userspace.
+
 	  If unsure, say Y.
 
 config CAVIUM_ERRATUM_22375
@@ -1683,6 +1693,13 @@ config MACH_BEYOND1QLTE_JPN_KDI
         help
           Support for Samsung BEYOND1QLTE JPN KDI device.
 
+config MACH_BEYOND1QLTE_JPN_RKT
+        depends on SEC_BEYOND1QLTE_PROJECT
+        default n
+        bool "Samsung BEYOND1QLTE JPN RKT"
+        help
+          Support for Samsung BEYOND1QLTE JPN RKT device.
+
 config SEC_BEYOND2QLTE_PROJECT
 	depends on ARCH_SM8150
 	default n
@@ -1752,6 +1769,13 @@ config MACH_BEYOND2QLTE_JPN_DCM
         bool "Samsung BEYOND2QLTE JPN DCM"
         help
           Support for Samsung BEYOND2QLTE JPN DCM device.
+
+config MACH_BEYOND2QLTE_JPN_DCMOLY
+        depends on SEC_BEYOND2QLTE_PROJECT
+        default n
+        bool "Samsung BEYOND2QLTE JPN DCMOLY"
+        help
+          Support for Samsung BEYOND2QLTE JPN DCMOLY device.
 
 config MACH_BEYOND2QLTE_JPN_KDI
         depends on SEC_BEYOND2QLTE_PROJECT
@@ -1907,19 +1931,61 @@ config MACH_BEYONDXQ_CHN_OPEN
         help
           Support for Samsung BEYONDXQ CHN OPEN device.
 
-config SEC_D1XQ_PROJECT
+config SEC_D1Q_PROJECT
         depends on ARCH_SM8150
         default n
-        bool "Samsung D1XQ Project"
+        bool "Samsung D1Q Project"
         help
-          Support for Samsung D1XQ Project
+          Support for Samsung D1Q Project
 
-config MACH_D1XQ_USA_SPR
-        depends on SEC_D1XQ_PROJECT
+config MACH_D1Q_USA_SINGLE
+        depends on SEC_D1Q_PROJECT
         default n
-        bool "Samsung D1XQ USA SPR"
+        bool "Samsung D1Q USA SINGLE"
         help
-          Support for Samsung D1XQ USA SPR device.
+          Support for Samsung D1Q USA SINGLE device.
+
+config MACH_D1Q_USA_OPEN
+        depends on SEC_D1Q_PROJECT
+        default n
+        bool "Samsung D1Q USA OPEN"
+        help
+          Support for Samsung D1Q USA OPEN device.
+
+config MACH_D1Q_USA_LDU
+        depends on SEC_D1Q_PROJECT
+        default n
+        bool "Samsung D1Q USA LDU"
+        help
+          Support for Samsung D1Q USA LDU device.
+
+config MACH_D1Q_CAN_SINGLE
+        depends on SEC_D1Q_PROJECT
+        default n
+        bool "Samsung D1Q CAN SINGLE"
+        help
+          Support for Samsung D1Q CAN SINGLE device.
+
+config MACH_D1Q_CHNZC
+        depends on SEC_D1Q_PROJECT
+        default n
+        bool "Samsung D1Q CHN OPEN"
+        help
+          Support for Samsung D1Q CHN OPEN device.
+
+config MACH_D1Q_CHNZH
+        depends on SEC_D1Q_PROJECT
+        default n
+        bool "Samsung D1Q CHN HK"
+        help
+          Support for Samsung D1Q CHN OPEN device.
+
+config MACH_D1Q_CHN_LDU
+        depends on SEC_D1Q_PROJECT
+        default n
+        bool "Samsung D1Q CHN LDU"
+        help
+          Support for Samsung D1Q CHN LDU device.
 
 config SEC_D2XQ_PROJECT
         depends on ARCH_SM8150
@@ -1934,7 +2000,56 @@ config MACH_D2XQ_USA_VZW
         bool "Samsung D2XQ USA VZW"
         help
           Support for Samsung D2XQ USA VZW device.
-		  
+
+config MACH_D2XQ_USA_LDU
+        depends on SEC_D2XQ_PROJECT
+        default n
+        bool "Samsung D2XQ USA LDU"
+        help
+          Support for Samsung D2XQ USA LDU device.
+
+config MACH_D2XQ_CHN_OPEN
+        depends on SEC_D2XQ_PROJECT
+        default n
+        bool "Samsung D2XQ CHN OPEN"
+        help
+          Support for Samsung D2XQ CHN OPEN device.
+
+config MACH_D2XQ_CHN_LDU
+        depends on SEC_D2XQ_PROJECT
+        default n
+        bool "Samsung D2XQ CHN LDU"
+        help
+          Support for Samsung D2XQ CHN LDU device.
+
+config MACH_D2XQ_MEA_OPEN
+        depends on SEC_D2XQ_PROJECT
+        default n
+        bool "Samsung D2XQ MEA OPEN"
+        help
+          Support for Samsung D2XQ MEA OPEN device.
+	
+config MACH_D2XQ_USA_SINGLE
+        depends on SEC_D2XQ_PROJECT
+        default n
+        bool "Samsung D2XQ USA SQ"
+        help
+          Support for Samsung D2XQ USA SQ device.
+	  
+config SEC_D2XQ2_PROJECT
+        depends on ARCH_SM8150
+        default n
+        bool "Samsung D2XQ2 Project"
+        help
+          Support for Samsung D2XQ2 Project
+	
+config MACH_D2XQ2_USA_SINGLE
+        depends on SEC_D2XQ2_PROJECT
+        default n
+        bool "Samsung D2XQ2 USA SQ"
+        help
+          Support for Samsung D2XQ2 USA SQ device.
+
 config MACH_BEYONDXQ_USA_TMO
         depends on SEC_BEYONDXQ_PROJECT
         default n
@@ -1963,6 +2078,13 @@ config MACH_D2Q_USA_OPEN
         help
           Support for Samsung D2Q USA OPEN device.
 
+config MACH_D2Q_USA_LDU
+        depends on SEC_D2Q_PROJECT
+        default n
+        bool "Samsung D2Q USA LDU"
+        help
+          Support for Samsung D2Q USA LDU device.
+
 config MACH_D2Q_CAN_SINGLE
         depends on SEC_D2Q_PROJECT
         default n
@@ -1990,6 +2112,13 @@ config MACH_D2Q_CHNZM
         bool "Samsung D2Q CHN CMCC"
         help
           Support for Samsung D2Q CHN CMCC device.
+
+config MACH_D2Q_CHN_LDU
+        depends on SEC_D2Q_PROJECT
+        default n
+        bool "Samsung D2Q CHN LDU"
+        help
+          Support for Samsung D2Q CHN LDU device.
 
 config MACH_D2Q_JPN_KDI
         depends on SEC_D2Q_PROJECT
@@ -2025,7 +2154,266 @@ config MACH_GTS5L_EUR_OPEN
         bool "Samsung GTS5L EUR OPEN"
         help
           Support for Samsung GTS5L EUR OPEN device.
-  
+
+config SEC_GTS5LWIFI_PROJECT
+	depends on ARCH_SM8150
+	default n
+	bool "Samsung GTS5LWIFI Project"
+	help
+	  Support for Samsung GTS5LWIFI Project
+
+config MACH_GTS5LWIFI_EUR_OPEN
+        depends on SEC_GTS5LWIFI_PROJECT
+        default n
+        bool "Samsung GTS5LWIFI EUR OPEN"
+        help
+          Support for Samsung GTS5LWIFI EUR OPEN device.
+
+config SEC_GTS6L_PROJECT
+	depends on ARCH_SM8150
+	default n
+	bool "Samsung GTS6L Project"
+	help
+	  Support for Samsung GTS6L Project
+
+config MACH_GTS6L_EUR_OPEN
+        depends on SEC_GTS6L_PROJECT
+        default n
+        bool "Samsung GTS6L EUR OPEN"
+        help
+          Support for Samsung GTS6L EUR OPEN device.
+
+config MACH_GTS6L_KOR_OPEN
+        depends on SEC_GTS6L_PROJECT
+        default n
+        bool "Samsung GTS6L KOR OPEN"
+        help
+          Support for Samsung GTS6L KOR OPEN device.
+
+config MACH_GTS6L_MEA_TUR
+        depends on SEC_GTS6L_PROJECT
+        default n
+        bool "Samsung GTS6L MEA TUR"
+        help
+          Support for Samsung GTS6L MEA TUR device.
+
+config MACH_GTS6L_USA_VZW
+        depends on SEC_GTS6L_PROJECT
+        default n
+        bool "Samsung GTS6L USA VZW"
+        help
+          Support for Samsung GTS6L USA VZW device.
+
+config MACH_GTS6L_USA_USC
+        depends on SEC_GTS6L_PROJECT
+        default n
+        bool "Samsung GTS6L USA USC"
+        help
+          Support for Samsung GTS6L USA USC device.
+
+config MACH_GTS6L_USA_SINGLE
+        depends on SEC_GTS6L_PROJECT
+        default n
+        bool "Samsung GTS6L USA SQ"
+        help
+          Support for Samsung GTS6L USA SQ device.
+
+config MACH_GTS6L_CHN_OPEN
+        depends on SEC_GTS6L_PROJECT
+        default n
+        bool "Samsung GTS6L CHN OPEN"
+        help
+          Support for Samsung GTS6L CHN OPEN device.
+
+config MACH_GTS6L_CHN_HK
+        depends on SEC_GTS6L_PROJECT
+        default n
+        bool "Samsung GTS6L CHN HK"
+        help
+          Support for Samsung GTS6L CHN HK device.
+
+config SEC_GTS6LWIFI_PROJECT
+	depends on ARCH_SM8150
+	default n
+	bool "Samsung GTS6LWIFI Project"
+	help
+	  Support for Samsung GTS6LWIFI Project
+
+config MACH_GTS6LWIFI_EUR_OPEN
+        depends on SEC_GTS6LWIFI_PROJECT
+        default n
+        bool "Samsung GTS6LWIFI EUR OPEN"
+        help
+          Support for Samsung GTS6LWIFI EUR OPEN device.
+
+config MACH_GTS6LWIFI_CHN_OPEN
+        depends on SEC_GTS6LWIFI_PROJECT
+        default n
+        bool "Samsung GTS6LWIFI CHN OPEN"
+        help
+          Support for Samsung GTS6LWIFI CHN OPEN device.
+
+config SEC_GTS6X_PROJECT
+	depends on ARCH_SM8150
+	default n
+	bool "Samsung GTS6X Project"
+	help
+	  Support for Samsung GTS6X Project
+
+config MACH_GTS6X_KOR_OPEN
+        depends on SEC_GTS6X_PROJECT
+        default n
+        bool "Samsung GTS6X KOR OPEN"
+        help
+          Support for Samsung GTS6X KOR OPEN device.
+
+config SEC_BLOOMQ_PROJECT
+        depends on ARCH_SM8150
+        default n
+        bool "Samsung BLOOMQ Project"
+        help
+          Support for Samsung BLOOMQ Project
+
+config MACH_BLOOMQ_EUR_OPEN
+        depends on SEC_BLOOMQ_PROJECT
+        default n
+        bool "Samsung BLOOMQ EUR OPEN"
+        help
+          Support for Samsung BLOOMQ EUR OPEN device.
+
+config MACH_BLOOMQ_KOR_OPEN
+        depends on SEC_BLOOMQ_PROJECT
+        default n
+        bool "Samsung BLOOMQ KOR OPEN"
+        help
+          Support for Samsung BLOOMQ KOR OPEN device.
+
+config MACH_BLOOMQ_KOR_SINGLE
+        depends on SEC_BLOOMQ_PROJECT
+        default n
+        bool "Samsung BLOOMQ KOR SINGLE"
+        help
+          Support for Samsung BLOOMQ KOR SINGLE device.
+
+config MACH_BLOOMQ_USA_OPEN
+        depends on SEC_BLOOMQ_PROJECT
+        default n
+        bool "Samsung BLOOMQ USA OPEN"
+        help
+          Support for Samsung BLOOMQ USA OPEN device.
+
+config MACH_BLOOMQ_CHN_OPEN
+        depends on SEC_BLOOMQ_PROJECT
+        default n
+        bool "Samsung BLOOMQ CHN OPEN"
+        help
+          Support for Samsung BLOOMQ CHN OPEN device.
+
+config MACH_BLOOMQ_USA_SINGLE
+        depends on SEC_BLOOMQ_PROJECT
+        default n
+        bool "Samsung BLOOMQ USA SINGLE"
+        help
+          Support for Samsung BLOOMQ USA SINGLE device.
+
+config MACH_BLOOMQ_CAN_SINGLE
+        depends on SEC_BLOOMQ_PROJECT
+        default n
+        bool "Samsung BLOOMQ CAN SINGLE"
+        help
+          Support for Samsung BLOOMQ CAN SINGLE device.
+
+config MACH_BLOOMQ_JPN_KDI
+        depends on SEC_BLOOMQ_PROJECT
+        default n
+        bool "Samsung BLOOMQ JPN KDI"
+        help
+          Support for Samsung BLOOMQ JPN KDI device.
+
+config SEC_R3Q_PROJECT
+        depends on ARCH_SM8150
+        default n
+        bool "Samsung R3Q Project"
+        help
+          Support for Samsung R3Q Project
+
+config MACH_R3Q_EUR_OPEN
+        depends on SEC_R3Q_PROJECT
+        default n
+        bool "Samsung R3Q EUR OPEN"
+        help
+          Support for Samsung R3Q EUR OPEN device.
+
+config MACH_R3Q_KOR_SINGLE
+        depends on SEC_R3Q_PROJECT
+        default n
+        bool "Samsung R3Q KOR SQ"
+        help
+          Support for Samsung R3Q KOR SQ device.
+
+config MACH_R3Q_CHN_OPEN
+        depends on SEC_R3Q_PROJECT
+        default n
+        bool "Samsung R3Q CHN OPEN"
+        help
+          Support for Samsung R3Q CHN OPEN device.
+
+config MACH_R3Q_MEA_OPEN
+        depends on SEC_R3Q_PROJECT
+        default n
+        bool "Samsung R3Q MEA OPEN"
+        help
+          Support for Samsung R3Q MEA OPEN device.
+
+config SEC_R5Q_PROJECT
+        depends on ARCH_SM8150
+        default n
+        bool "Samsung R5Q Project"
+        help
+          Support for Samsung R5Q Project
+
+config MACH_R5Q_EUR_OPEN
+        depends on SEC_R5Q_PROJECT
+        default n
+        bool "Samsung R5Q EUR OPEN"
+        help
+          Support for Samsung R5Q EUR OPEN device.
+
+config MACH_R5Q_EUR_LDU
+        depends on SEC_R5Q_PROJECT
+        default n
+        bool "Samsung R5Q EUR LDU"
+        help
+          Support for Samsung R5Q EUR LDU device.
+
+config MACH_R5Q_CHN_HK
+        depends on SEC_R5Q_PROJECT
+        default n
+        bool "Samsung R5Q CHN HK"
+        help
+          Support for Samsung R5Q CHN HK device.
+
+config MACH_R5Q_USA_OPEN
+        depends on SEC_R5Q_PROJECT
+        default n
+        bool "Samsung R5Q USA OPEN"
+        help
+          Support for Samsung R5Q USA OPEN device.
+
+config SEC_ZODIAC_PROJECT
+        depends on ARCH_SM8150
+        default n
+        bool "Samsung ZODIAC Project"
+        help
+          Support for Samsung ZODIAC Project
+
+config MACH_ZODIAC_CHN_OPEN
+        depends on SEC_ZODIAC_PROJECT
+        default n
+        bool "Samsung ZODIAC CHN OPEN"
+        help
+          Support for Samsung ZODIAC CHN OPEN device.
+
 config LOD_SEC
 	bool "kernel security re-enforcement for Linux On Dex, including cap re-check and seccomp report"
 	default n

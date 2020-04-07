@@ -22,8 +22,8 @@ config BATTERY_SAMSUNG_V2
 	 To see battery-related functions,
 	 refer to sec_charging_common.h
 
-config BATTERY_SAMSUNG_V3
-	tristate "samsung battery driver version 3"
+config BATTERY_SAMSUNG_LEGO_STYLE
+	tristate "samsung battery driver (lego style)"
 	default n
 	depends on BATTERY_SAMSUNG
 	help
@@ -31,12 +31,11 @@ config BATTERY_SAMSUNG_V3
 	 This battery driver integrated all battery-related functions
 	 To see battery-related functions,
 	 refer to sec_charging_common.h
+ 
+if BATTERY_SAMSUNG_LEGO_STYLE
+source "drivers/battery/charger/Kconfig"
+source "drivers/battery/common/Kconfig"
+source "drivers/battery/fuelgauge/Kconfig"
+source "drivers/battery/wireless/Kconfig"
+endif # BATTERY_SAMSUNG_LEGO_STYLE
 
-#if BATTERY_SAMSUNG_V2
-# source "drivers/battery/v2/Kconfig"
-#endif # BATTERY_SAMSUNG_V2
-
-
-if BATTERY_SAMSUNG_V3
-source "drivers/battery/v3/Kconfig"
-endif # BATTERY_SAMSUNG_V3

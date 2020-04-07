@@ -21,6 +21,7 @@ int q6audio_get_afe_cal_validation(u16 port_id, u32 topology_id);
 /****************************************************************************/
 #define MODULE_ID_PP_SS_REC             0x10001050
 #define PARAM_ID_PP_SS_REC_GETPARAMS    0x10001052
+#define PARAM_ID_PP_SS_REC_SETPARAMS    0x1000BA30
 
 #define MODULE_ID_PP_SA                 0x10001fa0
 #define PARAM_ID_PP_SA_PARAMS           0x10001fa1
@@ -105,12 +106,17 @@ struct asm_stream_cmd_set_pp_params_dolby_atmos {
 	int16_t dolby_profile;
 } __packed;
 
+struct adm_param_interview_operating_mode {
+	uint32_t onoff;
+} __packed;
+
 /****************************************************************************/
 /*//////////////////////////// VOICE SOLUTION //////////////////////////////*/
 /****************************************************************************/
 /* NXP */
 #define VPM_TX_SM_LVVEFQ_COPP_TOPOLOGY      0x1000BFF0
 #define VPM_TX_DM_LVVEFQ_COPP_TOPOLOGY      0x1000BFF1
+#define VPM_TX_QM_LVVEFQ_COPP_TOPOLOGY      0x1000BFF3
 #define VPM_TX_SM_LVSAFQ_COPP_TOPOLOGY      0x1000B200
 #define VPM_TX_DM_LVSAFQ_COPP_TOPOLOGY      0x1000B201
 
@@ -118,6 +124,12 @@ struct asm_stream_cmd_set_pp_params_dolby_atmos {
 #define VOICE_TX_DIAMONDVOICE_FVSAM_SM      0x1000110B
 #define VOICE_TX_DIAMONDVOICE_FVSAM_DM      0x1000110A
 #define VOICE_TX_DIAMONDVOICE_FVSAM_QM      0x10001109
+#define VOICE_TX_DIAMONDVOICE_FRSAM_DM      0x1000110C
+
+/* Solomon Voice */
+#define VOICE_TX_SOLOMONVOICE_SM            0x100010AA
+#define VOICE_TX_SOLOMONVOICE_DM            0x100010AB
+#define VOICE_TX_SOLOMONVOICE_QM            0x100010AC
 
 #define VOICEPROC_MODULE_VENC				0x00010F07
 #define VOICE_PARAM_LOOPBACK_ENABLE			0x00010E18
@@ -135,9 +147,12 @@ struct asm_stream_cmd_set_pp_params_dolby_atmos {
 #define VOICE_MODULE_LVVEFQ_TX              0x1000B500
 #define TX_VOICE_SOLOMONVOICE               0x100010A0
 #define VOICE_ECHO_REF_LCH_MUTE_PARAM       0x10001028
+#define VOICE_NREC_MODE_DYNAMIC_PARAM       0x10001029
 
 #define VOICE_MODULE_SET_DEVICE				0x10041000
 #define VOICE_MODULE_SET_DEVICE_PARAM		0x10041001
+
+#define DIAMONDVOICE_REMOTEVOL_PARAM		0x10001012
 
 struct vss_icommon_cmd_set_ui_property_v2_t {
 	uint32_t module_id;
@@ -218,6 +233,16 @@ struct cvp_set_device_info_cmd {
 struct cvp_set_ref_lch_mute_enable_cmd {
 	struct apr_hdr hdr;
 	struct vss_icommon_cmd_set_ui_property_v2_t cvp_set_ref_lch_mute;
+} __packed;
+
+struct cvp_set_aec_effect_cmd {
+	struct apr_hdr hdr;
+	struct vss_icommon_cmd_set_ui_property_v2_t cvp_set_aec_effect;
+} __packed;
+
+struct cvp_set_voice_remote_mic_cmd {
+	struct apr_hdr hdr;
+	struct vss_icommon_cmd_set_ui_property_v2_t cvp_set_voice_remote_mic;
 } __packed;
 
 void voice_sec_loopback_start_cmd(u32 session_id);

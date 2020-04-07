@@ -110,6 +110,21 @@ extern void sec_cmd_send_event_to_user(struct sec_cmd_data *data, char *test, ch
 extern void sec_virtual_tsp_register(struct sec_cmd_data *sec);
 #endif
 
+enum sec_input_notify {
+	SEC_INPUT_CUSTOM_NOTIFIER_NOTHING = 0,
+	SEC_INPUT_CUSTOM_NOTIFIER_MAIN_TOUCH_ON,
+	SEC_INPUT_CUSTOM_NOTIFIER_MAIN_TOUCH_OFF,
+	SEC_INPUT_CUSTOM_NOTIFIER_SUB_TOUCH_ON,
+	SEC_INPUT_CUSTOM_NOTIFIER_SUB_TOUCH_OFF,
+	SEC_INPUT_CUSTOM_NOTIFIER_SECURE_TOUCH_ENABLE,
+	SEC_INPUT_CUSTOM_NOTIFIER_SECURE_TOUCH_DISABLE,
+	SEC_INPUT_CUSTOM_NOTIFIER_VALUE_MAX,
+};
+
+void sec_input_register_notify(struct notifier_block *nb, notifier_fn_t notifier_call);
+void sec_input_unregister_notify(struct notifier_block *nb);
+void sec_input_notify(struct notifier_block *nb, unsigned long data);
+void sec_input_self_request_notify(struct notifier_block *nb);
 #endif /* _SEC_CMD_H_ */
 
 

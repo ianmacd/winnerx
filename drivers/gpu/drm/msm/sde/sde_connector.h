@@ -222,9 +222,12 @@ struct sde_connector_ops {
 	/**
 	 * post_kickoff - display to program post kickoff-time features
 	 * @connector: Pointer to drm connector structure
+	 * @params: Parameter bundle of connector-stored information for
+	 *	post kickoff programming into the display
 	 * Returns: Zero on success
 	 */
-	int (*post_kickoff)(struct drm_connector *connector);
+	int (*post_kickoff)(struct drm_connector *connector,
+		struct msm_display_conn_params *params);
 
 	/**
 	 * post_open - calls connector to process post open functionalities
@@ -310,6 +313,16 @@ struct sde_connector_ops {
 	 * Returns: v_front_porch on success error-code on failure
 	 */
 	int (*get_panel_vfp)(void *display, int h_active, int v_active);
+
+	/**
+	 * prepare_commit - trigger display to program pre-commit time features
+	 * @display: Pointer to private display structure
+	 * @params: Parameter bundle of connector-stored information for
+	 *	pre commit time programming into the display
+	 * Returns: Zero on success
+	 */
+	int (*prepare_commit)(void *display,
+			struct msm_display_conn_params *params);
 };
 
 /**
@@ -379,7 +392,6 @@ struct sde_connector_evt {
  * @qsync_updated: Qsync settings were updated
  * last_cmd_tx_sts: status of the last command transfer
  * @hdr_capable: external hdr support present
- * @mode_info_lock: lock to protect mode info
  */
 struct sde_connector {
 	struct drm_connector base;
@@ -432,7 +444,6 @@ struct sde_connector {
 
 	bool last_cmd_tx_sts;
 	bool hdr_capable;
-	struct mutex mode_info_lock;
 };
 
 /**
@@ -766,6 +777,13 @@ int sde_connector_register_custom_event(struct sde_kms *kms,
  * Returns: Zero on success
  */
 int sde_connector_pre_kickoff(struct drm_connector *connector);
+
+/**
+ * sde_connector_prepare_commit - trigger commit time feature programming
+ * @connector: Pointer to drm connector object
+ * Returns: Zero on success
+ */
+int sde_connector_prepare_commit(struct drm_connector *connector);
 
 /**
  * sde_connector_needs_offset - adjust the output fence offset based on

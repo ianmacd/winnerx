@@ -14,27 +14,24 @@ five_fwdir := firmware/five
 five_signed_fwdir := firmware/five/signed
 five_objs := $(addprefix $(obj)/,$(five_fwlist))
 
-# Tools
-five_split_tool := $(srctree)/tools/pil_splitter.py
-ifeq ($(SIGNCLIENT_JAR),)
-	five_sign_tool := $(srctree)/tools/signclient.jar
-else
-	five_sign_tool := $(SIGNCLIENT_JAR)
-endif
-
-ifeq (exist, $(shell [ -e $(five_split_tool) ] && echo exist))
+ifeq ($(CONFIG_FIVE_SIGN_TA),y)
 # Setup five_sign_runtype and five_sign_model
 include $(srctree)/firmware/five/sign_mode.mk
 
+# The strings are came from Kconfig are quoted with \". This symbol must be removed
+# because 'make' doesn't do that automatically
+five_pilsplitter := $(subst $\",,$(CONFIG_FIVE_PILSPLITTER_PATH))
+five_signclient := $(subst $\",,$(CONFIG_FIVE_SIGNCLIENT_PATH))
+
 $(five_objs): $(five_fwdir)/five.signed
 
-$(five_fwdir)/five.signed: $(five_split_tool) $(five_signed_fwdir)/five.mbn
-	python $(five_split_tool) $(five_signed_fwdir)/five.mbn $(five_fwdir)/five
+$(five_fwdir)/five.signed: $(five_pilsplitter) $(five_signed_fwdir)/five.mbn
+	python $(five_pilsplitter) $(five_signed_fwdir)/five.mbn $(five_fwdir)/five
 	touch $@
 
-$(five_signed_fwdir)/five.mbn: $(five_sign_tool) $(srctree)/firmware/five/five.mbn
+$(five_signed_fwdir)/five.mbn: $(five_signclient) $(srctree)/firmware/five/five.mbn
 	mkdir -p $(five_signed_fwdir)
-	java -jar $(five_sign_tool) -model $(five_sign_model) \
+	java -jar $(five_signclient) -model $(five_sign_model) \
 		-runtype $(five_sign_runtype) -input $(srctree)/firmware/five/five.mbn \
 		-output $(five_signed_fwdir)/five.mbn
 

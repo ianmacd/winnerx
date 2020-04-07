@@ -62,6 +62,7 @@
 #if defined(CONFIG_DISPLAY_SAMSUNG)
 /* max size supported for dsi cmd transfer using DMA */
 #define DSI_CTRL_MAX_CMD_FET_MEMORY_SIZE 200
+#define DSI_CTRL_MAX_CMD_FET_MEMORY_SIZE_ONE_DSI_LANE 100
 #endif
 
 /**

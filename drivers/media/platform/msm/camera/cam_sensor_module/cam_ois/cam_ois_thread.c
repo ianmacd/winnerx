@@ -22,6 +22,9 @@
 #if defined(CONFIG_SAMSUNG_OIS_MCU_STM32)
 #include "cam_ois_mcu_stm32g.h"
 #endif
+#if defined(CONFIG_SAMSUNG_OIS_RUMBA_S4)
+#include "cam_ois_rumba_s4.h"
+#endif
 
 /**
  * cam_ois_thread_add_msg - add msg to list
@@ -106,11 +109,12 @@ static int cam_ois_thread_func(void *data)
 					rc = cam_ois_init(o_ctrl);
 					if (rc < 0)
 						CAM_ERR(CAM_OIS, "OIS init failed %d", rc);
-
+#if !defined(CONFIG_SAMSUNG_OIS_RUMBA_S4)
 					// OIS centering
 					cam_ois_set_ois_mode(o_ctrl, 0x05);
 					if (rc < 0)
 						CAM_ERR(CAM_OIS, "OIS centering failed %d", rc);
+#endif
 					msleep(40);
 					mutex_unlock(&(o_ctrl->ois_mode_mutex));
 					break;
@@ -132,6 +136,7 @@ static int cam_ois_thread_func(void *data)
 					mutex_unlock(&(o_ctrl->i2c_mode_data_mutex));
 					mutex_unlock(&(o_ctrl->ois_mode_mutex));
 					break;
+#if defined(CONFIG_SAMSUNG_OIS_MCU_STM32)
 				case CAM_OIS_THREAD_MSG_RESET_MCU:
 					mutex_lock(&(o_ctrl->ois_mode_mutex));
 					CAM_DBG(CAM_OIS, "CAM_OIS_THREAD_MSG_RESET_MCU");
@@ -141,6 +146,18 @@ static int cam_ois_thread_func(void *data)
 						CAM_ERR(CAM_OIS, "OIS centering failed %d", rc);
 					mutex_unlock(&(o_ctrl->ois_mode_mutex));
 					break;
+#endif
+#if defined(CONFIG_SAMSUNG_OIS_RUMBA_S4)
+					case CAM_OIS_THREAD_MSG_RESET_RUMBA:
+						mutex_lock(&(o_ctrl->ois_mode_mutex));
+						CAM_DBG(CAM_OIS, "CAM_OIS_THREAD_MSG_RESET_RUMBA");
+									
+						cam_ois_set_ois_mode(o_ctrl, 0x16);
+						if (rc < 0)
+							CAM_ERR(CAM_OIS, "OIS centering failed %d", rc);
+						mutex_unlock(&(o_ctrl->ois_mode_mutex));
+						break;
+#endif
 				}
 			}
 			kfree(msg);

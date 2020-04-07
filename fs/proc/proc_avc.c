@@ -18,6 +18,10 @@
 #include <linux/io.h>
 #include <linux/slab.h>
 
+#ifdef CONFIG_PROC_AVC
+#include <linux/proc_avc.h>
+#endif
+
 #define LOG_MAGIC 0x4d474f4c	/* "LOGM" */
 
 static unsigned int *sec_avc_log_ptr;
@@ -155,3 +159,12 @@ static int __init sec_avc_log_late_init(void)
 }
 
 late_initcall(sec_avc_log_late_init);
+
+int __init sec_log_init(void)
+{
+#ifdef CONFIG_PROC_AVC
+	sec_avc_log_init();
+#endif
+	return 0;
+}
+fs_initcall(sec_log_init);

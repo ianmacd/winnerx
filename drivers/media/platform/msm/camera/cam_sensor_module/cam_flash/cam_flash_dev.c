@@ -24,6 +24,10 @@
 struct msm_pinctrl_info flash_pctrl;
 #endif
 
+#if defined(CONFIG_LEDS_PMIC_QPNP)
+struct cam_flash_ctrl *g_flash_ctrl;
+#endif
+
 static int32_t cam_flash_driver_cmd(struct cam_flash_ctrl *fctrl,
 		void *arg, struct cam_flash_private_soc *soc_private)
 {
@@ -78,6 +82,8 @@ static int32_t cam_flash_driver_cmd(struct cam_flash_ctrl *fctrl,
 		bridge_params.v4l2_sub_dev_flag = 0;
 		bridge_params.media_entity_flag = 0;
 		bridge_params.priv = fctrl;
+
+		bridge_params.dev_id = CAM_FLASH;
 
 		flash_acq_dev.device_handle =
 			cam_create_device_hdl(&bridge_params);
@@ -509,6 +515,9 @@ static int32_t cam_flash_platform_probe(struct platform_device *pdev)
 #endif
 
 	fctrl->flash_state = CAM_FLASH_STATE_INIT;
+#if defined(CONFIG_LEDS_PMIC_QPNP)
+        g_flash_ctrl = fctrl;
+#endif
 	CAM_DBG(CAM_FLASH, "Probe success");
 	return rc;
 
@@ -595,6 +604,9 @@ static int32_t cam_flash_i2c_driver_probe(struct i2c_client *client,
 
 	mutex_init(&(fctrl->flash_mutex));
 	fctrl->flash_state = CAM_FLASH_STATE_INIT;
+#if defined(CONFIG_LEDS_PMIC_QPNP)
+        g_flash_ctrl = fctrl;
+#endif
 
 	return rc;
 

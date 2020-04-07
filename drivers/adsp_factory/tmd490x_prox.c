@@ -17,7 +17,11 @@
 #include <linux/wakelock.h>
 #include "adsp.h"
 #define VENDOR "AMS"
+#ifdef CONFIG_SUPPORT_TMD4907_FACTORY
+#define CHIP_ID "TMD4907"
+#else
 #define CHIP_ID "TMD4910"
+#endif
 
 #define PROX_AVG_COUNT 40
 #define PROX_ALERT_THRESHOLD 200
@@ -480,13 +484,12 @@ static ssize_t prox_register_read_show(struct device *dev,
 		pr_err("[FACTORY] %s: Timeout!!!\n", __func__);
 
 	pdata->reg_backup[1] = data->msg_buf[prox_idx][0];
-	pr_info("[FACTORY] %s: [0x%x]: 0x%x\n",
+	pr_info("[FACTORY] %s: [0x%x]: %d\n",
 		__func__, pdata->reg_backup[0], pdata->reg_backup[1]);
 
 	mutex_unlock(&data->prox_factory_mutex);
 
-	return snprintf(buf, PAGE_SIZE, "[0x%x]: 0x%x\n",
-		pdata->reg_backup[0], pdata->reg_backup[1]);
+	return snprintf(buf, PAGE_SIZE, "%d\n", pdata->reg_backup[1]);
 }
 
 static ssize_t prox_register_read_store(struct device *dev,
@@ -494,7 +497,7 @@ static ssize_t prox_register_read_store(struct device *dev,
 {
 	int reg = 0;
 
-	if (sscanf(buf, "%3x", &reg) != 1) {
+	if (sscanf(buf, "%3d", &reg) != 1) {
 		pr_err("[FACTORY]: %s - The number of data are wrong\n",
 			__func__);
 		return -EINVAL;
@@ -514,7 +517,7 @@ static ssize_t prox_register_write_store(struct device *dev,
 	int cnt = 0;
 	int32_t msg_buf[2];
 
-	if (sscanf(buf, "%3x,%3x", &msg_buf[0], &msg_buf[1]) != 2) {
+	if (sscanf(buf, "%3d,%5d", &msg_buf[0], &msg_buf[1]) != 2) {
 		pr_err("[FACTORY]: %s - The number of data are wrong\n",
 			__func__);
 		return -EINVAL;
@@ -534,7 +537,7 @@ static ssize_t prox_register_write_store(struct device *dev,
 		pr_err("[FACTORY] %s: Timeout!!!\n", __func__);
 
 	pdata->reg_backup[0] = msg_buf[0];
-	pr_info("[FACTORY] %s: 0x%x - 0x%x\n",
+	pr_info("[FACTORY] %s: 0x%x - %d\n",
 		__func__, msg_buf[0], data->msg_buf[prox_idx][0]);
 	mutex_unlock(&data->prox_factory_mutex);
 

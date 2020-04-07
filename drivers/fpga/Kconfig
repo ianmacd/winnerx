@@ -117,4 +117,9 @@ config XILINX_PR_DECOUPLER
 	  region of the FPGA from the busses while that region is
 	  being reprogrammed during partial reconfig.
 
+config POGO_FPGA
+	tristate "fpga for pogo"
+	help
+	  FPGA manager driver support for pogo fpga
+
 endif # FPGA

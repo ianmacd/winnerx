@@ -51,6 +51,9 @@ obj-$(CONFIG_MFD_TACNA)		+= tacna-core.o
 ifeq ($(CONFIG_MFD_CS47L96),y)
 obj-$(CONFIG_MFD_TACNA)		+= cs47l96-tables.o
 endif
+ifeq ($(CONFIG_MFD_CS48L31),y)
+obj-$(CONFIG_MFD_TACNA)		+= cs48l32-tables.o
+endif
 ifeq ($(CONFIG_MFD_CS48L32),y)
 obj-$(CONFIG_MFD_TACNA)		+= cs48l32-tables.o
 endif
@@ -249,3 +252,6 @@ obj-$(CONFIG_MFD_MXS_LRADC)     += mxs-lradc.o
 
 obj-$(CONFIG_MFD_S2MPB02)       += s2mpb02-core.o s2mpb02-irq.o
 obj-$(CONFIG_SEC_PM)	+= sec_ap_pmic.o
+
+obj-$(CONFIG_MFD_S2MU107)	+= s2mu107_core.o s2mu107_irq.o
+obj-$(CONFIG_MFD_S2MU106)	+= s2mu106_core.o s2mu106_irq.o

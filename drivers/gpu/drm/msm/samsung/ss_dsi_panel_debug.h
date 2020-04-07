@@ -29,7 +29,6 @@
 //#include "ss_dsi_panel_common.h"
 #ifdef CONFIG_SEC_DEBUG
 #include <linux/sec_debug.h>
-#include <linux/sec_debug_partition.h>
 #endif
 
 
@@ -85,9 +84,8 @@ enum ss_smmu_type {
 struct ss_smmu_logging {
 	ktime_t time;
 
-	int domain; /* To check which domain */
-	struct file *file; /* To compare wiht task open file */
 	struct sg_table *table; /*To compare with whole ion buffer(page_link) */
+
 	struct list_head list;
 };
 
@@ -96,6 +94,12 @@ struct ss_smmu_debug {
 
 	struct list_head list;
 	spinlock_t lock;
+};
+
+struct ss_image_logging {
+	uint32_t	dma_address;
+	int src_width, src_height;
+	int src_format;
 };
 
 int ss_read_rddpm(struct samsung_display_driver_data *vdd);
@@ -107,9 +111,10 @@ int ss_read_ddi_cmd_log(struct samsung_display_driver_data *vdd, char *read_buf)
 int ss_read_pps_data(struct samsung_display_driver_data *vdd);
 
 int ss_smmu_debug_init(struct samsung_display_driver_data *vdd);
-void ss_smmu_debug_map(enum ss_smmu_type type, int domain, struct file *file, struct sg_table *table);
+void ss_smmu_debug_map(enum ss_smmu_type type, struct sg_table *table);
 void ss_smmu_debug_unmap(enum ss_smmu_type type, struct sg_table *table);
 void ss_smmu_debug_log(void);
+void ss_image_logging_update(uint32_t plane_addr, int width, int height, int src_format);
 
 void ss_inc_ftout_debug(const char *name);
 

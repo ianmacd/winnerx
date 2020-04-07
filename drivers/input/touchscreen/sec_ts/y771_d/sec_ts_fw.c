@@ -11,6 +11,7 @@
  */
 
 #include "sec_ts.h"
+#include <linux/spu-verify.h>
 
 #define SEC_TS_FW_BLK_SIZE		256
 
@@ -575,8 +576,7 @@ err_write_fail:
 	return ret;
 }
 
-static int sec_ts_firmware_update(struct sec_ts_data *ts, const u8 *data,
-						size_t size, int bl_update, int retry)
+static int sec_ts_firmware_update(struct sec_ts_data *ts, const u8 *data, int bl_update, int retry)
 {
 	int i;
 	int ret;
@@ -775,7 +775,7 @@ int sec_ts_firmware_update_on_probe(struct sec_ts_data *ts, bool force_update)
 	} else {	/* firmup case */
 
 		for (ii = 0; ii < 3; ii++) {
-			ret = sec_ts_firmware_update(ts, fw_entry->data, fw_entry->size, 0, ii);
+			ret = sec_ts_firmware_update(ts, fw_entry->data, 0, ii);
 			if (ret >= 0)
 				break;
 		}
@@ -851,13 +851,15 @@ static int sec_ts_load_fw_from_bin(struct sec_ts_data *ts)
 		return error;
 	}
 
+	if (!ts->plat_data->firmware_name) {
+		error = -1;
+		input_info(true, &ts->client->dev, "%s: empty fw_path.\n", __func__);
+		return error;
+	}
 	if (ts->client->irq)
 		disable_irq(ts->client->irq);
 
-	if (!ts->plat_data->firmware_name)
-		snprintf(fw_path, SEC_TS_MAX_FW_PATH, "%s", SEC_TS_DEFAULT_FW_NAME);
-	else
-		snprintf(fw_path, SEC_TS_MAX_FW_PATH, "%s", ts->plat_data->firmware_name);
+	snprintf(fw_path, SEC_TS_MAX_FW_PATH, "%s", ts->plat_data->firmware_name);
 
 	input_info(true, &ts->client->dev, "%s: initial firmware update  %s\n", __func__, fw_path);
 
@@ -874,7 +876,7 @@ static int sec_ts_load_fw_from_bin(struct sec_ts_data *ts)
 	restore_cal = 1;
 #endif
 	/* use virtual tclm_control - magic cal 1 */
-	if (sec_ts_firmware_update(ts, fw_entry->data, fw_entry->size, 0, 0) < 0) {
+	if (sec_ts_firmware_update(ts, fw_entry->data, 0, 0) < 0) {
 		error = -1;
 		restore_cal = 0;
 	}
@@ -896,23 +898,25 @@ err_request_fw:
 	return error;
 }
 
-static int sec_ts_load_fw_from_ums(struct sec_ts_data *ts)
+static int sec_ts_load_fw(struct sec_ts_data *ts, const char *file_path)
 {
 	fw_header *fw_hd;
 	struct file *fp;
 	mm_segment_t old_fs;
 	long fw_size, nread;
 	int error = 0;
+	long spu_ret = 0;
+	long ori_size = 0;
 #ifdef TCLM_CONCEPT
 	int restore_cal = 0;
 #endif
 	old_fs = get_fs();
 	set_fs(KERNEL_DS);
 
-	fp = filp_open(SEC_TS_DEFAULT_UMS_FW, O_RDONLY, S_IRUSR);
+	fp = filp_open(file_path, O_RDONLY, S_IRUSR);
 	if (IS_ERR(fp)) {
 		input_err(true, ts->dev, "%s: failed to open %s.\n", __func__,
-				SEC_TS_DEFAULT_UMS_FW);
+				file_path);
 		error = -ENOENT;
 		goto open_err;
 	}
@@ -934,7 +938,7 @@ static int sec_ts_load_fw_from_ums(struct sec_ts_data *ts)
 
 		input_info(true, ts->dev,
 				"%s: start, file path %s, size %ld Bytes\n",
-				__func__, SEC_TS_DEFAULT_UMS_FW, fw_size);
+				__func__, file_path, fw_size);
 
 		if (nread != fw_size) {
 			input_err(true, ts->dev,
@@ -952,12 +956,53 @@ static int sec_ts_load_fw_from_ums(struct sec_ts_data *ts)
 			if (ts->client->irq)
 				disable_irq(ts->client->irq);
 
+			/* If FFU firmware version is lower than IC's version, do not run update routine */
+			if (strncmp(file_path, TSP_PATH_SPU_FW_SIGNED, strlen(TSP_PATH_SPU_FW_SIGNED)) == 0
+				|| strncmp(file_path, TSP_PATH_EXTERNAL_FW_SIGNED, strlen(TSP_PATH_EXTERNAL_FW_SIGNED)) == 0) {
+				/* digest 32, signature 512 TSP 3 */
+				ori_size = fw_size - SPU_METADATA_SIZE(TSP);
+				if (strncmp(file_path, TSP_PATH_SPU_FW_SIGNED, strlen(TSP_PATH_SPU_FW_SIGNED)) == 0
+					&& (ts->plat_data->img_version_of_ic[0] == ((fw_hd->img_ver >> 0) & 0xff) &&
+					ts->plat_data->img_version_of_ic[1] == ((fw_hd->img_ver >> 8) & 0xff) &&
+					ts->plat_data->img_version_of_ic[2] == ((fw_hd->img_ver >> 16) & 0xff))) {
+					if (ts->plat_data->img_version_of_ic[3] >= ((fw_hd->img_ver >> 24) & 0xff)) {
+						input_info(true, &ts->client->dev, "%s: img version: %02X%02X%02X%02X/%08X exit\n",
+							__func__, ts->plat_data->img_version_of_ic[3], ts->plat_data->img_version_of_ic[2],
+							ts->plat_data->img_version_of_ic[1], ts->plat_data->img_version_of_ic[0],
+							fw_hd->img_ver);
+						error = 0;
+						input_info(true, &ts->client->dev, "%s: skip ffu update\n", __func__);
+						goto done;
+					} else {
+						input_info(true, &ts->client->dev, "%s: run spu update\n", __func__);
+					}
+				
+				} else if (strncmp(file_path, TSP_PATH_EXTERNAL_FW_SIGNED, strlen(TSP_PATH_EXTERNAL_FW_SIGNED)) == 0
+					&& (ts->plat_data->img_version_of_ic[0] == ((fw_hd->img_ver >> 0) & 0xff) &&
+					ts->plat_data->img_version_of_ic[1] == ((fw_hd->img_ver >> 8) & 0xff))) {
+						input_info(true, &ts->client->dev, "%s: run sfu update\n", __func__);
+				
+				} else {
+					input_info(true, &ts->client->dev, "%s: not matched product version\n", __func__);
+					error = -ENOENT;
+					goto done;
+				}
+
+				spu_ret = spu_firmware_signature_verify("TSP", fw_data, fw_size);
+				if (spu_ret != ori_size) {
+					input_err(true, &ts->client->dev, "%s: signature verify failed, spu_ret:%ld, ori_size:%ld\n",
+						__func__, spu_ret, ori_size);
+					error = -1;
+					goto done;
+				}
+			}
+
 #ifdef TCLM_CONCEPT
 			sec_tclm_root_of_cal(ts->tdata, CALPOSITION_TESTMODE);
 			restore_cal = 1;
 #endif
 			/* use virtual tclm_control - magic cal 1 */
-			if (sec_ts_firmware_update(ts, fw_data, fw_size, 0, 0) < 0) {
+			if (sec_ts_firmware_update(ts, fw_data, 0, 0) < 0) {
 				error = -1; /* firmware failed */
 				goto done;
 			}
@@ -987,6 +1032,44 @@ open_err:
 	return error;
 }
 
+#if 0
+static int sec_ts_load_fw_from_ffu(struct sec_ts_data *ts)
+{
+	const struct firmware *fw_entry;
+	const char *fw_path = SEC_TS_DEFAULT_FFU_FW;
+	int result = -1;
+
+	if (!fw_path) {
+		input_err(true, &ts->client->dev, "%s: Firmware name is not defined\n", __func__);
+		return -EINVAL;
+	}
+
+	disable_irq(ts->client->irq);
+
+	input_info(true, &ts->client->dev, "%s: Load firmware : %s\n", __func__, fw_path);
+
+	/* Loading Firmware------------------------------------------ */
+	if (request_firmware(&fw_entry, fw_path, &ts->client->dev) != 0) {
+		input_err(true, &ts->client->dev, "%s: firmware is not available\n", __func__);
+		goto err_request_fw;
+	}
+	input_info(true, &ts->client->dev, "%s: request firmware done! size = %d\n", __func__, (int)fw_entry->size);
+
+	sec_ts_check_firmware_version(ts, fw_entry->data);
+
+	if (sec_ts_firmware_update(ts, fw_entry->data, fw_entry->size, 0, 0) < 0)
+		result = -1;
+	else
+		result = 0;
+
+err_request_fw:
+	release_firmware(fw_entry);
+	enable_irq(ts->client->irq);
+
+	return result;
+}
+#endif
+
 int sec_ts_firmware_update_on_hidden_menu(struct sec_ts_data *ts, int update_type)
 {
 	int ret = 0;
@@ -997,7 +1080,7 @@ int sec_ts_firmware_update_on_hidden_menu(struct sec_ts_data *ts, int update_typ
 	 * 0 : [BUILT_IN] Getting firmware which is for user.
 	 * 1 : [UMS] Getting firmware from sd card.
 	 * 2 : none
-	 * 3 : [FFU] Getting firmware from air.
+	 * 3 : [FFU] Getting firmware from apk.
 	 */
 
 	switch (update_type) {
@@ -1005,7 +1088,14 @@ int sec_ts_firmware_update_on_hidden_menu(struct sec_ts_data *ts, int update_typ
 		ret = sec_ts_load_fw_from_bin(ts);
 		break;
 	case UMS:
-		ret = sec_ts_load_fw_from_ums(ts);
+#if !defined(CONFIG_SAMSUNG_PRODUCT_SHIP)
+		ret = sec_ts_load_fw(ts, TSP_PATH_EXTERNAL_FW);
+#else
+		ret = sec_ts_load_fw(ts, TSP_PATH_EXTERNAL_FW_SIGNED);
+#endif
+		break;
+	case FFU:
+		ret = sec_ts_load_fw(ts, TSP_PATH_SPU_FW_SIGNED);
 		break;
 	default:
 		input_err(true, ts->dev, "%s: Not support command[%d]\n",

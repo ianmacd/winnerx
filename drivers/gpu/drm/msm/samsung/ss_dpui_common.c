@@ -67,6 +67,9 @@ static const char * const dpui_key_name[] = {
 
 	/* GPU */
 	[DPUI_KEY_QCT_GPU_PF] = "QCT_GPU_PF",
+
+	/* ub con detect */
+	[DPUI_KEY_UB_CON] = "UB_CON",
 };
 
 static const char * const dpui_type_name[] = {
@@ -160,6 +163,10 @@ static struct dpui_info dpui = {
 		/* GPU */
 		DPUI_FIELD_INIT(DPUI_LOG_LEVEL_INFO, DPUI_TYPE_CTRL,
 			DPUI_VAR_U32, DPUI_AUTO_CLEAR_ON, "0", DPUI_KEY_QCT_GPU_PF),
+
+		/* UB CON */
+		DPUI_FIELD_INIT(DPUI_LOG_LEVEL_INFO, DPUI_TYPE_PANEL,
+			DPUI_VAR_U32, DPUI_AUTO_CLEAR_ON, "0", DPUI_KEY_UB_CON),
 	},
 };
 

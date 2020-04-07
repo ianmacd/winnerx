@@ -36,7 +36,7 @@
 #define CAM_SOC_MAX_BASE            CAM_SOC_MAX_BLOCK
 
 /* maximum number of device regulator */
-#define CAM_SOC_MAX_REGULATOR       10
+#define CAM_SOC_MAX_REGULATOR       11
 
 /* maximum number of device clock */
 #define CAM_SOC_MAX_CLK             32
@@ -384,7 +384,7 @@ int cam_soc_util_set_clk_flags(struct cam_hw_soc_info *soc_info,
  * @return:             success or failure
  */
 int cam_soc_util_set_src_clk_rate(struct cam_hw_soc_info *soc_info,
-	int32_t clk_rate);
+	int64_t clk_rate);
 
 /**
  * cam_soc_util_get_option_clk_by_name()
@@ -516,7 +516,7 @@ int cam_soc_util_regulator_disable(struct regulator *rgltr,
 	uint32_t rgltr_min_volt, uint32_t rgltr_max_volt,
 	uint32_t rgltr_op_mode, uint32_t rgltr_delay);
 
-#if defined(CONFIG_EEPROM_FORCE_DOWN)
+#if defined(CONFIG_SAMSUNG_FORCE_DISABLE_REGULATOR)
 /**
  * cam_soc_util_regulator_force_disable()
  *
@@ -536,7 +536,6 @@ int cam_soc_util_regulator_force_disable(struct regulator *rgltr,
 	uint32_t rgltr_min_volt, uint32_t rgltr_max_volt,
 	uint32_t rgltr_op_mode, uint32_t rgltr_delay);
 #endif
-
 
 /**
  * cam_soc_util_w()

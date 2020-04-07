@@ -1,4 +1,4 @@
-/* Copyright (c) 2017-2018, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2017-2019, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -410,10 +410,10 @@ static ssize_t ipa_ut_dbgfs_meta_test_read(struct file *file,
 	meta_type = (long)(file->private_data);
 	IPA_UT_DBG("Meta test type %ld\n", meta_type);
 
-	buf = kmalloc(IPA_UT_DEBUG_READ_BUF_SIZE, GFP_KERNEL);
+	buf = kmalloc(IPA_UT_DEBUG_READ_BUF_SIZE + 1, GFP_KERNEL);
 	if (!buf) {
 		IPA_UT_ERR("failed to allocate %d bytes\n",
-			IPA_UT_DEBUG_READ_BUF_SIZE);
+			IPA_UT_DEBUG_READ_BUF_SIZE + 1);
 		cnt = 0;
 		goto unlock_mutex;
 	}
@@ -866,7 +866,7 @@ static ssize_t ipa_ut_dbgfs_enable_write(struct file *file,
 		return -E2BIG;
 	}
 
-	if (copy_from_user(lcl_buf, buf, count)) {
+	if (copy_from_user(lcl_buf, buf, min(sizeof(lcl_buf), count))) {
 		IPA_UT_ERR("fail to copy buf from user space\n");
 		return -EFAULT;
 	}

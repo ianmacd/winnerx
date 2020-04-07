@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2018, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2019, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -3868,6 +3868,12 @@ struct afe_id_aptx_adaptive_enc_init
 #define AFE_ENCODER_PARAM_ID_PACKETIZER_ID 0x0001322E
 
 /*
+ * MI2S packetizer id for #AVS_MODULE_ID_ENCODER module.
+ * Used when I2S interface is selected.
+ */
+#define AFE_MODULE_ID_PACKETIZER_MI2S 0x1000F101
+
+/*
  * Encoder config block  parameter for the #AVS_MODULE_ID_ENCODER module.
  * This parameter may be set runtime.
  */
@@ -4066,6 +4072,11 @@ struct asm_sbc_enc_cfg_t {
 	 */
 	uint32_t    sample_rate;
 };
+
+struct asm_ss_sbc_enc_cfg_t {
+	struct asm_sbc_enc_cfg_t custom_config;
+	struct afe_abr_enc_cfg_t abr_config;
+} __packed;
 
 #define ASM_MEDIA_FMT_AAC_AOT_LC            2
 #define ASM_MEDIA_FMT_AAC_AOT_SBR           5
@@ -4288,6 +4299,7 @@ struct asm_custom_enc_cfg_ssc_t {
 	 */
 	uint8_t     channel_mapping[8];
 	uint32_t    custom_size;
+	struct afe_abr_enc_cfg_t abr_config;
 } __packed;
 
 struct afe_enc_fmt_id_param_t {
@@ -4448,6 +4460,7 @@ struct asm_aac_dec_cfg_v2_t {
 
 union afe_enc_config_data {
 	struct asm_sbc_enc_cfg_t sbc_config;
+	struct asm_ss_sbc_enc_cfg_t ss_sbc_config;
 	struct asm_aac_enc_cfg_t aac_config;
 	struct asm_custom_enc_cfg_t  custom_config;
 	struct asm_celt_enc_cfg_t  celt_config;
@@ -5527,8 +5540,13 @@ struct asm_softvolume_params {
 /* Left side direct channel. */
 #define PCM_CHANNEL_LSD  33
 
-/* Right side direct channel. */
+/* Right side direct channel. Update PCM_MAX_CHMAP_ID when
+ * this list is extended.
+ */
 #define PCM_CHANNEL_RSD  34
+
+/* Max valid channel map index */
+#define PCM_MAX_CHMAP_ID PCM_CHANNEL_RSD
 
 #define PCM_FORMAT_MAX_NUM_CHANNEL  8
 #define PCM_FORMAT_MAX_CHANNELS_9   9
@@ -12425,6 +12443,14 @@ struct admx_sec_primary_mic_ch {
 	uint16_t sec_primary_mic_ch;
 	uint16_t reserved1;
 } __packed;
+
+#define FFECNS_MODULE_ID                                       0x00010952
+#define FLUENCE_CMN_GLOBAL_EFFECT_PARAM_ID                     0x00010EAF
+#define FFECNS_TOPOLOGY                                        0X10028003
+
+struct ffecns_effect {
+	uint32_t payload;
+};
 
 /** ID of the Voice Activity Detection (VAD) module, which is used to
  *   configure AFE VAD.

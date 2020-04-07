@@ -77,6 +77,9 @@
 #ifdef PNO_SUPPORT
 #include <dhd_pno.h>
 #endif /* PNO_SUPPORT */
+#ifdef RTT_SUPPORT
+#include "dhd_rtt.h"
+#endif /* RTT_SUPPORT */
 
 #define ACTIVE_SCAN 1
 #define PASSIVE_SCAN 0
@@ -96,6 +99,9 @@ bool g_first_broadcast_scan = TRUE;
 #ifdef CUSTOMER_HW4_DEBUG
 bool wl_scan_timeout_dbg_enabled = 0;
 #endif /* CUSTOMER_HW4_DEBUG */
+#ifdef P2P_LISTEN_OFFLOADING
+void wl_cfg80211_cancel_p2plo(struct bcm_cfg80211 *cfg);
+#endif /* P2P_LISTEN_OFFLOADING */
 static void _wl_notify_scan_done(struct bcm_cfg80211 *cfg, bool aborted);
 
 extern int passive_channel_skip;
@@ -668,9 +674,6 @@ wl_escan_handler(struct bcm_cfg80211 *cfg, bcm_struct_cfgdev *cfgdev,
 			wl_scan_timeout_dbg_clear();
 #endif /* CUSTOMER_HW4_DEBUG */
 	} else if ((status == WLC_E_STATUS_ABORT) || (status == WLC_E_STATUS_NEWSCAN) ||
-#ifdef BCMCCX
-		(status == WLC_E_STATUS_CCXFASTRM) ||
-#endif /* BCMCCX */
 		(status == WLC_E_STATUS_11HQUIET) || (status == WLC_E_STATUS_CS_ABORT) ||
 		(status == WLC_E_STATUS_NEWASSOC)) {
 		/* Dump FW preserve buffer content */
@@ -1088,7 +1091,7 @@ wl_scan_prep(struct bcm_cfg80211 *cfg, void *scan_params, u32 len,
 
 	/* Copy ssid array if applicable */
 	if (request->n_ssids > 0) {
-		cur_offset = roundup(cur_offset, sizeof(u32));
+		cur_offset = (u32) roundup(cur_offset, sizeof(u32));
 		if (len > (cur_offset + (request->n_ssids * sizeof(wlc_ssid_t)))) {
 			u32 rem_len = len - cur_offset;
 			wl_cfgscan_populate_scan_ssids(cfg,
@@ -1565,6 +1568,94 @@ wl_get_scan_timeout_val(struct bcm_cfg80211 *cfg)
 	return scan_timer_interval_ms;
 }
 
+#define SCAN_EBUSY_RETRY_LIMIT 20
+static s32
+wl_cfgscan_handle_scanbusy(struct bcm_cfg80211 *cfg, struct net_device *ndev, s32 err)
+{
+	s32	scanbusy_err = 0;
+	static u32 busy_count = 0;
+
+	if (!err) {
+		busy_count = 0;
+		return scanbusy_err;
+	}
+	if (err == BCME_BUSY || err == BCME_NOTREADY) {
+		WL_ERR(("Scan err = (%d), busy?%d", err, -EBUSY));
+		scanbusy_err = -EBUSY;
+	} else if ((err == BCME_EPERM) && cfg->scan_suppressed) {
+		WL_ERR(("Scan not permitted due to scan suppress\n"));
+		scanbusy_err = -EPERM;
+	} else {
+		/* For all other fw errors, use a generic error code as return
+		 * value to cfg80211 stack
+		 */
+		scanbusy_err = -EAGAIN;
+	}
+
+	if (scanbusy_err == -EBUSY) {
+		/* Flush FW preserve buffer logs for checking failure */
+		if (busy_count++ > (SCAN_EBUSY_RETRY_LIMIT/5)) {
+			wl_flush_fw_log_buffer(ndev, FW_LOGSET_MASK_ALL);
+		}
+		if (busy_count > SCAN_EBUSY_RETRY_LIMIT) {
+			struct ether_addr bssid;
+			s32 ret = 0;
+			dhd_pub_t *dhdp = (dhd_pub_t *)(cfg->pub);
+			if (dhd_query_bus_erros(dhdp)) {
+				return BCME_NOTREADY;
+			}
+			dhdp->scan_busy_occurred = TRUE;
+			busy_count = 0;
+			WL_ERR(("Unusual continuous EBUSY error, %d %d %d %d %d %d %d %d %d\n",
+				wl_get_drv_status(cfg, SCANNING, ndev),
+				wl_get_drv_status(cfg, SCAN_ABORTING, ndev),
+				wl_get_drv_status(cfg, CONNECTING, ndev),
+				wl_get_drv_status(cfg, CONNECTED, ndev),
+				wl_get_drv_status(cfg, DISCONNECTING, ndev),
+				wl_get_drv_status(cfg, AP_CREATING, ndev),
+				wl_get_drv_status(cfg, AP_CREATED, ndev),
+				wl_get_drv_status(cfg, SENDING_ACT_FRM, ndev),
+				wl_get_drv_status(cfg, SENDING_ACT_FRM, ndev)));
+
+#if defined(DHD_DEBUG) && defined(DHD_FW_COREDUMP)
+			if (dhdp->memdump_enabled) {
+				dhdp->memdump_type = DUMP_TYPE_SCAN_BUSY;
+				dhd_bus_mem_dump(dhdp);
+			}
+#endif /* DHD_DEBUG && DHD_FW_COREDUMP */
+			dhdp->hang_reason = HANG_REASON_SCAN_BUSY;
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 27))
+			dhd_os_send_hang_message(dhdp);
+#else
+			WL_ERR(("%s: HANG event is unsupported\n", __FUNCTION__));
+#endif /* LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 27) && OEM_ANDROID */
+
+			bzero(&bssid, sizeof(bssid));
+			if ((ret = wldev_ioctl_get(ndev, WLC_GET_BSSID,
+				&bssid, ETHER_ADDR_LEN)) == 0) {
+				WL_ERR(("FW is connected with " MACDBG "/n",
+					MAC2STRDBG(bssid.octet)));
+			} else {
+				WL_ERR(("GET BSSID failed with %d\n", ret));
+			}
+
+			wl_cfg80211_scan_abort(cfg);
+
+		} else {
+			/* Hold the context for 400msec, so that 10 subsequent scans
+			* can give a buffer of 4sec which is enough to
+			* cover any on-going scan in the firmware
+			*/
+			WL_DBG(("Enforcing delay for EBUSY case \n"));
+			msleep(400);
+		}
+	} else {
+		busy_count = 0;
+	}
+
+	return scanbusy_err;
+}
+
 s32
 __wl_cfg80211_scan(struct wiphy *wiphy, struct net_device *ndev,
 	struct cfg80211_scan_request *request,
@@ -1580,9 +1671,10 @@ __wl_cfg80211_scan(struct wiphy *wiphy, struct net_device *ndev,
 	s32 err = 0;
 	s32 bssidx = -1;
 	s32 i;
+	bool escan_req_failed = false;
+	s32 scanbusy_err = 0;
 
 	unsigned long flags;
-	static s32 busy_count = 0;
 #ifdef WL_CFG80211_VSDB_PRIORITIZE_SCAN_REQUEST
 	struct net_device *remain_on_channel_ndev = NULL;
 #endif // endif
@@ -1627,13 +1719,6 @@ __wl_cfg80211_scan(struct wiphy *wiphy, struct net_device *ndev,
 	wl_android_bcnrecv_stop(ndev, WL_BCNRECV_SCANBUSY);
 #endif /* WL_BCNRECV */
 
-#ifdef P2P_LISTEN_OFFLOADING
-	if (wl_get_p2p_status(cfg, DISC_IN_PROGRESS)) {
-		WL_ERR(("P2P_FIND: Discovery offload is in progress\n"));
-		return -EAGAIN;
-	}
-#endif /* P2P_LISTEN_OFFLOADING */
-
 #ifdef WL_CFG80211_VSDB_PRIORITIZE_SCAN_REQUEST
 	mutex_lock(&cfg->scan_sync);
 	remain_on_channel_ndev = wl_cfg80211_get_remain_on_channel_ndev(cfg);
@@ -1643,6 +1728,10 @@ __wl_cfg80211_scan(struct wiphy *wiphy, struct net_device *ndev,
 	}
 	mutex_unlock(&cfg->scan_sync);
 #endif /* WL_CFG80211_VSDB_PRIORITIZE_SCAN_REQUEST */
+
+#ifdef P2P_LISTEN_OFFLOADING
+	wl_cfg80211_cancel_p2plo(cfg);
+#endif /* P2P_LISTEN_OFFLOADING */
 
 	if (request) {		/* scan bss */
 		ssids = request->ssids;
@@ -1670,7 +1759,9 @@ __wl_cfg80211_scan(struct wiphy *wiphy, struct net_device *ndev,
 					p2p_on(cfg) = true;
 					wl_cfgp2p_set_firm_p2p(cfg);
 					get_primary_mac(cfg, &primary_mac);
+#ifndef WL_P2P_USE_RANDMAC
 					wl_cfgp2p_generate_bss_mac(cfg, &primary_mac);
+#endif /* WL_P2P_USE_RANDMAC */
 #if defined(P2P_IE_MISSING_FIX)
 					cfg->p2p_prb_noti = false;
 #endif // endif
@@ -1773,13 +1864,15 @@ __wl_cfg80211_scan(struct wiphy *wiphy, struct net_device *ndev,
 
 	mutex_lock(&cfg->scan_sync);
 	err = wl_do_escan(cfg, wiphy, ndev, request);
-	if (likely(!err))
+	if (likely(!err)) {
 		goto scan_success;
-	else
+	} else {
+		escan_req_failed = true;
 		goto scan_out;
+	}
 
 scan_success:
-	busy_count = 0;
+	wl_cfgscan_handle_scanbusy(cfg, ndev, BCME_OK);
 	cfg->scan_request = request;
 	wl_set_drv_status(cfg, SCANNING, ndev);
 	/* Arm the timer */
@@ -1789,82 +1882,22 @@ scan_success:
 	return 0;
 
 scan_out:
-	wl_clr_drv_status(cfg, SCANNING, ndev);
+	if (escan_req_failed) {
+		WL_CFG_DRV_LOCK(&cfg->cfgdrv_lock, flags);
+		cfg->scan_request = NULL;
+		WL_CFG_DRV_UNLOCK(&cfg->cfgdrv_lock, flags);
+		mutex_unlock(&cfg->scan_sync);
+		/* Handling for scan busy errors */
+		scanbusy_err = wl_cfgscan_handle_scanbusy(cfg, ndev, err);
+		if (scanbusy_err == BCME_NOTREADY) {
+			/* In case of bus failures avoid ioctl calls */
+			DHD_OS_SCAN_WAKE_UNLOCK((dhd_pub_t *)(cfg->pub));
+			return -ENODEV;
+		}
+		err = scanbusy_err;
+	}
+
 	DHD_OS_SCAN_WAKE_UNLOCK((dhd_pub_t *)(cfg->pub));
-	WL_CFG_DRV_LOCK(&cfg->cfgdrv_lock, flags);
-	cfg->scan_request = NULL;
-	WL_CFG_DRV_UNLOCK(&cfg->cfgdrv_lock, flags);
-	mutex_unlock(&cfg->scan_sync);
-
-	if (err == BCME_BUSY || err == BCME_NOTREADY) {
-		WL_ERR(("Scan err = (%d), busy?%d", err, -EBUSY));
-		err = -EBUSY;
-	} else if ((err == BCME_EPERM) && cfg->scan_suppressed) {
-		WL_ERR(("Scan not permitted due to scan suppress\n"));
-		err = -EPERM;
-	} else {
-		/* For all other fw errors, use a generic error code as return
-		 * value to cfg80211 stack
-		 */
-		err = -EAGAIN;
-	}
-
-#define SCAN_EBUSY_RETRY_LIMIT 20
-	if (err == -EBUSY) {
-		/* Flush FW preserve buffer logs for checking failure */
-		if (busy_count++ > (SCAN_EBUSY_RETRY_LIMIT/5)) {
-			wl_flush_fw_log_buffer(ndev, FW_LOGSET_MASK_ALL);
-		}
-		if (busy_count > SCAN_EBUSY_RETRY_LIMIT) {
-			struct ether_addr bssid;
-			s32 ret = 0;
-			dhd_pub_t *dhdp = (dhd_pub_t *)(cfg->pub);
-			if (dhd_query_bus_erros(dhdp)) {
-				return BCME_ERROR;
-			}
-			dhdp->scan_busy_occurred = TRUE;
-			busy_count = 0;
-			WL_ERR(("Unusual continuous EBUSY error, %d %d %d %d %d %d %d %d %d\n",
-				wl_get_drv_status(cfg, SCANNING, ndev),
-				wl_get_drv_status(cfg, SCAN_ABORTING, ndev),
-				wl_get_drv_status(cfg, CONNECTING, ndev),
-				wl_get_drv_status(cfg, CONNECTED, ndev),
-				wl_get_drv_status(cfg, DISCONNECTING, ndev),
-				wl_get_drv_status(cfg, AP_CREATING, ndev),
-				wl_get_drv_status(cfg, AP_CREATED, ndev),
-				wl_get_drv_status(cfg, SENDING_ACT_FRM, ndev),
-				wl_get_drv_status(cfg, SENDING_ACT_FRM, ndev)));
-
-#if defined(DHD_DEBUG) && defined(DHD_FW_COREDUMP)
-			if (dhdp->memdump_enabled) {
-				dhdp->memdump_type = DUMP_TYPE_SCAN_BUSY;
-				dhd_bus_mem_dump(dhdp);
-			}
-#endif /* DHD_DEBUG && DHD_FW_COREDUMP */
-
-			bzero(&bssid, sizeof(bssid));
-			if ((ret = wldev_ioctl_get(ndev, WLC_GET_BSSID,
-				&bssid, ETHER_ADDR_LEN)) == 0) {
-				WL_ERR(("FW is connected with " MACDBG "/n",
-					MAC2STRDBG(bssid.octet)));
-			} else {
-				WL_ERR(("GET BSSID failed with %d\n", ret));
-			}
-
-			wl_cfg80211_scan_abort(cfg);
-
-		} else {
-			/* Hold the context for 400msec, so that 10 subsequent scans
-			* can give a buffer of 4sec which is enough to
-			* cover any on-going scan in the firmware
-			*/
-			WL_DBG(("Enforcing delay for EBUSY case \n"));
-			msleep(400);
-		}
-	} else {
-		busy_count = 0;
-	}
-
 	return err;
 }
 
@@ -2097,7 +2130,12 @@ s32 wl_notify_escan_complete(struct bcm_cfg80211 *cfg,
 	if (cfg->sched_scan_req && !cfg->scan_request) {
 		if (!aborted) {
 			WL_INFORM_MEM(("[%s] Report sched scan done.\n", dev->name));
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 11, 0))
+			cfg80211_sched_scan_results(cfg->sched_scan_req->wiphy,
+					cfg->sched_scan_req->reqid);
+#else
 			cfg80211_sched_scan_results(cfg->sched_scan_req->wiphy);
+#endif /* LINUX_VER > 4.11 */
 		}
 
 		DBG_EVENT_LOG(dhdp, WIFI_EVENT_DRIVER_PNO_SCAN_COMPLETE);
@@ -2325,9 +2363,6 @@ static s32 wl_escan_without_scan_cache(struct bcm_cfg80211 *cfg, wl_escan_result
 			wl_scan_timeout_dbg_clear();
 #endif /* CUSTOMER_HW4_DEBUG */
 	} else if ((status == WLC_E_STATUS_ABORT) || (status == WLC_E_STATUS_NEWSCAN) ||
-#ifdef BCMCCX
-		(status == WLC_E_STATUS_CCXFASTRM) ||
-#endif /* BCMCCX */
 		(status == WLC_E_STATUS_11HQUIET) || (status == WLC_E_STATUS_CS_ABORT) ||
 		(status == WLC_E_STATUS_NEWASSOC)) {
 		/* Handle all cases of scan abort */
@@ -2938,7 +2973,11 @@ exit:
 }
 
 int
+#if (LINUX_VERSION_CODE > KERNEL_VERSION(4, 11, 0))
+wl_cfg80211_sched_scan_stop(struct wiphy *wiphy, struct net_device *dev, u64 reqid)
+#else
 wl_cfg80211_sched_scan_stop(struct wiphy *wiphy, struct net_device *dev)
+#endif /* LINUX_VER > 4.11 */
 {
 	struct bcm_cfg80211 *cfg = wiphy_priv(wiphy);
 	dhd_pub_t *dhdp = (dhd_pub_t *)(cfg->pub);
@@ -3043,46 +3082,74 @@ static void wl_scan_timeout(unsigned long data)
 	u32 channel;
 	u64 cur_time = OSL_LOCALTIME_NS();
 	dhd_pub_t *dhdp = (dhd_pub_t *)(cfg->pub);
-#ifdef DHD_FW_COREDUMP
-	uint32 prev_memdump_mode = dhdp->memdump_enabled;
-#endif /* DHD_FW_COREDUMP */
+	unsigned long flags;
+#ifdef RTT_SUPPORT
+	rtt_status_info_t *rtt_status = NULL;
+	UNUSED_PARAMETER(rtt_status);
+#endif /* RTT_SUPPORT */
 
+	UNUSED_PARAMETER(cur_time);
+	WL_CFG_DRV_LOCK(&cfg->cfgdrv_lock, flags);
 	if (!(cfg->scan_request)) {
 		WL_ERR(("timer expired but no scan request\n"));
+		WL_CFG_DRV_UNLOCK(&cfg->cfgdrv_lock, flags);
 		return;
 	}
 
+	wdev = GET_SCAN_WDEV(cfg->scan_request);
+	WL_CFG_DRV_UNLOCK(&cfg->cfgdrv_lock, flags);
+
+	if (!wdev) {
+		WL_ERR(("No wireless_dev present\n"));
+		return;
+	}
+
+	if (dhd_query_bus_erros(dhdp)) {
+		return;
+	}
 #if defined(DHD_KERNEL_SCHED_DEBUG) && defined(DHD_FW_COREDUMP)
-	if (prev_memdump_mode && !dhd_query_bus_erros(dhdp) &&
+	if (dhdp->memdump_enabled == DUMP_MEMFILE_BUGON &&
 		((cfg->scan_deq_time < cfg->scan_enq_time) ||
 		dhd_bus_query_dpc_sched_errors(dhdp))) {
 		WL_ERR(("****SCAN event timeout due to scheduling problem\n"));
 		/* change g_assert_type to trigger Kernel panic */
 		g_assert_type = 2;
+#ifdef RTT_SUPPORT
+		rtt_status = GET_RTTSTATE(dhdp);
+#endif /* RTT_SUPPORT */
+		WL_ERR(("***SCAN event timeout. WQ state:0x%x scan_enq_time:"SEC_USEC_FMT
+			" evt_hdlr_entry_time:"SEC_USEC_FMT" evt_deq_time:"SEC_USEC_FMT
+			"\nscan_deq_time:"SEC_USEC_FMT" scan_hdlr_cmplt_time:"SEC_USEC_FMT
+			" scan_cmplt_time:"SEC_USEC_FMT" evt_hdlr_exit_time:"SEC_USEC_FMT
+			"\ncurrent_time:"SEC_USEC_FMT"\n", work_busy(&cfg->event_work),
+			GET_SEC_USEC(cfg->scan_enq_time), GET_SEC_USEC(cfg->wl_evt_hdlr_entry_time),
+			GET_SEC_USEC(cfg->wl_evt_deq_time), GET_SEC_USEC(cfg->scan_deq_time),
+			GET_SEC_USEC(cfg->scan_hdlr_cmplt_time), GET_SEC_USEC(cfg->scan_cmplt_time),
+			GET_SEC_USEC(cfg->wl_evt_hdlr_exit_time), GET_SEC_USEC(cur_time)));
+		if (cfg->scan_enq_time) {
+			WL_ERR(("Elapsed time(ns): %llu\n", (cur_time - cfg->scan_enq_time)));
+		}
+		WL_ERR(("lock_states:[%d:%d:%d:%d:%d:%d]\n",
+			mutex_is_locked(&cfg->if_sync),
+			mutex_is_locked(&cfg->usr_sync),
+			mutex_is_locked(&cfg->pm_sync),
+			mutex_is_locked(&cfg->scan_sync),
+			spin_is_locked(&cfg->cfgdrv_lock),
+			spin_is_locked(&cfg->eq_lock)));
+#ifdef RTT_SUPPORT
+		WL_ERR(("RTT lock_state:[%d]\n",
+			mutex_is_locked(&rtt_status->rtt_mutex)));
+#ifdef WL_NAN
+		WL_ERR(("RTT and Geofence lock_states:[%d:%d]\n",
+			mutex_is_locked(&cfg->nancfg.nan_sync),
+			mutex_is_locked(&(rtt_status)->geofence_mutex)));
+#endif /* WL_NAN */
+#endif /* RTT_SUPPORT */
+
 		/* use ASSERT() to trigger panic */
 		ASSERT(0);
 	}
 #endif /* DHD_KERNEL_SCHED_DEBUG && DHD_FW_COREDUMP */
-
-	WL_ERR(("***SCAN event timeout. WQ state:0x%x scan_enq_time:"SEC_USEC_FMT
-		" evt_hdlr_entry_time:"SEC_USEC_FMT" evt_deq_time:"SEC_USEC_FMT
-		"\nscan_deq_time:"SEC_USEC_FMT" scan_hdlr_cmplt_time:"SEC_USEC_FMT
-		" scan_cmplt_time:"SEC_USEC_FMT" evt_hdlr_exit_time:"SEC_USEC_FMT
-		"\ncurrent_time:"SEC_USEC_FMT"\n", work_busy(&cfg->event_work),
-		GET_SEC_USEC(cfg->scan_enq_time), GET_SEC_USEC(cfg->wl_evt_hdlr_entry_time),
-		GET_SEC_USEC(cfg->wl_evt_deq_time), GET_SEC_USEC(cfg->scan_deq_time),
-		GET_SEC_USEC(cfg->scan_hdlr_cmplt_time), GET_SEC_USEC(cfg->scan_cmplt_time),
-		GET_SEC_USEC(cfg->wl_evt_hdlr_exit_time), GET_SEC_USEC(cur_time)));
-	if (cfg->scan_enq_time) {
-		WL_ERR(("Elapsed time(ns): %llu\n", (cur_time - cfg->scan_enq_time)));
-	}
-	WL_ERR(("lock_states:[%d:%d:%d:%d:%d:%d]\n",
-		mutex_is_locked(&cfg->if_sync),
-		mutex_is_locked(&cfg->usr_sync),
-		mutex_is_locked(&cfg->pm_sync),
-		mutex_is_locked(&cfg->scan_sync),
-		spin_is_locked(&cfg->cfgdrv_lock),
-		spin_is_locked(&cfg->eq_lock)));
 	dhd_bus_intr_count_dump(dhdp);
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 1, 0)) && !defined(CONFIG_MODULES)
@@ -3104,23 +3171,9 @@ static void wl_scan_timeout(unsigned long data)
 		}
 	}
 
-#if (LINUX_VERSION_CODE < KERNEL_VERSION(3, 6, 0))
-	if (cfg->scan_request->dev)
-		wdev = cfg->scan_request->dev->ieee80211_ptr;
-#else
-	wdev = cfg->scan_request->wdev;
-#endif /* LINUX_VERSION < KERNEL_VERSION(3, 6, 0) */
-	if (!wdev) {
-		WL_ERR(("No wireless_dev present\n"));
-		return;
-	}
 	ndev = wdev_to_wlc_ndev(wdev, cfg);
-
 	bzero(&msg, sizeof(wl_event_msg_t));
 	WL_ERR(("timer expired\n"));
-	if (dhd_query_bus_erros(dhdp)) {
-		return;
-	}
 	dhdp->scan_timeout_occurred = TRUE;
 #ifdef BCMPCIE
 	(void)dhd_pcie_dump_int_regs(dhdp);
@@ -3128,11 +3181,14 @@ static void wl_scan_timeout(unsigned long data)
 #endif /* BCMPCIE */
 #ifdef DHD_FW_COREDUMP
 	if (dhdp->memdump_enabled) {
-		dhdp->memdump_enabled = DUMP_MEMFILE;
 		dhdp->memdump_type = DUMP_TYPE_SCAN_TIMEOUT;
 		dhd_bus_mem_dump(dhdp);
-		dhdp->memdump_enabled = prev_memdump_mode;
 	}
+	/*
+	 * For the memdump sanity, blocking bus transactions for a while
+	 * Keeping it TRUE causes the sequential private cmd error
+	 */
+	dhdp->scan_timeout_occurred = FALSE;
 #endif /* DHD_FW_COREDUMP */
 	msg.event_type = hton32(WLC_E_ESCAN_RESULT);
 	msg.status = hton32(WLC_E_STATUS_TIMEOUT);

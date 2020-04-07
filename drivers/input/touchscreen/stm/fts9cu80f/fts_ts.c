@@ -46,12 +46,6 @@
 #ifdef CONFIG_SEC_SYSFS
 #include <linux/sec_sysfs.h>
 #endif
-#ifdef CONFIG_TRUSTONIC_TRUSTED_UI
-#include <linux/t-base-tui.h>
-#endif
-#ifdef CONFIG_TRUSTONIC_TRUSTED_UI_QC
-#include <linux/input/tui_hal_ts.h>
-#endif
 #include "fts_ts.h"
 
 #if defined(CONFIG_INPUT_SEC_SECURE_TOUCH)
@@ -97,7 +91,7 @@ static void fts_reset_work(struct work_struct *work);
 static void fts_read_info_work(struct work_struct *work);
 
 #if defined(CONFIG_TOUCHSCREEN_DUMP_MODE)
-#include <linux/sec_debug.h>
+#include <linux/sec_ts_common.h>
 static void tsp_dump(void);
 static void dump_tsp_rawdata(struct work_struct *work);
 struct delayed_work *p_debug_work;
@@ -198,9 +192,6 @@ static ssize_t fts_secure_touch_enable_store(struct device *dev,
 
 		input_info(true, &info->client->dev, "%s: secure_touch is disabled\n", __func__);
 
-#if defined(CONFIG_TRUSTONIC_TRUSTED_UI_QC)
-		complete(&info->st_irq_received);
-#endif
 		break;
 
 	case 1:
@@ -234,9 +225,6 @@ static ssize_t fts_secure_touch_enable_store(struct device *dev,
 
 		reinit_completion(&info->st_powerdown);
 		reinit_completion(&info->st_interrupt);
-#if defined(CONFIG_TRUSTONIC_TRUSTED_UI_QC)
-		reinit_completion(&info->st_irq_received);
-#endif
 		atomic_set(&info->st_enabled, 1);
 		atomic_set(&info->st_pending_irqs, 0);
 
@@ -257,35 +245,6 @@ static ssize_t fts_secure_touch_enable_store(struct device *dev,
 #endif
 	return err;
 }
-
-#if defined(CONFIG_TRUSTONIC_TRUSTED_UI_QC)
-static int secure_get_irq(struct device *dev)
-{
-	struct fts_ts_info *info = dev_get_drvdata(dev);
-	int val = 0;
-
-	input_err(true, &info->client->dev, "%s: enter\n", __func__);
-	if (atomic_read(&info->st_enabled) == 0) {
-		input_err(true, &info->client->dev, "%s: disabled\n", __func__);
-		return -EBADF;
-	}
-
-	if (atomic_cmpxchg(&info->st_pending_irqs, -1, 0) == -1) {
-		input_err(true, &info->client->dev, "%s: pending irq -1\n", __func__);
-		return -EINVAL;
-	}
-
-	if (atomic_cmpxchg(&info->st_pending_irqs, 1, 0) == 1)
-		val = 1;
-
-	input_err(true, &info->client->dev, "%s: pending irq is %d\n",
-			__func__, atomic_read(&info->st_pending_irqs));
-
-	complete(&info->st_interrupt);
-
-	return val;
-}
-#endif
 
 static ssize_t fts_secure_touch_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
@@ -320,14 +279,6 @@ static void fts_secure_touch_init(struct fts_ts_info *info)
 {
 	init_completion(&info->st_powerdown);
 	init_completion(&info->st_interrupt);
-#if defined(CONFIG_TRUSTONIC_TRUSTED_UI_QC)
-	init_completion(&info->st_irq_received);
-#endif
-#if defined(CONFIG_TRUSTONIC_TRUSTED_UI_QC)
-	register_tui_hal_ts(&info->input_dev->dev, &info->st_enabled,
-			&info->st_irq_received, secure_get_irq,
-			fts_secure_touch_enable_store);
-#endif
 }
 
 static void fts_secure_touch_stop(struct fts_ts_info *info, int blocking)
@@ -335,9 +286,6 @@ static void fts_secure_touch_stop(struct fts_ts_info *info, int blocking)
 	if (atomic_read(&info->st_enabled)) {
 		atomic_set(&info->st_pending_irqs, -1);
 		sysfs_notify(&info->input_dev->dev.kobj, NULL, "secure_touch");
-#if defined(CONFIG_TRUSTONIC_TRUSTED_UI_QC)
-		complete(&info->st_irq_received);
-#endif
 
 		if (blocking)
 			wait_for_completion_interruptible(&info->st_powerdown);
@@ -347,15 +295,12 @@ static void fts_secure_touch_stop(struct fts_ts_info *info, int blocking)
 static irqreturn_t fts_filter_interrupt(struct fts_ts_info *info)
 {
 	if (atomic_read(&info->st_enabled)) {
-		if (atomic_cmpxchg(&info->st_pending_irqs, 0, 1) == 0) {
+		if (atomic_cmpxchg(&info->st_pending_irqs, 0, 1) == 0)
 			sysfs_notify(&info->input_dev->dev.kobj, NULL, "secure_touch");
-#if defined(CONFIG_TRUSTONIC_TRUSTED_UI_QC)
-			complete(&info->st_irq_received);
-#endif
-		} else {
+		else
 			input_info(true, &info->client->dev, "%s: st_pending_irqs: %d\n",
 					__func__, atomic_read(&info->st_pending_irqs));
-		}
+
 		return IRQ_HANDLED;
 	}
 	return IRQ_NONE;
@@ -383,13 +328,6 @@ int fts_write_reg(struct fts_ts_info *info,
 		goto exit;
 	}
 
-#ifdef CONFIG_TRUSTONIC_TRUSTED_UI
-	if (TRUSTEDUI_MODE_INPUT_SECURED & trustedui_get_current_mode()) {
-		input_err(true, &info->client->dev,
-				"%s: TSP no accessible from Linux, TUI is enabled!\n", __func__);
-		return -EIO;
-	}
-#endif
 #ifdef CONFIG_INPUT_SEC_SECURE_TOUCH
 	if (atomic_read(&info->st_enabled)) {
 		input_err(true, &info->client->dev,
@@ -477,13 +415,6 @@ int fts_read_reg(struct fts_ts_info *info, u8 *reg, int cnum,
 		goto exit;
 	}
 
-#ifdef CONFIG_TRUSTONIC_TRUSTED_UI
-	if (TRUSTEDUI_MODE_INPUT_SECURED & trustedui_get_current_mode()) {
-		input_err(true, &info->client->dev,
-				"%s: TSP no accessible from Linux, TUI is enabled!\n", __func__);
-		return -EIO;
-	}
-#endif
 #ifdef CONFIG_INPUT_SEC_SECURE_TOUCH
 	if (atomic_read(&info->st_enabled)) {
 		input_err(true, &info->client->dev,
@@ -585,13 +516,6 @@ static int fts_read_from_sponge(struct fts_ts_info *info,
 	u8 *buf;
 	int rtn;
 
-#ifdef CONFIG_TRUSTONIC_TRUSTED_UI
-	if (TRUSTEDUI_MODE_INPUT_SECURED & trustedui_get_current_mode()) {
-		input_err(true, &info->client->dev,
-				"%s: TSP no accessible from Linux, TUI is enabled!\n", __func__);
-		return -EIO;
-	}
-#endif
 #ifdef CONFIG_INPUT_SEC_SECURE_TOUCH
 	if (atomic_read(&info->st_enabled)) {
 		input_err(true, &info->client->dev,
@@ -635,13 +559,6 @@ static int fts_write_to_sponge(struct fts_ts_info *info,
 		return 0;
 	}
 
-#ifdef CONFIG_TRUSTONIC_TRUSTED_UI
-	if (TRUSTEDUI_MODE_INPUT_SECURED & trustedui_get_current_mode()) {
-		input_err(true, &info->client->dev,
-				"%s: TSP no accessible from Linux, TUI is enabled!\n", __func__);
-		return -EIO;
-	}
-#endif
 #ifdef CONFIG_INPUT_SEC_SECURE_TOUCH
 	if (atomic_read(&info->st_enabled)) {
 		input_err(true, &info->client->dev,
@@ -1828,22 +1745,49 @@ static void fts_print_info_work(struct work_struct *work)
 	schedule_delayed_work(&info->work_print_info, msecs_to_jiffies(TOUCH_PRINT_INFO_DWORK_TIME));
 }
 
+/************************************************************
+*  720  * 1480 : <48 96 60> indicator: 24dp navigator:48dp edge:60px dpi=320
+* 1080  * 2220 :  4096 * 4096 : <133 266 341>  (approximately value)
+************************************************************/
+
+static void location_detect(struct fts_ts_info *info, char *loc, int x, int y)
+{
+	int i;
+
+	for (i = 0; i < FTS_TS_LOCATION_DETECT_SIZE; ++i)
+		loc[i] = 0;
+
+	if (x < info->board->area_edge)
+		strcat(loc, "E.");
+	else if (x < (info->board->max_x - info->board->area_edge))
+		strcat(loc, "C.");
+	else
+		strcat(loc, "e.");
+
+	if (y < info->board->area_indicator)
+		strcat(loc, "S");
+	else if (y < (info->board->max_y - info->board->area_navigation))
+		strcat(loc, "C");
+	else
+		strcat(loc, "N");
+}
+
+static const char finger_mode[10] = {'N', '1', '2', 'G', '4', 'P'};
+
 static u8 fts_event_handler_type_b(struct fts_ts_info *info)
 {
 	u8 regAdd;
 	int left_event_count = 0;
 	int EventNum = 0;
 	u8 TouchID = 0, event_id = 0;
-
 	u8 data[FTS_FIFO_MAX * FTS_EVENT_SIZE] = {0};
-
 	u8 *event_buff;
 	struct fts_event_coordinate *p_event_coord;
 	struct fts_gesture_status *p_gesture_status;
 	struct fts_event_status *p_event_status;
 
-	u8 prev_ttype = 0;
 	u8 prev_action = 0;
+	char location[FTS_TS_LOCATION_DETECT_SIZE] = { 0 };
 
 	regAdd = FTS_READ_ONE_EVENT;
 	fts_read_reg(info, &regAdd, 1, (u8 *)&data[0 * FTS_EVENT_SIZE], FTS_EVENT_SIZE);
@@ -1930,7 +1874,7 @@ static u8 fts_event_handler_type_b(struct fts_ts_info *info)
 				break;
 			}
 
-			prev_ttype = info->finger[TouchID].ttype;
+			info->finger[TouchID].prev_ttype = info->finger[TouchID].ttype;
 			prev_action = info->finger[TouchID].action;
 			info->finger[TouchID].id = TouchID;
 			info->finger[TouchID].action = p_event_coord->tchsta;
@@ -1961,6 +1905,9 @@ static u8 fts_event_handler_type_b(struct fts_ts_info *info)
 					(info->finger[TouchID].ttype == FTS_EVENT_TOUCHTYPE_PALM)   ||
 					(info->finger[TouchID].ttype == FTS_EVENT_TOUCHTYPE_WET)    ||
 					(info->finger[TouchID].ttype == FTS_EVENT_TOUCHTYPE_GLOVE)) {
+
+				location_detect(info, location, info->finger[TouchID].x, info->finger[TouchID].y);
+
 				if (info->finger[TouchID].action == FTS_COORDINATE_ACTION_RELEASE) {
 					input_mt_slot(info->input_dev, TouchID);
 
@@ -1983,14 +1930,22 @@ static u8 fts_event_handler_type_b(struct fts_ts_info *info)
 
 #if !defined(CONFIG_SAMSUNG_PRODUCT_SHIP)
 					input_info(true, &info->client->dev,
-							"[R] tID:%d mc:%d tc:%d lx:%d ly:%d mx:%d, my:%d\n",
-							TouchID, info->finger[TouchID].mcount, info->touch_count,
+							"[R] tID:%d loc:%s dd:%d,%d mc:%d tc:%d lx:%d ly:%d mx:%d, my:%d\n",
+							TouchID, location,
+							info->finger[TouchID].x - info->finger[TouchID].p_x,
+							info->finger[TouchID].y - info->finger[TouchID].p_y,
+							info->finger[TouchID].mcount, info->touch_count,
 							info->finger[TouchID].x, info->finger[TouchID].y,
 							info->finger[TouchID].max_energy_x, info->finger[TouchID].max_energy_y);
 #else
 					input_info(true, &info->client->dev,
-							"[R] tID:%d mc:%d tc:%d\n",
-							TouchID, info->finger[TouchID].mcount, info->touch_count);
+							"[R] tID:%d loc:%s dd:%d,%d mp:%d,%d mc:%d tc:%d\n",
+							TouchID, location,
+							info->finger[TouchID].x - info->finger[TouchID].p_x,
+							info->finger[TouchID].y - info->finger[TouchID].p_y,
+							info->finger[TouchID].max_energy_x - info->finger[TouchID].p_x,
+							info->finger[TouchID].max_energy_y - info->finger[TouchID].p_y,
+							info->finger[TouchID].mcount, info->touch_count);
 #endif
 
 					info->finger[TouchID].action = FTS_COORDINATE_ACTION_NONE;
@@ -2001,6 +1956,9 @@ static u8 fts_event_handler_type_b(struct fts_ts_info *info)
 
 					info->touch_count++;
 					info->all_finger_count++;
+
+					info->finger[TouchID].p_x = info->finger[TouchID].x;
+					info->finger[TouchID].p_y = info->finger[TouchID].y;
 
 					input_mt_slot(info->input_dev, TouchID);
 					input_mt_report_slot_state(info->input_dev, MT_TOOL_FINGER, 1);
@@ -2036,19 +1994,21 @@ static u8 fts_event_handler_type_b(struct fts_ts_info *info)
 
 #if !defined(CONFIG_SAMSUNG_PRODUCT_SHIP)
 					input_info(true, &info->client->dev,
-							"[P] tID:%d.%d x:%d y:%d w:%d h:%d z:%d type:%X tc:%d tm:%02X\n",
+							"[P] tID:%d.%d x:%d y:%d z:%d major:%d minor:%d loc:%s tc:%d\n",
 							TouchID, (info->input_dev->mt->trkid - 1) & TRKID_MAX,
 							info->finger[TouchID].x, info->finger[TouchID].y,
+							info->finger[TouchID].z,
 							info->finger[TouchID].major, info->finger[TouchID].minor,
-							info->finger[TouchID].z, info->finger[TouchID].ttype,
-							info->touch_count, (u8)info->touch_functions);
+							location,
+							info->touch_count);
 #else
 					input_info(true, &info->client->dev,
-							"[P] tID:%d.%d w:%d h:%d z:%d type:%X tc:%d tm:%02X\n",
+							"[P] tID:%d.%d z:%d major:%d minor:%d loc:%s tc:%d\n",
 							TouchID, (info->input_dev->mt->trkid - 1) & TRKID_MAX,
+							info->finger[TouchID].z,
 							info->finger[TouchID].major, info->finger[TouchID].minor,
-							info->finger[TouchID].z, info->finger[TouchID].ttype,
-							info->touch_count, (u8)info->touch_functions);
+							location,
+							info->touch_count);
 #endif
 				} else if (info->finger[TouchID].action == FTS_COORDINATE_ACTION_MOVE) {
 					if (info->touch_count == 0) {
@@ -2098,13 +2058,14 @@ static u8 fts_event_handler_type_b(struct fts_ts_info *info)
 							__func__, info->finger[TouchID].action);
 				}
 
-				if ((info->finger[TouchID].action == FTS_COORDINATE_ACTION_PRESS) ||
-						(info->finger[TouchID].action == FTS_COORDINATE_ACTION_MOVE)) {
-					if (info->finger[TouchID].ttype != prev_ttype) {
-						input_info(true, &info->client->dev, "%s : tID:%d ttype(%x->%x)\n",
-								__func__, info->finger[TouchID].id,
-								prev_ttype, info->finger[TouchID].ttype);
-					}
+
+				if (info->finger[TouchID].ttype != info->finger[TouchID].prev_ttype) {
+					input_info(true, &info->client->dev, "%s : tID:%d ttype(%c->%c) : %s\n",
+							__func__, info->finger[TouchID].id,
+							finger_mode[info->finger[TouchID].prev_ttype],
+							finger_mode[info->finger[TouchID].ttype],
+							info->finger[TouchID].action == FTS_COORDINATE_ACTION_PRESS ? "P" :
+							info->finger[TouchID].action == FTS_COORDINATE_ACTION_MOVE ? "M" : "R");
 				}
 			} else {
 				input_dbg(true, &info->client->dev,
@@ -2134,9 +2095,9 @@ static u8 fts_event_handler_type_b(struct fts_ts_info *info)
 					input_report_key(info->input_dev, KEY_BLACK_UI_GESTURE, 0);
 
 				} else if (p_gesture_status->gesture_id == FTS_SPONGE_EVENT_GESTURE_ID_DOUBLETAP_TO_WAKEUP) {
-					input_report_key(info->input_dev, KEY_HOMEPAGE, 1);
+					input_report_key(info->input_dev, KEY_WAKEUP, 1);
 					input_sync(info->input_dev);
-					input_report_key(info->input_dev, KEY_HOMEPAGE, 0);
+					input_report_key(info->input_dev, KEY_WAKEUP, 0);
 					input_info(true, &info->client->dev, "%s: Dobule Tap Wake up\n", __func__);
 					break;
 				}
@@ -2355,6 +2316,7 @@ static void fts_switching_work(struct work_struct *work)
 	}
 }
 
+#ifdef CONFIG_FOLDER_HALL
 static int fts_hall_ic_notify(struct notifier_block *nb,
 			unsigned long flip_cover, void *v)
 {
@@ -2377,6 +2339,7 @@ static int fts_hall_ic_notify(struct notifier_block *nb,
 
 	return 0;
 }
+#endif
 #endif
 
 #ifdef FTS_SUPPORT_TA_MODE
@@ -2547,6 +2510,7 @@ static int fts_parse_dt(struct i2c_client *client)
 #if defined(CONFIG_EXYNOS_DECON_FB)
 	int connected;
 #endif
+	u32 px_zone[3] = { 0 };
 
 	pdata->tsp_icid = of_get_named_gpio(np, "stm,tsp-icid_gpio", 0);
 	if (gpio_is_valid(pdata->tsp_icid)) {
@@ -2717,6 +2681,19 @@ static int fts_parse_dt(struct i2c_client *client)
 	input_info(true, &client->dev, "%s: lcdtype 0x%08X\n", __func__, lcdtype);
 
 	pdata->panel_revision = ((lcdtype >> 8) & 0xFF) >> 4;
+
+	if (of_property_read_u32_array(np, "stm,area-size", px_zone, 3)) {
+		input_info(true, &client->dev, "Failed to get zone's size\n");
+		pdata->area_indicator = 48;
+		pdata->area_navigation = 96;
+		pdata->area_edge = 60;
+	} else {
+		pdata->area_indicator = px_zone[0];
+		pdata->area_navigation = px_zone[1];
+		pdata->area_edge = px_zone[2];
+	}
+	input_info(true, dev, "%s : zone's size - indicator:%d, navigation:%d, edge:%d\n",
+		__func__, pdata->area_indicator, pdata->area_navigation ,pdata->area_edge);
 
 	input_err(true, dev,
 			"%s: irq :%d, irq_type: 0x%04x, max[x,y]: [%d,%d], project/model_name: %s/%s, "
@@ -2890,7 +2867,7 @@ static void fts_set_input_prop(struct fts_ts_info *info, struct input_dev *dev, 
 	set_bit(BTN_TOUCH, dev->keybit);
 	set_bit(BTN_TOOL_FINGER, dev->keybit);
 	set_bit(KEY_BLACK_UI_GESTURE, dev->keybit);
-	set_bit(KEY_HOMEPAGE, dev->keybit);
+	set_bit(KEY_WAKEUP, dev->keybit);
 	set_bit(KEY_INT_CANCEL, dev->keybit);
 
 #ifdef FTS_SUPPORT_TOUCH_KEY
@@ -3059,11 +3036,6 @@ static int fts_probe(struct i2c_client *client, const struct i2c_device_id *idp)
 		goto err_enable_irq;
 	}
 
-#ifdef CONFIG_TRUSTONIC_TRUSTED_UI
-	trustedui_set_tsp_irq(info->irq);
-	input_info(true, &client->dev, "%s[%d] called!\n", __func__, info->irq);
-#endif
-
 #ifdef FTS_SUPPORT_TA_MODE
 	info->register_cb = info->board->register_cb;
 
@@ -3155,6 +3127,7 @@ static int fts_probe(struct i2c_client *client, const struct i2c_device_id *idp)
 	mutex_init(&info->switching_mutex);
 	INIT_DELAYED_WORK(&info->switching_work, fts_switching_work);
 
+#ifdef CONFIG_FOLDER_HALL
 	/* Hall IC notify priority -> ftn -> register */
 	info->flip_status = -1;
 	info->flip_status_current = FTS_STATUS_UNFOLDING;	// default : 0 unfolding
@@ -3162,6 +3135,7 @@ static int fts_probe(struct i2c_client *client, const struct i2c_device_id *idp)
 	info->hall_ic_nb.notifier_call = fts_hall_ic_notify;
 	hall_ic_register_notify(&info->hall_ic_nb);
 	input_info(true, &info->client->dev, "%s: hall ic register\n", __func__);
+#endif
 #endif
 
 	schedule_delayed_work(&info->work_read_info, msecs_to_jiffies(100));
@@ -3261,8 +3235,11 @@ static int fts_remove(struct i2c_client *client)
 	disable_irq_nosync(info->client->irq);
 	free_irq(info->client->irq, info);
 
+#ifdef CONFIG_TOUCHSCREEN_DUAL_FOLDABLE
+#ifdef CONFIG_FOLDER_HALL
 	hall_ic_unregister_notify(&info->hall_ic_nb);
-
+#endif
+#endif
 	cancel_delayed_work_sync(&info->work_print_info);
 	cancel_delayed_work_sync(&info->work_read_info);
 	cancel_delayed_work_sync(&info->reset_work);
@@ -3652,8 +3629,6 @@ void fts_release_all_finger(struct fts_ts_info *info)
 	input_report_key(info->input_dev, BTN_TOUCH, 0);
 	input_report_key(info->input_dev, BTN_TOOL_FINGER, 0);
 
-	input_report_key(info->input_dev, KEY_HOMEPAGE, 0);
-
 	if (info->board->support_sidegesture) {
 		input_report_key(info->input_dev, KEY_SIDE_GESTURE, 0);
 		input_report_key(info->input_dev, KEY_SIDE_GESTURE_RIGHT, 0);
@@ -3664,14 +3639,6 @@ void fts_release_all_finger(struct fts_ts_info *info)
 
 	info->check_multi = 0;
 }
-
-#if 0/*def CONFIG_TRUSTONIC_TRUSTED_UI*/
-void trustedui_mode_on(void)
-{
-	input_info(true, &tui_tsp_info->client->dev, "%s, release all finger..", __func__);
-	fts_release_all_finger(tui_tsp_info);
-}
-#endif
 
 #ifdef CONFIG_TOUCHSCREEN_DUMP_MODE
 static void dump_tsp_rawdata(struct work_struct *work)
@@ -4199,6 +4166,8 @@ static struct i2c_driver fts_i2c_driver = {
 
 static int __init fts_driver_init(void)
 {
+	pr_info("[sec_input] %s\n", __func__);
+
 	return i2c_add_driver(&fts_i2c_driver);
 }
 

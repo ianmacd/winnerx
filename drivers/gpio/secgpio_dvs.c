@@ -415,12 +415,6 @@ static ssize_t secgpio_read_request_gpio(
 
 	pr_err("%s: gpio[%d]\n",__func__,requested_gpio);
 
-	ret = gpio_request(requested_gpio, "gpio_request_read");
-	if(ret){
-		pr_err("%s: gpio_request failed\n",__func__);
-		goto gpio_request_failed;
-	}
-
 	ret = gpio_direction_input(requested_gpio);
 	if(ret){
 		pr_err("%s: gpio_direction_input failed\n",__func__);
@@ -433,8 +427,6 @@ static ssize_t secgpio_read_request_gpio(
 	}
 
 gpio_read_failed:
-	gpio_free(requested_gpio);
-gpio_request_failed:
 	return snprintf(buf, PAGE_SIZE, "GPIO[%d] : [%d]", requested_gpio, val);
 }
 

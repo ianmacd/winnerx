@@ -801,6 +801,57 @@ void sec_cmd_send_event_to_user(struct sec_cmd_data *data, char *test, char *res
 	kobject_uevent_env(&data->fac_dev->kobj, KOBJ_CHANGE, event);
 }
 
+static BLOCKING_NOTIFIER_HEAD(sec_input_notifier_list);
+
+/*
+ * sec_input_register_notify
+ * @nb: pointer of blocking notifier chain structure
+ * @notifier_fn_t: register notifier callback function
+ *
+ * register universal notifier for any development issue.
+ * ex) folder open/close, seucre touch enable/disable ...
+ */
+void sec_input_register_notify(struct notifier_block *nb, notifier_fn_t notifier_call)
+{
+	nb->notifier_call = notifier_call;
+	nb->priority = 1;
+	blocking_notifier_chain_register(&sec_input_notifier_list, nb);
+}
+
+/*
+ * sec_input_unregister_notify
+ * @nb: pointer of blocking notifier chain structure
+ * 
+ * unregister notifier
+ */
+void sec_input_unregister_notify(struct notifier_block *nb)
+{
+	blocking_notifier_chain_unregister(&sec_input_notifier_list, nb);
+}
+
+/*
+ * sec_input_notify
+ * @nb: pointer of blocking notifier chain structure
+ * data: notifier data is defined in sec_cmd.h(enum sec_input_notify)
+ *
+ * notifier call function
+ */
+void sec_input_notify(struct notifier_block *nb, unsigned long data)
+{
+	blocking_notifier_call_chain(&sec_input_notifier_list, data, NULL);
+}
+
+/*
+ * sec_input_self_request_notify
+ * @nb: pointer of blocking notifier chain structure
+ *
+ * only test
+ */
+void sec_input_self_request_notify(struct notifier_block *nb)
+{
+	nb->notifier_call(nb, SEC_INPUT_CUSTOM_NOTIFIER_NOTHING, NULL);
+}
+
 MODULE_DESCRIPTION("Samsung factory command");
 MODULE_LICENSE("GPL");
 

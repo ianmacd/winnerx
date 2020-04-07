@@ -353,6 +353,17 @@
 			0x0a44 0x03 0x0>;
 };
 
+&pcie_ep {
+	reg = <0x40004000 0x1000>,
+		<0x40000000 0xf1d>,
+		<0x40000f20 0xa8>,
+		<0x40001000 0x1000>,
+		<0x40002000 0x2000>,
+		<0x01c08000 0x3000>,
+		<0x01c0e000 0x2000>,
+		<0x01c0b000 0x1000>;
+};
+
 &msm_vidc {
 	qcom,allowed-clock-rates = <240000000 338000000
 		365000000 444000000 533000000>;
@@ -676,11 +687,11 @@
 			#size-cells = <0>;
 
 			qcom,speed-bin = <1>;
-			qcom,initial-pwrlevel = <5>;
+			qcom,initial-pwrlevel = <4>;
 
 			qcom,gpu-pwrlevel@0 {
 				reg = <0>;
-				qcom,gpu-freq = <675000000>;
+				qcom,gpu-freq = <585000000>;
 				qcom,bus-freq = <11>;
 				qcom,bus-min = <11>;
 				qcom,bus-max = <11>;
@@ -688,46 +699,38 @@
 
 			qcom,gpu-pwrlevel@1 {
 				reg = <1>;
-				qcom,gpu-freq = <585000000>;
-				qcom,bus-freq = <10>;
-				qcom,bus-min = <9>;
-				qcom,bus-max = <11>;
-			};
-
-			qcom,gpu-pwrlevel@2 {
-				reg = <2>;
 				qcom,gpu-freq = <499200000>;
 				qcom,bus-freq = <9>;
 				qcom,bus-min = <8>;
 				qcom,bus-max = <11>;
 			};
 
-			qcom,gpu-pwrlevel@3 {
-				reg = <3>;
+			qcom,gpu-pwrlevel@2 {
+				reg = <2>;
 				qcom,gpu-freq = <427000000>;
 				qcom,bus-freq = <6>;
 				qcom,bus-min = <5>;
 				qcom,bus-max = <9>;
 			};
 
-			qcom,gpu-pwrlevel@4 {
-				reg = <4>;
+			qcom,gpu-pwrlevel@3 {
+				reg = <3>;
 				qcom,gpu-freq = <345000000>;
 				qcom,bus-freq = <4>;
 				qcom,bus-min = <3>;
 				qcom,bus-max = <5>;
 			};
 
-			qcom,gpu-pwrlevel@5 {
-				reg = <5>;
+			qcom,gpu-pwrlevel@4 {
+				reg = <4>;
 				qcom,gpu-freq = <257000000>;
 				qcom,bus-freq = <3>;
 				qcom,bus-min = <2>;
 				qcom,bus-max = <4>;
 			};
 
-			qcom,gpu-pwrlevel@6 {
-				reg = <6>;
+			qcom,gpu-pwrlevel@5 {
+				reg = <5>;
 				qcom,gpu-freq = <0>;
 				qcom,bus-freq = <0>;
 				qcom,bus-min = <0>;
@@ -769,17 +772,16 @@
 
 	qcom,gpu-acd-table {
 		/* Corresponds to levels in the GPU perf table */
-		qcom,acd-enable-by-level = <0x7e>;
+		qcom,acd-enable-by-level = <0x3e>;
 		qcom,acd-stride = <0x2>;
-		qcom,acd-num-levels = <0x6>;
+		qcom,acd-num-levels = <0x5>;
 
 		/* ACDCR, ACDTD */
 		qcom,acd-data = <0xa02d5ffd 0x00007611 /* LowSVS */
 				0xa02d5ffd 0x00006911 /* SVS */
 				0xa02d5ffd 0x00006111 /* SVS_L1 */
 				0xa02d5ffd 0x00006011 /* SVS_L2 */
-				0x802d5ffd 0x00005411 /* NOM */
-				0x802d5ffd 0x00005411>; /* NOM_L1 */
+				0x802d5ffd 0x00005411>; /* NOM */
 	};
 };
 

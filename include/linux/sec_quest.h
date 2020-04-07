@@ -48,6 +48,7 @@
 
 #define MOUNTPOINT_LOGFS		"/data/log/quest"
 #define UEFI_QUESTRESULT_FILE	"/data/log/quest/questresult.txt"
+#define UEFI_ENHANCEMENT_START_FILE	"/data/log/quest/EnhanceStart.txt"
 
 
 #if defined(CONFIG_SEC_QUEST_UEFI)
@@ -78,6 +79,9 @@ struct param_quest_t {
 #if defined(CONFIG_SEC_QUEST_UEFI)	
 	int32_t quest_uefi_remain_count;
 	uint32_t quest_uefi_result;
+#else
+	int32_t padding_quest_uefi_remain_count;
+	uint32_t padding_quest_uefi_result;
 #endif		
 	uint32_t quest_step;
 #if defined(CONFIG_SEC_SKP)
@@ -116,7 +120,7 @@ TOTALTEST_NO_RESULT_FILE = 4,
 
 #define MAX_DDR_ERR_ADDR_CNT 64
 
-struct param_quest_ddr_test_result_t {
+struct param_quest_ddr_result_t {
 	uint32_t ddr_err_addr_total;
 	uint64_t ddr_err_addr[MAX_DDR_ERR_ADDR_CNT];
 };
@@ -136,19 +140,20 @@ struct param_quest_ddr_test_result_t {
 #define TEST_A75G(x) (!strcmp((x), "A75GTEST"))
 #define TEST_Q65G(x) (!strcmp((x), "Q65GTEST"))
 #define TEST_THERMAL(x) (!strcmp((x), "THERMALTEST"))
+#define TEST_QDAF(x) (!strcmp((x), "QDAFTEST"))
 #define TEST_PASS(x) (!strcmp((x), "PASS"))
 #define TEST_FAIL(x) (!strcmp((x), "FAIL"))
 
 /*
- *	  00 00 00    00    00   00           00      00        00     00      00         00       00      00        00          00
- *         [THERMAL][Q65G][A75G][GFX][SENSORPROBE][SENSOR][DDR_SCAN][CRYTO][ICACHE][CCOHRENCY][SUSPEND][VDDMIN][QMESADDR][QMESACACHE][UFS]
+ *	      00       00    00    00   00           00      00        00     00      00         00       00      00        00          00   00
+ *    [QDAF][THERMAL][Q65G][A75G][GFX][SENSORPROBE][SENSOR][DDR_SCAN][CRYTO][ICACHE][CCOHRENCY][SUSPEND][VDDMIN][QMESADDR][QMESACACHE][UFS]
  *
  *	00 : Not Test
  *	01 : Failed
  *	10 : PASS
  */
 
- 
+/* Please sync with STR_TEST_ITEM in sec_quest.c */
 enum TEST_ITEM {
 	NOT_ASSIGN = -1,
 	UFS,
@@ -166,6 +171,7 @@ enum TEST_ITEM {
 	A75G,
 	Q65G,
 	THERMAL,
+	QDAF,
 	//
 	ITEM_CNT,
 };
@@ -177,7 +183,7 @@ enum TEST_ITEM {
 #define TEST_ITEM_RESULT(curr, item, result) \
 		(result ? \
 			(0x1 << (((curr) * 16) + ((item) * 2) + ((result)-1))) \
-				: (0x3 << (((curr) * 16) + ((item) * 2))))
+				: (0x0 << (((curr) * 16) + ((item) * 2))))
 
 #define GET_DDR_TEST_RESULT(step, ddrtest_result) \
 	(((ddrtest_result)&((0xFF<<(8*step))))>>(8*step))
@@ -233,6 +239,9 @@ enum quest_qdaf_action_t {
 	/*==== from qdaf.sh ====*/
 	QUEST_QDAF_ACTION_DEBUG_SAVE_LOGS = 7,
 	QUEST_QDAF_ACTION_DEBUG_TRIGGER_PANIC = 8,
+
+	/*==== additional cmds ====*/
+	QUEST_QDAF_ACTION_RESULT_TO_NAD_RESULT = 9,
 };
 
 enum quest_qdaf_result_string_t {

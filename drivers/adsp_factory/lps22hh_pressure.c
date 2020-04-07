@@ -152,6 +152,57 @@ static ssize_t selftest_show(struct device *dev,
 		return snprintf(buf, PAGE_SIZE, "%d\n", ST_FAIL);
 }
 
+static ssize_t pressure_dhr_sensor_info_show(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	struct adsp_data *data = dev_get_drvdata(dev);
+	uint8_t cnt = 0;
+	int i = 0;
+
+	adsp_unicast(NULL, 0, MSG_PRESSURE, 0, MSG_TYPE_GET_DHR_INFO);
+	while (!(data->ready_flag[MSG_TYPE_GET_DHR_INFO] & 1 << MSG_PRESSURE) &&
+		cnt++ < TIMEOUT_CNT)
+		usleep_range(500, 550);
+
+	data->ready_flag[MSG_TYPE_GET_DHR_INFO] &= ~(1 << MSG_PRESSURE);
+
+	if (cnt >= TIMEOUT_CNT) {
+		pr_err("[FACTORY] %s: Timeout!!!\n", __func__);
+	} else {
+		for (i = 0; i < 7; i++) {
+			pr_info("[FACTORY] %s - %02x,%02x,%02x,%02x,%02x,%02x,%02x,%02x,%02x,%02x,%02x,%02x,%02x,%02x,%02x,%02x\n",
+				__func__,
+				data->msg_buf[MSG_PRESSURE][i * 16 + 0],
+				data->msg_buf[MSG_PRESSURE][i * 16 + 1],
+				data->msg_buf[MSG_PRESSURE][i * 16 + 2],
+				data->msg_buf[MSG_PRESSURE][i * 16 + 3],
+				data->msg_buf[MSG_PRESSURE][i * 16 + 4],
+				data->msg_buf[MSG_PRESSURE][i * 16 + 5],
+				data->msg_buf[MSG_PRESSURE][i * 16 + 6],
+				data->msg_buf[MSG_PRESSURE][i * 16 + 7],
+				data->msg_buf[MSG_PRESSURE][i * 16 + 8],
+				data->msg_buf[MSG_PRESSURE][i * 16 + 9],
+				data->msg_buf[MSG_PRESSURE][i * 16 + 10],
+				data->msg_buf[MSG_PRESSURE][i * 16 + 11],
+				data->msg_buf[MSG_PRESSURE][i * 16 + 12],
+				data->msg_buf[MSG_PRESSURE][i * 16 + 13],
+				data->msg_buf[MSG_PRESSURE][i * 16 + 14],
+				data->msg_buf[MSG_PRESSURE][i * 16 + 15]);
+		}
+		pr_info("[FACTORY] %s - %02x,%02x,%02x,%02x,%02x,%02x,%02x,%02x\n",
+			__func__, data->msg_buf[MSG_PRESSURE][i * 16 + 0],
+			data->msg_buf[MSG_PRESSURE][i * 16 + 1],
+			data->msg_buf[MSG_PRESSURE][i * 16 + 2],
+			data->msg_buf[MSG_PRESSURE][i * 16 + 3],
+			data->msg_buf[MSG_PRESSURE][i * 16 + 4],
+			data->msg_buf[MSG_PRESSURE][i * 16 + 5],
+			data->msg_buf[MSG_PRESSURE][i * 16 + 6],
+			data->msg_buf[MSG_PRESSURE][i * 16 + 7]);
+	}
+
+	return snprintf(buf, PAGE_SIZE, "%s\n", "Done");
+}
+
 static DEVICE_ATTR(vendor, 0444, pressure_vendor_show, NULL);
 static DEVICE_ATTR(name, 0444, pressure_name_show, NULL);
 static DEVICE_ATTR(calibration, 0664,
@@ -160,6 +211,13 @@ static DEVICE_ATTR(sea_level_pressure, 0664,
 	sea_level_pressure_show, sea_level_pressure_store);
 static DEVICE_ATTR(temperature, 0444, temperature_show, NULL);
 static DEVICE_ATTR(selftest, 0444, selftest_show, NULL);
+#ifdef CONFIG_SEC_FACTORY
+static DEVICE_ATTR(dhr_sensor_info, 0444,
+	pressure_dhr_sensor_info_show, NULL);
+#else
+static DEVICE_ATTR(dhr_sensor_info, 0440,
+	pressure_dhr_sensor_info_show, NULL);
+#endif
 
 static struct device_attribute *pressure_attrs[] = {
 	&dev_attr_vendor,
@@ -168,6 +226,7 @@ static struct device_attribute *pressure_attrs[] = {
 	&dev_attr_sea_level_pressure,
 	&dev_attr_temperature,
 	&dev_attr_selftest,
+	&dev_attr_dhr_sensor_info,
 	NULL,
 };
 

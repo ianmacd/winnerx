@@ -1,4 +1,4 @@
-/* Copyright (c) 2015-2018, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2015-2019, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -92,6 +92,9 @@ static void _sde_hw_cwb_ctrl_init(struct sde_mdss_cfg *m,
 		b->length = CWB_CTRL_BLK_SIZE * m->pingpong_count;
 		b->hwversion = m->hwversion;
 		b->log_mask = SDE_DBG_MASK_WB;
+
+		sde_dbg_reg_register_dump_range(SDE_DBG_NAME, "cwb", b->blk_off,
+			b->blk_off + b->length, 0xff);
 	}
 }
 
@@ -168,6 +171,11 @@ static void sde_hw_wb_setup_format(struct sde_hw_wb *ctx,
 		if (IS_UBWC_20_SUPPORTED(ctx->catalog->ubwc_version))
 			SDE_REG_WRITE(c, WB_UBWC_STATIC_CTRL,
 					(ctx->mdp->ubwc_swizzle << 0) |
+					(ctx->mdp->highest_bank_bit << 4));
+		if (IS_UBWC_10_SUPPORTED(ctx->catalog->ubwc_version))
+			SDE_REG_WRITE(c, WB_UBWC_STATIC_CTRL,
+					(ctx->mdp->ubwc_swizzle << 0) |
+					BIT(8) |
 					(ctx->mdp->highest_bank_bit << 4));
 	}
 
@@ -280,8 +288,8 @@ static void sde_hw_wb_bind_pingpong_blk(
 }
 
 static void sde_hw_wb_program_cwb_ctrl(struct sde_hw_wb *ctx,
-		const enum sde_cwb cur_idx,
-		const enum sde_cwb data_src, bool dspp_out)
+		const enum sde_cwb cur_idx, const enum sde_cwb data_src,
+		bool dspp_out, bool enable)
 {
 	struct sde_hw_blk_reg_map *c;
 	u32 blk_base;
@@ -292,8 +300,13 @@ static void sde_hw_wb_program_cwb_ctrl(struct sde_hw_wb *ctx,
 	c = &ctx->cwb_hw;
 	blk_base = CWB_CTRL_BLK_SIZE * (cur_idx - CWB_0);
 
-	SDE_REG_WRITE(c, blk_base + CWB_CTRL_SRC_SEL, data_src - CWB_0);
-	SDE_REG_WRITE(c, blk_base + CWB_CTRL_MODE, dspp_out);
+	if (enable) {
+		SDE_REG_WRITE(c, blk_base + CWB_CTRL_SRC_SEL, data_src - CWB_0);
+		SDE_REG_WRITE(c, blk_base + CWB_CTRL_MODE, dspp_out);
+	} else {
+		SDE_REG_WRITE(c, blk_base + CWB_CTRL_SRC_SEL, 0xf);
+		SDE_REG_WRITE(c, blk_base + CWB_CTRL_MODE, 0x0);
+	}
 }
 
 static void _setup_wb_ops(struct sde_hw_wb_ops *ops,

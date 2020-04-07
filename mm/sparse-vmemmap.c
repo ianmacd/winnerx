@@ -199,8 +199,6 @@ pud_t * __meminit vmemmap_pud_populate(p4d_t *p4d, unsigned long addr, int node)
 	if (pud_none(*pud)) {
 #ifdef CONFIG_UH_RKP
 		p = rkp_ro_alloc();
-		if (!p)
-			p = vmemmap_alloc_block(PAGE_SIZE, node);
 #else
 		p = vmemmap_alloc_block(PAGE_SIZE, node);
 #endif

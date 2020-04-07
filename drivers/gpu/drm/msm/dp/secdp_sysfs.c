@@ -17,6 +17,7 @@
 #include <linux/kernel.h>
 #include <linux/device.h>
 #include <drm/drm_edid.h>
+#include <linux/string.h>
 #ifdef CONFIG_SEC_DISPLAYPORT_BIGDATA
 #include <linux/displayport_bigdata.h>
 #endif
@@ -119,7 +120,8 @@ static ssize_t dex_show(struct class *class,
 	struct secdp_sysfs_private *sysfs = g_secdp_sysfs;
 	struct secdp_dex *dex = &sysfs->sec->dex;
 
-	if (!secdp_get_cable_status() || !secdp_get_hpd_status()) {
+	if (!secdp_get_cable_status() || !secdp_get_hpd_status() ||
+			secdp_get_poor_connection_status() || !secdp_get_link_train_status()) {
 		pr_info("cable is out\n");
 		dex->prev = dex->curr = DEX_DISABLED;
 	}
@@ -138,7 +140,7 @@ static ssize_t dex_store(struct class *class,
 {
 	int val[4] = {0,};
 	int setting_ui;	/* setting has Dex mode? if yes, 1. otherwise 0 */
-	int run;		/* dex is running now? if yes, 1. otherwise 0 */
+	int run;	/* dex is running now? if yes, 1. otherwise 0 */
 
 	struct secdp_sysfs_private *sysfs = g_secdp_sysfs;
 	struct secdp_misc *sec = sysfs->sec;
@@ -181,9 +183,16 @@ static ssize_t dex_store(struct class *class,
 	}
 	mutex_unlock(&sec->notifier_lock);
 
-	if (!secdp_get_cable_status() || !secdp_get_hpd_status()) {
+	if (!secdp_get_cable_status() || !secdp_get_hpd_status() ||
+			secdp_get_poor_connection_status() || !secdp_get_link_train_status()) {
 		pr_info("cable is out\n");
 		dex->prev = dex->curr = DEX_DISABLED;
+		goto exit;
+	}
+
+	if (sec->hpd_noti_deferred) {
+		secdp_send_deferred_hpd_noti();
+		dex->prev = dex->setting_ui;
 		goto exit;
 	}
 
@@ -321,6 +330,289 @@ static ssize_t dp_unit_test_store(struct class *dev,
 
 static CLASS_ATTR_RW(dp_unit_test);
 
+
+#ifdef SECDP_SELF_TEST
+struct secdp_sef_test_item g_self_test[] = {
+	{DP_ENUM_STR(ST_CLEAR_CMD), .arg_cnt = 0, .arg_str = "clear all configurations"}, 
+	{DP_ENUM_STR(ST_LANE_CNT), .arg_cnt = 1, .arg_str = "lane_count: 1 = 1 lane, 2 = 2 lane, 4 = 4 lane, -1 = disable"}, 
+	{DP_ENUM_STR(ST_LINK_RATE), .arg_cnt = 1, .arg_str = "link_rate: 1 = 1.62G , 2 = 2.7G, 3 = 5.4G, -1 = disable"}, 
+	{DP_ENUM_STR(ST_CONNECTION_TEST), .arg_cnt = 1, .arg_str = "reconnection time(sec) : range = 5 ~ 50, -1 = disable"}, 
+	{DP_ENUM_STR(ST_HDCP_TEST), .arg_cnt = 1, .arg_str = "hdcp on/off time(sec): range = 5 ~ 50, -1 = disable"}, 
+	{DP_ENUM_STR(ST_EDID), .arg_cnt = 0, .arg_str = "need to write edid to \"sys/class/dp_sec/dp_edid\" sysfs node, -1 = disable"}, 
+	{DP_ENUM_STR(ST_PREEM_TUN), .arg_cnt = 16, .arg_str = "pre-emphasis calibration value, -1 = disable"}, 
+	{DP_ENUM_STR(ST_VOLTAGE_TUN), .arg_cnt = 16, .arg_str = "voltage-level calibration value, -1 = disable"}, 
+};
+ 
+int secdp_self_test_status(int cmd)
+{
+	if (cmd >= ST_MAX)
+		return -1;
+
+	if (g_self_test[cmd].enabled)
+		pr_info("%s : %s\n", g_self_test[cmd].cmd_str, g_self_test[cmd].enabled ? "true" : "false");
+
+	return g_self_test[cmd].enabled ? g_self_test[cmd].arg_cnt : -1;
+}
+
+int *secdp_self_test_get_arg(int cmd)
+{
+	return g_self_test[cmd].arg;
+}
+
+void secdp_self_register_clear_func(int cmd, void (*func)(void))
+{
+	if (cmd >= ST_MAX)
+		return;
+
+	g_self_test[cmd].clear = func;
+	pr_info("%s : clear func was registered.\n", g_self_test[cmd].cmd_str);
+}
+
+u8 *secdp_self_test_get_edid(void)
+{
+	struct secdp_sysfs_private *sysfs = g_secdp_sysfs;
+	return	sysfs->sec->self_test_edid;
+}
+
+static void secdp_self_test_reconnect_work(struct work_struct *work)
+{
+	struct secdp_sysfs_private *sysfs = g_secdp_sysfs;
+	int delay = g_self_test[ST_CONNECTION_TEST].arg[0];
+	static unsigned long test_cnt;
+
+	if (!secdp_get_cable_status() || !secdp_get_hpd_status()) {
+		pr_info("cable is out\n");
+		test_cnt = 0;
+		return;
+	}
+
+	if (sysfs->sec->self_test_reconnect_callback)
+		sysfs->sec->self_test_reconnect_callback();
+
+	test_cnt++;
+	pr_info("test_cnt :%lu\n", test_cnt);
+
+	schedule_delayed_work(&sysfs->sec->self_test_reconnect_work, msecs_to_jiffies(delay * 1000));
+}
+
+void secdp_self_test_start_reconnect(void (*func)(void))
+{
+	struct secdp_sysfs_private *sysfs = g_secdp_sysfs;
+	int delay = g_self_test[ST_CONNECTION_TEST].arg[0];
+
+	if (delay > 50 || delay < 5)
+		delay = g_self_test[ST_CONNECTION_TEST].arg[0] = 10;
+
+	pr_info("start reconnect test : delay %d sec\n", delay);
+
+	sysfs->sec->self_test_reconnect_callback = func;
+	schedule_delayed_work(&sysfs->sec->self_test_reconnect_work, msecs_to_jiffies(delay * 1000));
+}
+
+static void secdp_self_test_hdcp_test_work(struct work_struct *work)
+{
+	struct secdp_sysfs_private *sysfs = g_secdp_sysfs;
+	int delay = g_self_test[ST_HDCP_TEST].arg[0];
+	static unsigned long test_cnt;
+
+	if (!secdp_get_cable_status() || !secdp_get_hpd_status()) {
+		pr_info("cable is out\n");
+		test_cnt = 0;
+		return;
+	}
+
+	if (sysfs->sec->self_test_hdcp_off_callback)
+		sysfs->sec->self_test_hdcp_off_callback();
+
+	msleep(3000);
+
+	if (sysfs->sec->self_test_hdcp_on_callback)
+		sysfs->sec->self_test_hdcp_on_callback();
+
+	test_cnt++;
+	pr_info("test_cnt :%lu\n", test_cnt);
+
+	schedule_delayed_work(&sysfs->sec->self_test_hdcp_test_work, msecs_to_jiffies(delay * 1000));
+
+}
+
+void secdp_self_test_start_hdcp_test(void (*func_on)(void), void (*func_off)(void))
+{
+	struct secdp_sysfs_private *sysfs = g_secdp_sysfs;
+	int delay = g_self_test[ST_HDCP_TEST].arg[0];
+
+	if (delay == 0) {
+		pr_info("hdcp test is aborted\n");
+		return;
+	}
+
+	if (delay > 50 || delay < 5)
+		delay = g_self_test[ST_HDCP_TEST].arg[0] = 10;
+
+	pr_info("start hdcp test : delay %d sec\n", delay);
+
+	sysfs->sec->self_test_hdcp_on_callback = func_on;
+	sysfs->sec->self_test_hdcp_off_callback = func_off;
+
+	schedule_delayed_work(&sysfs->sec->self_test_hdcp_test_work, msecs_to_jiffies(delay * 1000));
+}
+
+static ssize_t dp_self_test_show(struct class *class,
+				struct class_attribute *attr, char *buf)
+{
+	int i, j;
+	int rc = 0;
+
+	for (i = 0; i < ST_MAX; i++) {
+
+		rc += scnprintf(buf + rc, PAGE_SIZE - rc,
+				"%d. %s : %s\n   ==>", i, g_self_test[i].cmd_str, g_self_test[i].arg_str);
+		if (g_self_test[i].enabled) {
+			rc += scnprintf(buf + rc, PAGE_SIZE - rc, "current value : enabled - arg :");
+			for (j = 0; j < g_self_test[i].arg_cnt; j++)
+				rc += scnprintf(buf + rc, PAGE_SIZE - rc, "0x%x ", g_self_test[i].arg[j]);
+			rc += scnprintf(buf + rc, PAGE_SIZE - rc, "\n\n");
+
+		} else {
+			rc += scnprintf(buf + rc, PAGE_SIZE - rc,
+				"current value : disabled\n\n");
+		}
+	}
+
+	return rc;
+}
+
+static void dp_self_test_clear_func(int cmd)
+{
+	int arg_cnt = g_self_test[cmd].arg_cnt < ST_ARG_CNT ? g_self_test[cmd].arg_cnt : ST_ARG_CNT;
+
+	g_self_test[cmd].enabled = false;
+	memset(g_self_test[cmd].arg, 0,	sizeof(int) * arg_cnt);
+
+	if (g_self_test[cmd].clear)
+		g_self_test[cmd].clear();
+}
+
+static ssize_t dp_self_test_store(struct class *dev,
+				struct class_attribute *attr, const char *buf, size_t size)
+{
+	int val[ST_ARG_CNT + 2] = {0, };
+	int arg, arg_cnt, cmd, i;
+
+	get_options(buf, ST_ARG_CNT + 2, val);
+
+	cmd = val[1];
+	arg = val[2];
+
+	if (cmd < 0 || cmd >= ST_MAX) {
+		pr_info("invalid cmd\n");
+		goto end;
+	}
+
+	if (cmd == ST_CLEAR_CMD) {
+		for (i = 1; i < ST_MAX; i++)
+			dp_self_test_clear_func(i);
+
+		goto end;
+	}
+
+	g_self_test[cmd].enabled = arg < 0 ? false : true;
+
+	if (g_self_test[cmd].enabled) {
+		if ((val[0] - 1) != g_self_test[cmd].arg_cnt) {
+			pr_info("invalid param.\n");
+			goto end;
+		}
+		
+		arg_cnt = g_self_test[cmd].arg_cnt < ST_ARG_CNT ? g_self_test[cmd].arg_cnt : ST_ARG_CNT;
+		memcpy(g_self_test[cmd].arg, val + 2, sizeof(int) * arg_cnt); 
+	} else {
+		dp_self_test_clear_func(cmd);
+	}
+	
+end:
+	pr_info("cmd: %d. %s, enabled:%s\n", cmd,
+				cmd < ST_MAX ? g_self_test[cmd].cmd_str : "null",
+				cmd < ST_MAX ? (g_self_test[cmd].enabled ? "true" : "false"): "null");
+
+	return size;
+}
+
+static CLASS_ATTR_RW(dp_self_test);
+
+static ssize_t dp_edid_show(struct class *class,
+				struct class_attribute *attr, char *buf)
+{
+	struct secdp_sysfs_private *sysfs = g_secdp_sysfs;
+	int i, flag = 0;
+	int rc = 0;
+
+	rc += scnprintf(buf + rc, PAGE_SIZE - rc,
+			"EDID test is %s\n", g_self_test[ST_EDID].enabled ? "enabled" : "disabled");
+
+	for (i = 0; i < ST_EDID_SIZE; i++) {
+
+		rc += scnprintf(buf + rc, PAGE_SIZE - rc,
+				"0x%02x ", sysfs->sec->self_test_edid[i]);
+		if (!((i+1)%8)) {
+			rc += scnprintf(buf + rc, PAGE_SIZE - rc, "%s", flag ? "\n" : "  ");
+			flag = !flag;
+
+			if (!((i+1) % 128))
+				rc += scnprintf(buf + rc, PAGE_SIZE - rc, "\n");
+		}
+	}
+
+	return rc;
+}
+
+static ssize_t dp_edid_store(struct class *dev,
+				struct class_attribute *attr, const char *buf, size_t size)
+{
+	struct secdp_sysfs_private *sysfs = g_secdp_sysfs;
+	int val[ST_EDID_SIZE + 1] = {0, };
+	char *temp;
+	size_t i, j = 0;
+
+	temp = kzalloc(size, GFP_KERNEL);
+	if (!temp) {
+		pr_err("buffer alloc error\n");
+		dp_self_test_clear_func(ST_EDID);
+
+		goto error;
+	}
+
+	/* remove space */
+	for (i = 0; i < size; i++) {
+		if (buf[i] != ' ')
+			temp[j++] = buf[i];
+	}
+
+	get_options(temp, ST_EDID_SIZE + 1, val);
+
+	if (val[0] % 128) {
+		pr_err("invalid EDID(%d)\n", val[0]);
+		dp_self_test_clear_func(ST_EDID);
+
+		goto end;
+	}
+
+	memset(sysfs->sec->self_test_edid, 0, sizeof(ST_EDID_SIZE));
+
+	for (i = 0; i < val[0]; i++) {
+		sysfs->sec->self_test_edid[i] = (u8)val[i+1];
+	}
+
+	g_self_test[ST_EDID].enabled = true;
+end:
+	kfree(temp);
+error:
+	return size;
+}
+
+static CLASS_ATTR_RW(dp_edid);
+#endif
+
 #ifdef CONFIG_SEC_DISPLAYPORT_BIGDATA
 static ssize_t dp_error_info_show(struct class *class,
 				struct class_attribute *attr, char *buf)
@@ -387,6 +679,66 @@ static ssize_t dp_px_lvl_store(struct class *dev,
 }
 
 static CLASS_ATTR_RW(dp_px_lvl);
+
+static ssize_t dp_pref_skip_show(struct class *class,
+				struct class_attribute *attr, char *buf)
+{
+	int skip, rc;
+
+	pr_debug("+++\n");
+
+	skip = secdp_debug_prefer_skip_show();
+	rc = sprintf(buf, "%d\n", skip);
+
+	return rc;
+}
+
+static ssize_t dp_pref_skip_store(struct class *dev,
+				struct class_attribute *attr, const char *buf, size_t size)
+{
+	int i, val[30] = {0, };
+
+	pr_debug("+++, size(%d)\n", (int)size);
+
+	get_options(buf, 20, val);
+	for (i = 0; i < 16; i=i+4)
+		pr_debug("%02x,%02x,%02x,%02x\n", val[i+1],val[i+2],val[i+3],val[i+4]);
+
+	secdp_debug_prefer_skip_store(val[1]);
+	return size;
+}
+
+static CLASS_ATTR_RW(dp_pref_skip);
+
+static ssize_t dp_pref_ratio_show(struct class *class,
+				struct class_attribute *attr, char *buf)
+{
+	int ratio, rc;
+
+	pr_debug("+++\n");
+
+	ratio = secdp_debug_prefer_ratio_show();
+	rc = sprintf(buf, "%d\n", ratio);
+
+	return rc;
+}
+
+static ssize_t dp_pref_ratio_store(struct class *dev,
+				struct class_attribute *attr, const char *buf, size_t size)
+{
+	int i, val[30] = {0, };
+
+	pr_debug("+++, size(%d)\n", (int)size);
+
+	get_options(buf, 20, val);
+	for (i = 0; i < 16; i=i+4)
+		pr_debug("%02x,%02x,%02x,%02x\n", val[i+1],val[i+2],val[i+3],val[i+4]);
+
+	secdp_debug_prefer_ratio_store(val[1]);
+	return size;
+}
+
+static CLASS_ATTR_RW(dp_pref_ratio);
 #endif
 
 enum {
@@ -396,12 +748,18 @@ enum {
 	DEX_VER,
 	MONITOR_INFO,
 	DP_UNIT_TEST,
+#ifdef SECDP_SELF_TEST
+	DP_SELF_TEST,
+	DP_EDID,
+#endif
 #ifdef CONFIG_SEC_DISPLAYPORT_BIGDATA
 	DP_ERROR_INFO,
 #endif
 #ifdef SECDP_CALIBRATE_VXPX
 	DP_VX_LVL,
 	DP_PX_LVL,
+	DP_PREF_SKIP,
+	DP_PREF_RATIO,
 #endif
 };
 
@@ -412,12 +770,18 @@ static struct attribute *secdp_class_attrs[] = {
 	[DEX_VER]				= &class_attr_dex_ver.attr,
 	[MONITOR_INFO]			= &class_attr_monitor_info.attr,
 	[DP_UNIT_TEST]			= &class_attr_dp_unit_test.attr,
+#ifdef SECDP_SELF_TEST
+	[DP_SELF_TEST]			= &class_attr_dp_self_test.attr,
+	[DP_EDID]				= &class_attr_dp_edid.attr,
+#endif
 #ifdef CONFIG_SEC_DISPLAYPORT_BIGDATA
 	[DP_ERROR_INFO]			= &class_attr_dp_error_info.attr,
 #endif
 #ifdef SECDP_CALIBRATE_VXPX
 	[DP_VX_LVL]				= &class_attr_dp_vx_lvl.attr,
 	[DP_PX_LVL]				= &class_attr_dp_px_lvl.attr,
+	[DP_PREF_SKIP]			= &class_attr_dp_pref_skip.attr,
+	[DP_PREF_RATIO]			= &class_attr_dp_pref_ratio.attr,
 #endif
 	NULL,
 };
@@ -505,6 +869,11 @@ struct secdp_sysfs *secdp_sysfs_get(struct device *dev, struct secdp_misc *sec)
 	dp_sysfs = &sysfs->dp_sysfs;
 
 	g_secdp_sysfs = sysfs;
+
+#ifdef SECDP_SELF_TEST
+	INIT_DELAYED_WORK(&sec->self_test_reconnect_work, secdp_self_test_reconnect_work);
+	INIT_DELAYED_WORK(&sec->self_test_hdcp_test_work, secdp_self_test_hdcp_test_work);
+#endif
 	return dp_sysfs;
 
 error:

@@ -1554,14 +1554,6 @@ static inline struct page *alloc_slab_page(struct kmem_cache *s,
 	return page;
 }
 
-#ifdef CONFIG_RKP_DMAP_PROT
-void dmap_prot(u64 addr, u64 order, u64 val)
-{
-	if(rkp_cred_enable)
-		uh_call(UH_APP_RKP, 0x4a, order, val, 0, 0);
-}
-#endif
-
 #ifdef CONFIG_SLAB_FREELIST_RANDOM
 /* Pre-initialize the random sequence cache */
 static int init_cache_random_seq(struct kmem_cache *s)

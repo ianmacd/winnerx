@@ -54,7 +54,6 @@
 
 #ifdef CONFIG_SEC_DEBUG
 #include <linux/sec_debug.h>
-#include <linux/sec_debug_summary.h>
 #endif
 
 #include "workqueue_internal.h"
@@ -916,6 +915,26 @@ struct task_struct *wq_worker_sleeping(struct task_struct *task)
 	    !list_empty(&pool->worklist))
 		to_wakeup = first_idle_worker(pool);
 	return to_wakeup ? to_wakeup->task : NULL;
+}
+
+/**
+ * wq_worker_last_func - retrieve worker's last work function
+ *
+ * Determine the last function a worker executed. This is called from
+ * the scheduler to get a worker's last known identity.
+ *
+ * CONTEXT:
+ * spin_lock_irq(rq->lock)
+ *
+ * Return:
+ * The last work function %current executed as a worker, NULL if it
+ * hasn't executed any work yet.
+ */
+work_func_t wq_worker_last_func(struct task_struct *task)
+{
+	struct worker *worker = kthread_data(task);
+
+	return worker->last_func;
 }
 
 /**
@@ -2126,7 +2145,7 @@ __acquires(&pool->lock)
 	trace_workqueue_execute_start(work);
 
 #ifdef CONFIG_SEC_DEBUG_SCHED_LOG
-	secdbg_sched_msg("@%pS", worker->current_func);
+	sec_debug_sched_msg("@%pS", worker->current_func);
 #endif
 
 	worker->current_func(work);
@@ -2162,6 +2181,9 @@ __acquires(&pool->lock)
 	/* clear cpu intensive status */
 	if (unlikely(cpu_intensive))
 		worker_clr_flags(worker, WORKER_CPU_INTENSIVE);
+
+	/* tag the worker for identification in schedule() */
+	worker->last_func = worker->current_func;
 
 	/* we're done with it, release */
 	hash_del(&worker->hentry);

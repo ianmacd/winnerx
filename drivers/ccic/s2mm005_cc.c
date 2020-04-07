@@ -65,7 +65,14 @@ void process_cc_water_det(void * data);
 
 #ifdef CONFIG_MUIC_SM5705_SWITCH_CONTROL_GPIO
 extern int muic_GPIO_control(int gpio);
-int muic_GPIO_init_check = 0;
+#endif
+#if defined(CONFIG_MUIC_SUPPORT_KEYBOARDDOCK)
+extern void muic_ADC_rescan(void);
+int adc_rescan_done = 0;
+#endif
+
+#if defined(CONFIG_USB_DWC3)
+extern void dwc3_set_selfpowered(u8 enable);
 #endif
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -829,6 +836,19 @@ void process_cc_attach(void * data,u8 *plug_attach_done)
 			return;
 		}
 #endif
+		if (!usbpd_data->support_analog_audio) {
+			if (usbpd_data->pd_state == State_PE_SRC_Wait_New_Capabilities && Lp_DATA.BITS.ACC_DETECTION) {
+				dev_info(&i2c->dev, "Type-C Earjack detected\n");
+				usbpd_data->acc_type = CCIC_DOCK_TYPEC_ANALOG_EARPHONE;
+				process_check_accessory(usbpd_data);
+				return;
+			} else if(usbpd_data->pd_state == State_PE_Initial_detach && 
+				usbpd_data->acc_type == CCIC_DOCK_TYPEC_ANALOG_EARPHONE) {
+				dev_info(&i2c->dev, "Type-C Earjack removed\n");
+				schedule_delayed_work(&usbpd_data->acc_detach_work, msecs_to_jiffies(0));
+				return;				
+			}			
+		}
 	}
 #ifdef CONFIG_USB_NOTIFY_PROC_LOG
 	store_usblog_notify(NOTIFY_FUNCSTATE, (void*)&usbpd_data->pd_state, NULL);
@@ -852,23 +872,37 @@ void process_cc_attach(void * data,u8 *plug_attach_done)
 			vbus_turn_on_ctrl(1);
 		}
 		
+#if defined(CONFIG_TYPEC)
+		if (usbpd_data->pd_state == State_PE_SRC_Ready || usbpd_data->pd_state == State_PE_SNK_Ready)
+		{
+			usbpd_data->pd_support = true;
+#if defined(CONFIG_USB_DWC3)
+			dwc3_set_selfpowered(1);
+#endif
+			typec_set_pwr_opmode(usbpd_data->port, TYPEC_PWR_MODE_PD);
+#ifdef CONFIG_MUIC_SM5705_SWITCH_CONTROL_GPIO
+			pr_info("%s call muic_GPIO_control(0)\n", __func__);
+			muic_GPIO_control(0);
+#endif
+		}
+#endif		
 		if (usbpd_data->is_dr_swap || usbpd_data->is_pr_swap) {
 			dev_info(&i2c->dev, "%s - ignore all pd_state by %s\n",	__func__,(usbpd_data->is_dr_swap ? "dr_swap" : "pr_swap"));
 			return;
 		}
 
-#if defined(CONFIG_TYPEC)
-		if (usbpd_data->pd_state == State_PE_SRC_Ready || usbpd_data->pd_state == State_PE_SNK_Ready)
-		{
-			usbpd_data->pd_support = true;
-			typec_set_pwr_opmode(usbpd_data->port, TYPEC_PWR_MODE_PD);
-#ifdef CONFIG_MUIC_SM5705_SWITCH_CONTROL_GPIO
-			pr_info("%s Set muic GPIO to keep muic path\n", __func__);
-		        muic_GPIO_control(1);
-#endif
+		if (usbpd_data->pd_state == State_PE_SNK_Wait_for_Capabilities
+		|| usbpd_data->pd_state == State_PE_SNK_Select_Capability
+		|| usbpd_data->pd_state == State_PE_SNK_Ready) {
+			if (Func_DATA.BITS.VBUS_CC_Short) {
+				dev_info(&i2c->dev, "%s PD TA CC-VBUS  short\n", __func__);
+			}
 		}
-#endif		
+
 		switch (usbpd_data->pd_state) {
+		//lse 0717 new	
+		case State_PE_SRC_Startup:
+		
 		case State_PE_SRC_Send_Capabilities:
 		case State_PE_SRC_Negotiate_Capability:
 		case State_PE_SRC_Transition_Supply:
@@ -1061,6 +1095,9 @@ void process_cc_attach(void * data,u8 *plug_attach_done)
 			}			
 #endif
 			usbpd_data->pd_support = false;
+#if defined(CONFIG_USB_DWC3)
+			dwc3_set_selfpowered(0);
+#endif
 			send_otg_notify(o_notify, NOTIFY_EVENT_POWER_SOURCE, 0);
 			ccic_event_work(usbpd_data,
 				CCIC_NOTIFY_DEV_USB, CCIC_NOTIFY_ID_USB, 0/*attach*/, USB_STATUS_NOTIFY_DETACH/*drp*/, 0);
@@ -1073,9 +1110,6 @@ void process_cc_attach(void * data,u8 *plug_attach_done)
 #endif
 		}
 		usbpd_data->detach_done_wait = 1;
-#ifdef CONFIG_MUIC_SM5705_SWITCH_CONTROL_GPIO
-		muic_GPIO_control(0);
-#endif
 	}
 	prev_pd_state = usbpd_data->pd_state;
 }
@@ -1248,15 +1282,17 @@ void process_cc_rid(void *data)
 	if(rid) {
 #ifdef CONFIG_MUIC_SM5705_SWITCH_CONTROL_GPIO
 		if ((rid == RID_000K) || (rid == RID_001K) || (rid == RID_523K) || (rid == RID_619K)
-                    || (rid == RID_255K) || (rid == RID_301K))
+                    || (rid == RID_255K) || (rid == RID_301K)) {
 			muic_GPIO_control(1);
-                else if ((rid == RID_UNDEFINED) || (rid == RID_OPEN)) {
-                        if (!muic_GPIO_init_check) {
-			    pr_info("%s init muic GPIO with rid_open\n", __func__);
-                            muic_GPIO_control(0);
-                        }
-                }
-                muic_GPIO_init_check = 1;
+                } else if ((rid == RID_UNDEFINED) || (rid == RID_OPEN)) {
+			muic_GPIO_control(0);
+#if defined(CONFIG_MUIC_SUPPORT_KEYBOARDDOCK)
+			if (!adc_rescan_done) {
+				muic_ADC_rescan();
+				adc_rescan_done = 1;
+			}
+#endif
+		}
 #endif
 		if(prev_rid != rid)
 		{

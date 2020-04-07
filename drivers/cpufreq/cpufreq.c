@@ -31,10 +31,10 @@
 #include <linux/syscore_ops.h>
 #include <linux/tick.h>
 #include <linux/sched/topology.h>
+#include <linux/sched/sysctl.h>
 #include <linux/ologk.h>
 
 #include <trace/events/power.h>
-#include <linux/mm.h>
 
 static LIST_HEAD(cpufreq_policy_list);
 
@@ -562,13 +562,13 @@ EXPORT_SYMBOL_GPL(cpufreq_policy_transition_delay_us);
  *                          SYSFS INTERFACE                          *
  *********************************************************************/
 static ssize_t show_boost(struct kobject *kobj,
-				 struct attribute *attr, char *buf)
+			  struct kobj_attribute *attr, char *buf)
 {
 	return sprintf(buf, "%d\n", cpufreq_driver->boost_enabled);
 }
 
-static ssize_t store_boost(struct kobject *kobj, struct attribute *attr,
-				  const char *buf, size_t count)
+static ssize_t store_boost(struct kobject *kobj, struct kobj_attribute *attr,
+			   const char *buf, size_t count)
 {
 	int ret, enable;
 
@@ -645,31 +645,6 @@ static int cpufreq_parse_governor(char *str_governor, unsigned int *policy,
 	return err;
 }
 
-bool filterByProcName(char* proc_name) {
-	bool ret = false;
-	struct pid *pid = NULL;
-	struct task_struct *task = NULL;
-	int nr = task_tgid_vnr(current);
-	pid = find_get_pid(nr);
-
-	if(pid) {
-		task = get_pid_task(pid, PIDTYPE_PID);
-		put_pid(pid);
-
-		if(task) {
-			char* buf;
-			buf = kzalloc(512, GFP_KERNEL);
-			get_cmdline(task, buf, 512);
-			if(!strcmp(buf, proc_name)) {
-				ret = true;
-			}
-			put_task_struct(task);
-			kfree(buf);
-		}
-	}
-	return ret;
-}
-
 /**
  * cpufreq_per_cpu_attr_read() / show_##file_name() -
  * print out cpufreq information
@@ -685,42 +660,40 @@ static ssize_t show_##file_name				\
 	return sprintf(buf, "%u\n", policy->object);	\
 }
 
-// Please add/remove game app process's cmdline(/proc/<pid>/cmdline) in game list array.
-char* gamelist[] = {
-	"zo.wz.xingd.nearme.gamecenter",
-	"com.zsfz.klzsmn3d.nearme.gamecenter",
-	"zo.wz.xingd.m4399",
-	"com.jsdw.zzxdongjiB.nearme.gamecenter",
-	"com.tencent.tmgp.ffom",
-	"es.socialpoint.dragonland",
-	"com.gaeagame.cn.xj",
-	"com.gaea.xianjian.nearme.gamecenter",
-	"com.colorup.game",
-	NULL
-};
-
-// Game app unity engine reads CPU max frequency. If CPU max frequency
-// is bigger than "2419200", return value "2419200" to Unity.
-#define show_cpuinfo_max_freq(file_name, object)\
-static ssize_t show_##file_name \
-(struct cpufreq_policy *policy, char *buf) \
-{ \
-	int i = 0; \
-	while (gamelist[i] != NULL) { \
-		if ( filterByProcName(gamelist[i]) \
-			&& policy->object > 2419200 ) { \
-			return sprintf(buf, "%u\n", 2419200); \
-			} \
-		i++; \
-	} \
-	return sprintf(buf, "%u\n", policy->object); \
-} \
-
 show_one(cpuinfo_min_freq, cpuinfo.min_freq);
-show_cpuinfo_max_freq(cpuinfo_max_freq, cpuinfo.max_freq);
 show_one(cpuinfo_transition_latency, cpuinfo.transition_latency);
 show_one(scaling_min_freq, min);
 show_one(scaling_max_freq, max);
+
+unsigned int cpuinfo_max_freq_cached;
+
+static bool should_use_cached_freq(int cpu)
+{
+	/* This is a safe check. may not be needed */
+	if (!cpuinfo_max_freq_cached)
+		return false;
+
+	/*
+	 * perfd already configure sched_lib_mask_force to
+	 * 0xf0 from user space. so re-using it.
+	 */
+	if (!(BIT(cpu) & sched_lib_mask_force))
+		return false;
+
+	return is_sched_lib_based_app(current->pid);
+}
+
+static ssize_t show_cpuinfo_max_freq(struct cpufreq_policy *policy, char *buf)
+{
+	unsigned int freq = policy->cpuinfo.max_freq;
+
+	if (should_use_cached_freq(policy->cpu))
+		freq = cpuinfo_max_freq_cached << 1;
+	else
+		freq = policy->cpuinfo.max_freq;
+
+	return scnprintf(buf, PAGE_SIZE, "%u\n", freq);
+}
 
 __weak unsigned int arch_freq_get_on_cpu(int cpu)
 {
@@ -1592,17 +1565,16 @@ static unsigned int __cpufreq_get(struct cpufreq_policy *policy)
 {
 	unsigned int ret_freq = 0;
 
-	if (!cpufreq_driver->get)
+	if (unlikely(policy_is_inactive(policy)) || !cpufreq_driver->get)
 		return ret_freq;
 
 	ret_freq = cpufreq_driver->get(policy->cpu);
 
 	/*
-	 * Updating inactive policies is invalid, so avoid doing that.  Also
-	 * if fast frequency switching is used with the given policy, the check
+	 * If fast frequency switching is used with the given policy, the check
 	 * against policy->cur is pointless, so skip it in that case too.
 	 */
-	if (unlikely(policy_is_inactive(policy)) || policy->fast_switch_enabled)
+	if (policy->fast_switch_enabled)
 		return ret_freq;
 
 	if (ret_freq && policy->cur &&
@@ -1631,10 +1603,7 @@ unsigned int cpufreq_get(unsigned int cpu)
 
 	if (policy) {
 		down_read(&policy->rwsem);
-
-		if (!policy_is_inactive(policy))
-			ret_freq = __cpufreq_get(policy);
-
+		ret_freq = __cpufreq_get(policy);
 		up_read(&policy->rwsem);
 
 		cpufreq_cpu_put(policy);
@@ -1743,6 +1712,9 @@ void cpufreq_resume(void)
 	int ret;
 
 	if (!cpufreq_driver)
+		return;
+
+	if (unlikely(!cpufreq_suspended))
 		return;
 
 	cpufreq_suspended = false;
@@ -1922,17 +1894,13 @@ EXPORT_SYMBOL(cpufreq_unregister_notifier);
 unsigned int cpufreq_driver_fast_switch(struct cpufreq_policy *policy,
 					unsigned int target_freq)
 {
-	unsigned int next_freq;
-
+	int ret;
 	target_freq = clamp_val(target_freq, policy->min, policy->max);
-	next_freq = cpufreq_driver->fast_switch(policy, target_freq);
 
-	cpufreq_times_record_transition(policy, target_freq);
-
-	if (next_freq && unlikely(cpufreq_stats_on_check(policy)))
-		cpufreq_stats_record_transition(policy, next_freq);
-
-	return next_freq;
+        ret = cpufreq_driver->fast_switch(policy, target_freq);
+	if (ret)
+		cpufreq_times_record_transition(policy, ret);
+	return ret;
 }
 EXPORT_SYMBOL_GPL(cpufreq_driver_fast_switch);
 
@@ -2287,6 +2255,10 @@ static int cpufreq_set_policy(struct cpufreq_policy *policy,
 	/* adjust if necessary - all reasons */
 	blocking_notifier_call_chain(&cpufreq_policy_notifier_list,
 			CPUFREQ_ADJUST, new_policy);
+
+	/* adjust if necessary - hardware incompatibility */
+	blocking_notifier_call_chain(&cpufreq_policy_notifier_list,
+			CPUFREQ_INCOMPATIBLE, new_policy);
 
 	/*
 	 * verify the cpu speed can be set within this limit, which might be

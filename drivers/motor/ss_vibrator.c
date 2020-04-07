@@ -508,10 +508,10 @@ static int vibrator_parse_dt(struct ss_vib *vib)
 		pr_err("%s:%d, power gpio not specified\n", __func__, __LINE__);
 
 	rc = of_property_read_u32(np, "samsung,chip_model", &vib->chip_model);
-	if (rc == 2) {
+	if (vib->chip_model == 2) {
 		pr_info("chip_model is SM5720\n");
 		vib->chip_model = CHIP_SM5720;
-	} else if (rc == 4) {
+	} else if (vib->chip_model == 4) {
 		pr_info("chip_model is MAX77705\n");
 		vib->chip_model = CHIP_MAX77705;
 	} else
@@ -896,7 +896,7 @@ static ssize_t motor_type_show(struct device *dev, struct device_attribute *attr
 
 static DEVICE_ATTR(motor_type, 0660, motor_type_show, NULL);
 
-#if defined(CONFIG_MOTOR_DRV_MAX77854) || defined(CONFIG_MOTOR_DRV_SM5720) || defined(CONFIG_MOTOR_DRV_MAX77705)
+#if defined(CONFIG_MOTOR_DRV_MAX77854) || defined(CONFIG_MOTOR_DRV_SM5720) || defined(CONFIG_MOTOR_DRV_MAX77705) || defined(CONFIG_MOTOR_DRV_ISA1000A)
 #if !defined(CONFIG_BOOST_POWER_SHARE)
 static void regulator_power_onoff(int onoff)
 {

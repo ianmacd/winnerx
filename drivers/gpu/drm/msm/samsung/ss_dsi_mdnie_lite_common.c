@@ -918,6 +918,9 @@ static ssize_t night_mode_store(struct device *dev,
 
 	if (((idx >= 0) && (idx < mdnie_data->dsi_max_night_mode_index)) && (enable == true)) {
 		if (!IS_ERR_OR_NULL(mdnie_data->dsi_night_mode_table)) {
+			if(tune->mdnie_mode != AUTO_MODE){
+				idx += mdnie_data->dsi_max_night_mode_index;
+			}
 			buffer = &mdnie_data->dsi_night_mode_table[(MDNIE_SCR_CMD_SIZE * idx)];
 			if (!IS_ERR_OR_NULL(mdnie_data->DSI_NIGHT_MODE_MDNIE_SCR)) {
 				memcpy(&mdnie_data->DSI_NIGHT_MODE_MDNIE_SCR[mdnie_data->mdnie_color_blinde_cmd_offset],

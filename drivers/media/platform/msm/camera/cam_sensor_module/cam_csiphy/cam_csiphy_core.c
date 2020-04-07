@@ -306,6 +306,8 @@ int32_t cam_csiphy_update_secure_info(
 		adj_lane_mask = cam_cmd_csiphy_info->lane_mask & LANE_MASK_3PH;
 
 	csiphy_dev->csiphy_info.secure_mode[offset] = 1;
+	CAM_INFO(CAM_CSIPHY, "csiphy_dev->csiphy_info.secure_mode[%d] = %d",
+		offset, csiphy_dev->csiphy_info.secure_mode[offset]);
 
 	csiphy_dev->csiphy_cpas_cp_reg_mask[offset] =
 		adj_lane_mask << (csiphy_dev->soc_info.index *
@@ -326,6 +328,7 @@ int32_t cam_cmd_buf_parser(struct csiphy_device *csiphy_dev,
 	uint32_t                *cmd_buf = NULL;
 	struct cam_csiphy_info  *cam_cmd_csiphy_info = NULL;
 	size_t                  len;
+	int32_t                 offset;
 
 	if (!cfg_dev || !csiphy_dev) {
 		CAM_ERR(CAM_CSIPHY, "Invalid Args");
@@ -378,6 +381,18 @@ int32_t cam_cmd_buf_parser(struct csiphy_device *csiphy_dev,
 		csiphy_dev->csiphy_info.settle_time =
 			cam_cmd_csiphy_info->settle_time;
 	csiphy_dev->csiphy_info.data_rate = cam_cmd_csiphy_info->data_rate;
+
+	offset = cam_csiphy_get_instance_offset(csiphy_dev,
+		cfg_dev->dev_handle);
+	if (offset < 0 || offset >= CSIPHY_MAX_INSTANCES) {
+		CAM_ERR(CAM_CSIPHY, "Invalid offset");
+		return -EINVAL;
+	}
+	csiphy_dev->csiphy_info.secure_mode[offset] =
+		CAM_SECURE_MODE_NON_SECURE;
+
+	CAM_INFO(CAM_CSIPHY, "CSIPHY%d secure_mode : %u",
+		csiphy_dev->soc_info.index, cam_cmd_csiphy_info->secure_mode);
 
 	if (cam_cmd_csiphy_info->secure_mode == 1)
 		cam_csiphy_update_secure_info(csiphy_dev,
@@ -630,6 +645,8 @@ void cam_csiphy_shutdown(struct csiphy_device *csiphy_dev)
 
 			csiphy_dev->csiphy_info.secure_mode[i] =
 				CAM_SECURE_MODE_NON_SECURE;
+			CAM_INFO(CAM_CSIPHY, "csiphy_dev->csiphy_info.secure_mode[%d] = %d",
+				i, csiphy_dev->csiphy_info.secure_mode[i]);
 
 			csiphy_dev->csiphy_cpas_cp_reg_mask[i] = 0;
 		}
@@ -728,6 +745,14 @@ int32_t cam_csiphy_core_cfg(void *phy_dev,
 		struct cam_csiphy_acquire_dev_info csiphy_acq_params;
 
 		struct cam_create_dev_hdl bridge_params;
+
+		if (csiphy_dev->csiphy_state == CAM_CSIPHY_START) {
+			CAM_ERR(CAM_CSIPHY,
+				"Not in right state to acquire : %d",
+				csiphy_dev->csiphy_state);
+			rc = -EINVAL;
+			goto release_mutex;
+		}
 
 		rc = copy_from_user(&csiphy_acq_dev,
 			u64_to_user_ptr(cmd->handle),
@@ -857,6 +882,9 @@ int32_t cam_csiphy_core_cfg(void *phy_dev,
 
 			csiphy_dev->csiphy_info.secure_mode[offset] =
 				CAM_SECURE_MODE_NON_SECURE;
+			CAM_INFO(CAM_CSIPHY, "csiphy_dev->csiphy_info.secure_mode[%d] = %d",
+				offset, csiphy_dev->csiphy_info.secure_mode[offset]);
+
 			csiphy_dev->csiphy_cpas_cp_reg_mask[offset] = 0;
 
 			goto release_mutex;
@@ -869,6 +897,8 @@ int32_t cam_csiphy_core_cfg(void *phy_dev,
 
 		csiphy_dev->csiphy_info.secure_mode[offset] =
 			CAM_SECURE_MODE_NON_SECURE;
+		CAM_INFO(CAM_CSIPHY, "csiphy_dev->csiphy_info.secure_mode[%d] = %d",
+			offset, csiphy_dev->csiphy_info.secure_mode[offset]);
 
 		csiphy_dev->csiphy_cpas_cp_reg_mask[offset] = 0x0;
 
@@ -981,6 +1011,9 @@ int32_t cam_csiphy_core_cfg(void *phy_dev,
 			goto release_mutex;
 		}
 
+		CAM_INFO(CAM_CSIPHY, "csiphy_dev->csiphy_info.secure_mode[%d] = %d",
+			offset, csiphy_dev->csiphy_info.secure_mode[offset]);
+
 		if (csiphy_dev->csiphy_info.secure_mode[offset] == 1) {
 			rc = cam_csiphy_notify_secure_mode(
 				csiphy_dev,
@@ -988,6 +1021,8 @@ int32_t cam_csiphy_core_cfg(void *phy_dev,
 			if (rc < 0) {
 				csiphy_dev->csiphy_info.secure_mode[offset] =
 					CAM_SECURE_MODE_NON_SECURE;
+				CAM_INFO(CAM_CSIPHY, "csiphy_dev->csiphy_info.secure_mode[%d] = %d",
+					offset, csiphy_dev->csiphy_info.secure_mode[offset]);
 				cam_cpas_stop(csiphy_dev->cpas_handle);
 				goto release_mutex;
 			}

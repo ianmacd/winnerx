@@ -42,6 +42,8 @@ static DEFINE_IDA(input_ida);
 static LIST_HEAD(input_dev_list);
 static LIST_HEAD(input_handler_list);
 
+struct device_type_info device_type_infos[MAX_BOOSTER_CNT];
+
 /*
  * input_mutex protects access to both input_dev_list and input_handler_list.
  * This also causes input_[un]register_device and input_[un]register_handler
@@ -399,12 +401,15 @@ static void input_handle_event(struct input_dev *dev,
 	}
 
 	if (disposition & INPUT_FLUSH) {
-		if (dev->num_vals >= 2)
+		if (dev->num_vals >= 2) {
 			input_pass_values(dev, dev->vals, dev->num_vals);
+			dev->prev_num_vals = dev->num_vals;
+		}
 		dev->num_vals = 0;
 	} else if (dev->num_vals >= dev->max_vals - 2) {
 		dev->vals[dev->num_vals++] = input_value_sync;
 		input_pass_values(dev, dev->vals, dev->num_vals);
+		dev->prev_num_vals = dev->num_vals;
 		dev->num_vals = 0;
 	}
 
@@ -420,7 +425,6 @@ DECLARE_TIMEOUT_FUNC(mouse);
 DECLARE_TIMEOUT_FUNC(mouse_wheel);
 DECLARE_TIMEOUT_FUNC(pen);
 DECLARE_TIMEOUT_FUNC(hover);
-DECLARE_TIMEOUT_FUNC(key_two);
 
 // ********** Define Set Booster Functions ********** //
 DECLARE_SET_BOOSTER_FUNC(touch);
@@ -432,7 +436,6 @@ DECLARE_SET_BOOSTER_FUNC(mouse);
 DECLARE_SET_BOOSTER_FUNC(mouse_wheel);
 DECLARE_SET_BOOSTER_FUNC(pen);
 DECLARE_SET_BOOSTER_FUNC(hover);
-DECLARE_SET_BOOSTER_FUNC(key_two);
 
 // ********** Define State Functions ********** //
 DECLARE_STATE_FUNC(idle)
@@ -502,151 +505,170 @@ DECLARE_STATE_FUNC(press)
 		}
 	}
 }
+/**
+ * get_device_type : Define type of device for input_booster.
+ * dev : Current device that in which input events triggered.
+ * trgt_gender : The device_tree_gender struct of target device to change device information while input_booster works.
+ * trgt_booster : The device_booster struct of targer device to change device information same as trget_gender.
+ * ret_val : Booster_ON : 1, Booster_OFF : 0.
+**/
+
+int get_device_type(struct input_dev *dev){
+	int i;
+	int ret_val = -1;
+
+	if (dev == NULL)
+		return ret_val;
+
+	/* Initializing device type before finding the proper device type. */
+	dev->device_type = NONE_TYPE_DEVICE;
+
+	for (i = 0; i < dev->prev_num_vals && i < MAX_EVENTS; i++) {
+
+		pr_booster("[Input Data] Touch Type : %d, Code : %d, Value : %d \n", dev->vals[i].type, dev->vals[i].code, dev->vals[i].value);
+
+		if (dev->device_type != NONE_TYPE_DEVICE && dev->device_type != TOUCH && dev->device_type != MULTI_TOUCH) {
+			pr_booster("[Input Booster2] Device type Find - ret_val : %d, device_type : %d \n", ret_val, dev->device_type);
+			return ret_val;
+		}
+		if (dev->vals[i].type == EV_KEY) {
+			switch (dev->vals[i].code) {
+				case BTN_TOUCH:
+					if (i+1 < dev->prev_num_vals && i+1 < dev->max_vals) {
+						if (dev->vals[i+1].type == EV_ABS && dev->vals[i+1].code == ABS_PRESSURE)
+							dev->device_type = SPEN;
+							//enable = (!!(dev->vals[i].value) ^ !(pen_booster.multi_events)) ? !!(dev->vals[i].value) : -1;
+							if (dev->vals[i].value && !pen_booster.multi_events) {
+								ret_val = 1;
+							} else if (!dev->vals[i].value && pen_booster.multi_events) {
+								ret_val = 0;
+							}
+					}
+					break;
+				case BTN_TOOL_PEN:
+					dev->device_type = HOVER;
+					if (dev->vals[i].value && !hover_booster.multi_events) {
+						ret_val = 1;
+					} else if (!dev->vals[i].value && hover_booster.multi_events) {
+						ret_val = 0;
+					}
+					break;
+				case KEY_BACK:
+				case KEY_HOMEPAGE:
+				case KEY_RECENT:
+					dev->device_type = TOUCH_KEY;
+					if (dev->vals[i].value) {
+						ret_val = 1;
+					} else {
+						ret_val = 0;
+					}
+					break;
+				case KEY_VOLUMEUP:
+				case KEY_VOLUMEDOWN:
+				case KEY_POWER:
+				case KEY_WINK:
+					dev->device_type = KEY;
+					if (dev->vals[i].value) {
+						ret_val = 1;
+					} else {
+						ret_val = 0;
+					}
+					break;
+				default:
+					break;
+			}
+		} else if (dev->vals[i].type == EV_ABS) {
+			switch (dev->vals[i].code) {
+				case ABS_MT_TRACKING_ID:
+					if ( dev->vals[i].value >= 0 ) { /* Checking if Touch-Slot Exists */
+						dev->touch_slot_cnt++;
+					} else {
+						dev->touch_slot_cnt--;
+					}
+					if ( dev->touch_slot_cnt <= MAX_EVENTS) {
+						if ( dev->vals[i].value > 0 ) {
+							ret_val = 1;
+							if (dev->touch_slot_cnt == 1) {
+								dev->device_type = TOUCH;
+							} else if(dev->touch_slot_cnt >= 2) {
+								dev->device_type = MULTI_TOUCH;
+							}
+						} else {
+							if (dev->touch_slot_cnt == 0) {
+								ret_val = 0;
+								dev->device_type = TOUCH;
+							} else if (dev->touch_slot_cnt == 1) {
+								ret_val = 0;
+								dev->device_type = MULTI_TOUCH;
+							}
+						}
+					}
+			}
+		} else if (dev->vals[i].type == EV_MSC && dev->vals[i].code == MSC_SCAN) {
+			if (i+1 < dev->prev_num_vals && i+1 < dev->max_vals) {
+				if (dev->vals[i+1].type == EV_KEY) {
+					switch (dev->vals[i+1].code) {
+					case BTN_LEFT: /* Checking Touch Button Event */
+					case BTN_RIGHT:
+					case BTN_MIDDLE:
+						dev->device_type = MOUSE;
+						if (dev->vals[i+1].value) {
+							ret_val = 1;
+						} else {
+							ret_val = 0;
+						}
+						break;
+					default: /* Checking Keyboard Event */
+						dev->device_type = KEYBOARD;
+						if (dev->vals[i+1].value) {
+							ret_val = 1;
+						} else {
+							ret_val = 0;
+						}
+						break;
+					}
+				}
+			}
+		} else if (dev->vals[i].type == EV_REL && dev->vals[i].code == REL_WHEEL && dev->vals[i].value) {
+			dev->device_type = MOUSH_WHEEL;
+			ret_val = 1;
+		}
+	}
+	return ret_val;
+}
 
 // ********** Detect Events ********** //
 void input_booster(struct input_dev *dev)
 {
-	int i, j, iTouchID = -1, iTouchSlot = -1/*,lcdoffcounter = 0*/;
+	if (dev == NULL)
+		return;
 
-	for (i = 0; i < input_count && i < MAX_EVENTS; i++) {
-		if (input_events[i].type == EV_KEY) {
-			switch (input_events[i].code) {
-			case BTN_TOUCH:
-				if (input_events[i+1].type == EV_ABS && input_events[i+1].code == ABS_PRESSURE) {
-					if (input_events[i].value && !pen_booster.multi_events) {
-						pr_booster("[Input Booster] PEN EVENT - PRESS\n");
-						RUN_BOOSTER(pen, BOOSTER_ON);
-					} else if (!input_events[i].value && pen_booster.multi_events) {
-						pr_booster("[Input Booster] PEN EVENT - RELEASE\n");
-						RUN_BOOSTER(pen, BOOSTER_OFF);
-					}
-				} else if (iTouchID >= 0) { // ***************** Checking Touch Event's ID whethere it is same with previous ID.
-					if (!input_events[i].value && input_events[iTouchID].value < 0) {  // If this event is 'Release'
-						for (j = 0; j < MAX_MULTI_TOUCH_EVENTS; j++) {
-							TouchIDs[j] = -1;
-						}
-					}
-				}
-				break;
-			case BTN_TOOL_PEN:
-				if (input_events[i].value && !hover_booster.multi_events) {
-					pr_booster("[Input Booster] PEN EVENT - HOVER ON\n");
-					RUN_BOOSTER(hover, BOOSTER_ON);
-				} else if (!input_events[i].value && hover_booster.multi_events) {
-					pr_booster("[Input Booster] PEN EVENT - HOVER OFF\n");
-					RUN_BOOSTER(hover, BOOSTER_OFF);
-				}
-				break;
-			case KEY_BACK: // ***************** Checking Key & Touch key Event
-				if (key_back != input_events[i].value) {
-					key_back = input_events[i].value;
-					pr_booster("[Input Booster] TOUCHKEY EVENT - %s\n", (input_events[i].value) ? "PRESS" : "RELEASE");
-					RUN_BOOSTER(touchkey, (input_events[i].value) ? BOOSTER_ON : BOOSTER_OFF);
-				}
-				break;
-			case KEY_HOMEPAGE:
-				if (key_home != input_events[i].value) {
-					key_home = input_events[i].value;
-					pr_booster("[Input Booster] TOUCHKEY EVENT - %s\n", (input_events[i].value) ? "PRESS" : "RELEASE");
-					RUN_BOOSTER(touchkey, (input_events[i].value) ? BOOSTER_ON : BOOSTER_OFF);
-				}
-				break;
-			case KEY_RECENT:
-				if (key_recent != input_events[i].value) {
-					key_recent = input_events[i].value;
-					pr_booster("[Input Booster] TOUCHKEY EVENT - %s\n", (input_events[i].value) ? "PRESS" : "RELEASE");
-					RUN_BOOSTER(touchkey, (input_events[i].value) ? BOOSTER_ON : BOOSTER_OFF);
-				}
-				break;
-			case KEY_VOLUMEUP:
-			case KEY_VOLUMEDOWN:
-			case KEY_POWER:
-				pr_booster("[Input Booster] KEY EVENT - %s\n", (input_events[i].value) ? "PRESS" : "RELEASE");
-				RUN_BOOSTER(key, (input_events[i].value) ? BOOSTER_ON : BOOSTER_OFF);
-				break;
-			case KEY_WINK:
-				pr_booster("[Input Booster] key_two KEY EVENT - %s\n", (input_events[i].value) ? "PRESS" : "RELEASE");
-				RUN_BOOSTER(key_two, (input_events[i].value) ? BOOSTER_ON : BOOSTER_OFF);
-				break;
-			default:
-				break;
-			}
-		} else if (input_events[i].type == EV_ABS) {
-			if (input_events[i].code == ABS_MT_TRACKING_ID) {
-				iTouchID = i;
-				if (iTouchSlot >= 0 && iTouchSlot <= MAX_EVENTS) {
-					if (input_events[iTouchSlot].value < MAX_MULTI_TOUCH_EVENTS && input_events[iTouchSlot].value >= 0 && iTouchID < MAX_EVENTS) {
-						if (TouchIDs[input_events[iTouchSlot].value] < 0 && input_events[iTouchID].value >= 0) {
-							TouchIDs[input_events[iTouchSlot].value] = input_events[iTouchID].value;
-							if ((input_events[iTouchSlot].value >= 0 && touch_booster.multi_events <= 0) || (input_events[iTouchSlot].value == 0 && TouchIDs[1] < 0)) {
-								touch_booster.multi_events = 0;
-								pr_booster("[Input Booster] TOUCH EVENT - PRESS - ID: 0x%x, Slot: 0x%x, multi : %d\n", input_events[iTouchID].value, input_events[iTouchSlot].value, touch_booster.multi_events);
-								RUN_BOOSTER(touch, BOOSTER_ON);
-							} else {
-								pr_booster("[Input Booster] MULTI-TOUCH EVENT - PRESS - ID: 0x%x, Slot: 0x%x, multi : %d\n", input_events[iTouchID].value, input_events[iTouchSlot].value, touch_booster.multi_events);
-								touch_booster.multi_events++;
-								RUN_BOOSTER(multitouch, BOOSTER_ON);
-#if defined(CONFIG_ARCH_EXYNOS)
-								if (delayed_work_pending(&touch_booster.input_booster_timeout_work[0])) {
-									int temp_hmp_boost = touch_booster.param[0].hmp_boost, temp_index = touch_booster.index;
-									pr_booster("[Input Booster] ****             cancel the pending touch booster workqueue\n");
-									cancel_delayed_work(&touch_booster.input_booster_timeout_work[0]);
-									touch_booster.param[0].hmp_boost = multitouch_booster.param[0].hmp_boost;
-									touch_booster.index = 1;
-									TIMEOUT_FUNC(touch)(NULL);
-									touch_booster.param[0].hmp_boost = temp_hmp_boost;
-									touch_booster.index = (temp_index >= 2 ? 1 : temp_index);
-								}
-#endif
-							}
-						} else if (TouchIDs[input_events[iTouchSlot].value] >= 0 && input_events[iTouchID].value < 0) {
-							TouchIDs[input_events[iTouchSlot].value] = input_events[iTouchID].value;
-							if (touch_booster.multi_events <= 1) {
-								pr_booster("[Input Booster] TOUCH EVENT - RELEASE - ID: 0x%x, Slot: 0x%x, multi : %d\n", input_events[iTouchID].value, input_events[iTouchSlot].value, touch_booster.multi_events);
-								RUN_BOOSTER(touch, BOOSTER_OFF);
-							} else {
-								pr_booster("[Input Booster] MULTI-TOUCH EVENT - RELEASE - ID: 0x%x, Slot: 0x%x, multi : %d\n", input_events[iTouchID].value, input_events[iTouchSlot].value, touch_booster.multi_events);
-								touch_booster.multi_events--;
-								RUN_BOOSTER(multitouch, BOOSTER_OFF);
-							}
-						}
-					}
-				}
-			} else if (input_events[i].code == ABS_MT_SLOT) {
-				iTouchSlot = i;
-				/*
-				if (input_events[iTouchSlot + 1].value < 0) {
-					lcdoffcounter++;
-				}
-				if (lcdoffcounter >= 10) {
-					touch_booster.multi_events = 0;
-					multitouch_booster.multi_events = 0;
-					keyboard_booster.multi_events = 0;
-					pr_booster("[Input Booster] Multi events are reset  %d\n", lcdoffcounter);
-				}
-				*/
-			}
-		} else if (input_events[i].type == EV_MSC && input_events[i].code == MSC_SCAN) {
-			if (input_events[i+1].type == EV_KEY) {
-				switch (input_events[i+1].code) {
-				case BTN_LEFT: // ***************** Checking Touch Button Event
-				case BTN_RIGHT:
-				case BTN_MIDDLE:
-					pr_booster("[Input Booster] MOUSE EVENT - %s\n", (input_events[i+1].value) ? "PRESS" : "RELEASE");
-					RUN_BOOSTER(mouse, (input_events[i+1].value) ? BOOSTER_ON : BOOSTER_OFF);
-					break;
-				default: // ***************** Checking Keyboard Event
-					pr_booster("[Input Booster] KEYBOARD EVENT - %s (multi count %d)\n", (input_events[i+1].value) ? "PRESS" : "RELEASE", keyboard_booster.multi_events);
-					RUN_BOOSTER(keyboard, (input_events[i+1].value) ? BOOSTER_ON : BOOSTER_OFF);
-					break;
-				}
-			}
-		} else if (input_events[i].type == EV_REL && input_events[i].code == REL_WHEEL && input_events[i].value) { // ***************** Wheel Event for Mouse
-			if (input_events[0].type == EV_KEY && input_events[0].code == BTN_LEFT) {
-				pr_booster("[Input Booster] MOUSE EVENT - %s\n", "WHELL");
-				RUN_BOOSTER(mouse_wheel, BOOSTER_ON);
-			}
+	int enable = get_device_type(dev);
+
+	if (dev->device_type <= NONE_TYPE_DEVICE || dev->device_type >= MAX_BOOSTER_CNT || enable < 0){
+		return;
+	}
+	if(device_type_infos[dev->device_type].input_booster_dt == NULL){
+		pr_err("[Input Booster2] input_booster_dt is null And Event - %s :::: device_type : %d \n", (enable) ? "PRESS" : "RELEASE", dev->device_type);
+		return;
+	}
+	if(device_type_infos[dev->device_type].input_booster == NULL){
+		pr_err("[Input Booster2] input_booster is null And Event - %s :::: device_type : %d \n", (enable) ? "PRESS" : "RELEASE", dev->device_type);
+		return;
+	}
+
+	pr_booster("[Input Booster2] %s EVENT - %s \n", device_type_infos[dev->device_type].input_booster_dt->pDT->label, 
+		(enable) ? "PRESS" : "RELEASE");
+
+	if (device_type_infos[dev->device_type].input_booster_dt->level > 0) {
+		device_type_infos[dev->device_type].input_booster->event_type = enable;
+		if (enable == BOOSTER_ON) {
+			device_type_infos[dev->device_type].input_booster->level = -1;
+			device_type_infos[dev->device_type].input_booster->multi_events++;
+		}else {
+			device_type_infos[dev->device_type].input_booster->multi_events--;
 		}
+		schedule_work(&device_type_infos[dev->device_type].input_booster->input_booster_set_booster_work);
 	}
 }
 
@@ -738,12 +760,7 @@ void input_booster_init(void)
 			device_count++;
 		}
 	}
-
-	// ********** Initialize Buffer for Touch **********
-	for (i = 0; i < MAX_MULTI_TOUCH_EVENTS; i++) {
-		TouchIDs[i] = -1;
-	}
-
+	
 	// ********** Initialize Booster **********
 	INIT_BOOSTER(touch)
 	INIT_BOOSTER(multitouch)
@@ -754,7 +771,6 @@ void input_booster_init(void)
 	INIT_BOOSTER(mouse_wheel)
 	INIT_BOOSTER(pen)
 	INIT_BOOSTER(hover)
-	INIT_BOOSTER(key_two)
 	multitouch_booster.change_on_release = 1;
 
 	// ********** Initialize Sysfs **********
@@ -767,6 +783,7 @@ void input_booster_init(void)
 			return;
 		}
 
+		INIT_SYSFS_CLASS(enable_event)
 		INIT_SYSFS_CLASS(debug_level)
 		INIT_SYSFS_CLASS(head)
 		INIT_SYSFS_CLASS(tail)
@@ -781,8 +798,28 @@ void input_booster_init(void)
 		INIT_SYSFS_DEVICE(mouse_wheel)
 		INIT_SYSFS_DEVICE(pen)
 		INIT_SYSFS_DEVICE(hover)
-		INIT_SYSFS_DEVICE(key_two)
 	}
+
+	//Input Device Info Initialize
+	device_type_infos[TOUCH].input_booster = &touch_booster;
+	device_type_infos[TOUCH].input_booster_dt = &touch_booster_dt;
+	device_type_infos[MULTI_TOUCH].input_booster = &multitouch_booster; 
+	device_type_infos[MULTI_TOUCH].input_booster_dt = &multitouch_booster_dt;
+	device_type_infos[KEY].input_booster = &key_booster; 
+	device_type_infos[KEY].input_booster_dt = &key_booster_dt;
+	device_type_infos[TOUCH_KEY].input_booster = &touchkey_booster; 
+	device_type_infos[TOUCH_KEY].input_booster_dt = &touchkey_booster_dt;
+	device_type_infos[KEYBOARD].input_booster = &keyboard_booster; 
+	device_type_infos[KEYBOARD].input_booster_dt = &keyboard_booster_dt;
+	device_type_infos[MOUSE].input_booster = &mouse_booster; 
+	device_type_infos[MOUSE].input_booster_dt = &mouse_booster_dt;
+	device_type_infos[MOUSH_WHEEL].input_booster = &mouse_wheel_booster;
+	device_type_infos[MOUSH_WHEEL].input_booster_dt = &mouse_wheel_booster_dt;
+	device_type_infos[SPEN].input_booster = &pen_booster;
+	device_type_infos[SPEN].input_booster_dt = &pen_booster_dt;
+	device_type_infos[HOVER].input_booster = &hover_booster; 
+	device_type_infos[HOVER].input_booster_dt = &hover_booster_dt;
+
 #if defined(CONFIG_ARCH_QCOM)
 	fill_bus_vector();
 	for (i = 0; i < touch_reg_bus_scale_table.num_usecases; i++) {
@@ -826,32 +863,20 @@ void input_event(struct input_dev *dev,
 		 unsigned int type, unsigned int code, int value)
 {
 	unsigned long flags;
-    int idx = 0;
 
 	if (is_event_supported(type, dev->evbit, EV_MAX)) {
 
 		spin_lock_irqsave(&dev->event_lock, flags);
 		input_handle_event(dev, type, code, value);
-		spin_unlock_irqrestore(&dev->event_lock, flags);
 
 		if (device_tree_infor != NULL) {
-			if (type == EV_SYN && input_count > 0) {
+			if(dev->num_vals == 0 && dev->prev_num_vals > 0 ){
 				pr_booster("[Input Booster1] ==============================================\n");
 				input_booster(dev);
-				input_count = 0;
-			} else if (input_count < MAX_EVENTS) {
-				pr_booster("[Input Booster1] type = %x, code = %x, value =%x\n", type, code, value);
-				idx = input_count;
-				input_events[idx].type = type;
-				input_events[idx].code = code;
-				input_events[idx].value = value;
-				if (idx < MAX_EVENTS) {
-					input_count = idx + 1 ;
-				}
-			} else {
-				pr_booster("[Input Booster1] type = %x, code = %x, value =%x   Booster Event Exceeded\n", type, code, value);
+				dev->prev_num_vals = 0;
 			}
 		}
+		spin_unlock_irqrestore(&dev->event_lock, flags);
 	}
 }
 EXPORT_SYMBOL(input_event);
@@ -883,6 +908,13 @@ void input_inject_event(struct input_handle *handle,
 			input_handle_event(dev, type, code, value);
 		rcu_read_unlock();
 
+		if (device_tree_infor != NULL) {
+			if(enable_event_booster && dev->num_vals == 0 && dev->prev_num_vals > 0 ){
+				pr_booster("[Input Booster1] ==============================================\n");
+				input_booster(dev);
+				dev->prev_num_vals = 0;
+			}
+		}
 		spin_unlock_irqrestore(&dev->event_lock, flags);
 	}
 }
@@ -2875,9 +2907,7 @@ void input_unregister_handle(struct input_handle *handle)
 	list_del_rcu(&handle->d_node);
 	mutex_unlock(&dev->mutex);
 
-	pr_err("sec_input: %s: dev:%s++\n", __func__, dev->name);
 	synchronize_rcu();
-	pr_err("sec_input: %s: dev:%s--\n", __func__, dev->name);
 }
 EXPORT_SYMBOL(input_unregister_handle);
 

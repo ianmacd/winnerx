@@ -653,8 +653,19 @@ static int resolve_dedicated_dev(muic_data_t *pmuic, muic_attached_dev_t *pdev, 
 		pmuic->keyboard_state = 1;
 	else
 		pmuic->keyboard_state = 0;
-#if !defined(CONFIG_SEC_FACTORY)
+
 	new_dev = keyboard_chgtyp_to_dev(chgtyp, pmuic->attached_dev);
+
+#if defined(CONFIG_SEC_FACTORY)
+	if ((adc != ADC_OPEN) && (adc != ADC_KEYBOARDDOCK))
+#if defined(CONFIG_MUIC_SM5705_SWITCH_CONTROL_GPIO)		
+		if (adc != ADC_UART_CABLE)
+#endif
+	{
+		pr_info("%s: Detect PBA array Cable in PBA array(0x%x)\n", __func__, adc);
+		goto skip_pogo_wa;
+	}
+#endif
 
 	/* POGO ID + VBUS case, device type doesn't appear so check charger type */
 	if (pmuic->opmode & OPMODE_CCIC && (val1 | val2 | val3) == 0 && vbvolt == 1 && new_dev == ATTACHED_DEV_UNKNOWN_MUIC &&
@@ -670,6 +681,8 @@ static int resolve_dedicated_dev(muic_data_t *pmuic, muic_attached_dev_t *pdev, 
 		*pdev = new_dev;
 		return 0;
 	}
+#if defined(CONFIG_SEC_FACTORY)
+skip_pogo_wa:
 #endif
 #endif
 

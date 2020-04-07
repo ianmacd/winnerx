@@ -23,6 +23,7 @@
 #include <asm/memory.h>
 #include <asm/pgtable-hwdef.h>
 #include <asm/pgtable-prot.h>
+
 #ifdef CONFIG_UH
 #include <linux/uh.h>
 #ifdef CONFIG_UH_RKP
@@ -208,27 +209,6 @@ static inline pmd_t pmd_mkcont(pmd_t pmd)
 	return __pmd(pmd_val(pmd) | PMD_SECT_CONT);
 }
 
-#ifdef CONFIG_UH_RKP
-static inline void rkp_flush_cache(u64 addr)                                    
-{                                                                               
-    asm volatile(                                                               
-            "mov x1, %0\n"                                                      
-            "dc civac, x1\n"                                                    
-            :                                                                   
-            : "r" (addr)                                                        
-            : "x1", "memory" );                                                 
-}                                                                               
-static inline void rkp_inv_cache(u64 addr)                                      
-{                                                                               
-    asm volatile(                                                               
-            "mov x1, %0\n"                                                      
-            "dc ivac, x1\n"                                                     
-            :                                                                   
-            : "r" (addr)                                                        
-            : "x1", "memory" );                                                 
-}
-#endif
-
 static inline void set_pte(pte_t *ptep, pte_t pte)
 {
 #ifdef CONFIG_ARM64_STRICT_BREAK_BEFORE_MAKE
@@ -258,26 +238,16 @@ pte_bad:
 	isb();
 pte_ok:
 #endif
+
 #ifdef CONFIG_UH_RKP
 	/* bug on double mapping */
 	BUG_ON(pte_val(pte) && rkp_is_pg_dbl_mapped(pte_val(pte)));
  
 	if (rkp_is_pg_protected((u64)ptep)) {
-		rkp_flush_cache((u64)ptep);		
 		uh_call(UH_APP_RKP, RKP_WRITE_PGT3, (u64)ptep, pte_val(pte), 0, 0);
-		rkp_flush_cache((u64)ptep);
-	} else {
-		asm volatile(
-		"mov x1, %0\n"
-		"mov x2, %1\n"
-		"str x2, [x1]\n"
-		:
-		: "r" (ptep), "r" (pte)
-		: "x1", "x2", "memory");
-	}
-#else
-	*ptep = pte;
+	} else
 #endif
+	*ptep = pte;
 	/*
 	 * Only if the new pte is valid and kernel, otherwise TLB maintenance
 	 * or update_mmu_cache() have the necessary barriers.
@@ -480,24 +450,11 @@ extern pgprot_t phys_mem_access_prot(struct file *file, unsigned long pfn,
 static inline void set_pmd(pmd_t *pmdp, pmd_t pmd)
 {
 #ifdef CONFIG_UH_RKP
-
-	if (rkp_def_init_done || rkp_is_pg_protected((u64)pmdp)) {
-		rkp_flush_cache((u64)pmdp);
+	if (rkp_is_pg_protected((u64)pmdp)) {
 		uh_call(UH_APP_RKP, RKP_WRITE_PGT2, (u64)pmdp, pmd_val(pmd), 0, 0);
-		rkp_flush_cache((u64)pmdp);
-	} else {
-		asm volatile(
-		"mov x1, %0\n"
-		"mov x2, %1\n"
-		"str x2, [x1]\n"
-		:
-		: "r" (pmdp), "r" (pmd)
-		: "x1", "x2", "memory");
-		
-	}
-#else
-	*pmdp = pmd;
+	} else
 #endif
+	*pmdp = pmd;
 	dsb(ishst);
 	isb();
 }
@@ -554,22 +511,11 @@ static inline unsigned long pmd_page_vaddr(pmd_t pmd)
 static inline void set_pud(pud_t *pudp, pud_t pud)
 {
 #ifdef CONFIG_UH_RKP
-	if (rkp_def_init_done || rkp_is_pg_protected((u64)pudp)) {
-		rkp_flush_cache((u64)pudp);
+	if (rkp_is_pg_protected((u64)pudp)) {
 		uh_call(UH_APP_RKP, RKP_WRITE_PGT1, (u64)pudp, pud_val(pud), 0, 0);
-		rkp_flush_cache((u64)pudp);
-	} else {
-		asm volatile(
-		"mov x1, %0\n"
-		"mov x2, %1\n"
-		"str x2, [x1]\n"
-		:
-		: "r" (pudp), "r" (pud)
-		: "x1", "x2", "memory");
-	}
-#else
-	*pudp = pud;
+	} else
 #endif
+	*pudp = pud;
 	dsb(ishst);
 	isb();
 }

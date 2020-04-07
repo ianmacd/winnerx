@@ -1711,6 +1711,15 @@ static void fw_update(void *device_data)
 	int retval = 0;
 
 	sec_cmd_set_default_result(sec);
+#if defined(CONFIG_SAMSUNG_PRODUCT_SHIP)
+	if (sec->cmd_param[0] == 1) {
+		input_err(true, &ts->client->dev, "%s: user_ship, skip\n", __func__);
+		snprintf(buff, sizeof(buff), "OK");
+		sec_cmd_set_cmd_result(sec, buff, strnlen(buff, sizeof(buff)));
+		sec->cmd_state = SEC_CMD_STATUS_OK;
+		return;
+	}
+#endif
 	if (ts->power_status == SEC_TS_STATE_POWER_OFF) {
 		input_err(true, &ts->client->dev, "%s: [ERROR] Touch is stopped\n",
 				__func__);
@@ -3614,7 +3623,11 @@ void sec_ts_run_rawdata_all(struct sec_ts_data *ts, bool full_read)
 		TYPE_SIGNAL_DATA, TYPE_OFFSET_DATA_SEC, TYPE_OFFSET_DATA_SDC};
 
 	ts->tsp_dump_lock = 1;
+#ifdef CONFIG_TOUCHSCREEN_DUAL_FOLDABLE
+	input_raw_data_clear(MAIN_TOUCH);
+#else
 	input_raw_data_clear();
+#endif
 	input_raw_info(true, &ts->client->dev,
 			"%s: start (noise:%d, wet:%d)##\n",
 			__func__, ts->touch_noise_status, ts->wet_mode);
@@ -5716,11 +5729,13 @@ static void fod_enable(void *device_data)
 	else
 		ts->lowpower_mode &= ~SEC_TS_MODE_SPONGE_PRESS;
 
-	ts->press_prop = !!sec->cmd_param[1];
+	ts->press_prop = (sec->cmd_param[1] & 0x01) | ((sec->cmd_param[2] & 0x01) << 1);
 
-	input_info(true, &ts->client->dev, "%s: %s, fast:%d, %02X\n",
+	input_info(true, &ts->client->dev, "%s: %s, fast:%s, strict:%s, %02X\n",
 			__func__, sec->cmd_param[0] ? "on" : "off",
-			ts->press_prop, ts->lowpower_mode);
+			ts->press_prop & 1 ? "on" : "off",
+			ts->press_prop & 2 ? "on" : "off",
+			ts->lowpower_mode);
 
 	mutex_lock(&ts->modechange);
 	if (ts->input_closed && !ts->lowpower_mode && !ts->ed_enable) {
@@ -6580,8 +6595,13 @@ int sec_ts_fn_init(struct sec_ts_data *ts)
 {
 	int retval = 0;
 
+#ifdef CONFIG_TOUCHSCREEN_DUAL_FOLDABLE
+	retval = sec_cmd_init(&ts->sec, sec_cmds,
+			ARRAY_SIZE(sec_cmds), SEC_CLASS_DEVT_TSP1);
+#else
 	retval = sec_cmd_init(&ts->sec, sec_cmds,
 			ARRAY_SIZE(sec_cmds), SEC_CLASS_DEVT_TSP);
+#endif
 	if (retval < 0) {
 		input_err(true, &ts->client->dev,
 				"%s: Failed to sec_cmd_init\n", __func__);
@@ -6620,5 +6640,9 @@ void sec_ts_fn_remove(struct sec_ts_data *ts)
 	sysfs_remove_group(&ts->sec.fac_dev->kobj,
 			&cmd_attr_group);
 
+#ifdef CONFIG_TOUCHSCREEN_DUAL_FOLDABLE
+	sec_cmd_exit(&ts->sec, SEC_CLASS_DEVT_TSP1);
+#else
 	sec_cmd_exit(&ts->sec, SEC_CLASS_DEVT_TSP);
+#endif
 }

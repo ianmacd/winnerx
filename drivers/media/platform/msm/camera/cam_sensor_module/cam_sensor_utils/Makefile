@@ -11,5 +11,6 @@ ccflags-y += -Idrivers/media/platform/msm/camera/cam_sensor_module/cam_ois
 ccflags-y += -Idrivers/media/platform/msm/camera/cam_sensor_module/cam_eeprom
 ccflags-y += -Idrivers/media/platform/msm/camera/cam_sensor_module/cam_actuator
 ccflags-y += -Idrivers/media/platform/msm/camera/cam_sensor_module/cam_aperture
+ccflags-y += -Idrivers/media/platform/msm/camera/cam_sensor_module/cam_flash
 
 obj-$(CONFIG_SPECTRA_CAMERA) +=  cam_sensor_util.o cam_sysfs_init.o

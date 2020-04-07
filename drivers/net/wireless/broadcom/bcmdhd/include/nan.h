@@ -25,7 +25,7 @@
  *
  * <<Broadcom-WL-IPTag/Open:>>
  *
- * $Id: nan.h 810587 2019-03-20 13:31:04Z $
+ * $Id: nan.h 818571 2019-05-08 04:36:41Z $
  */
 #ifndef _NAN_H_
 #define _NAN_H_
@@ -291,6 +291,16 @@ typedef BWL_PRE_PACKED_STRUCT struct wifi_nan_ibss_attr_s {
 	/* avail. intervals bitmap, var len  */
 	uint8 avail_bmp[1];
 } BWL_POST_PACKED_STRUCT wifi_nan_ibss_attr_t;
+
+/* Country code attribute  */
+typedef BWL_PRE_PACKED_STRUCT struct wifi_nan_country_code_attr_s {
+	/* Attribute ID - 0x0B. */
+	uint8 id;
+	/* Length of the following fields in the attribute */
+	uint16 len;
+	/* Condensed Country String first two octets */
+	uint8 country_str[2];
+} BWL_POST_PACKED_STRUCT wifi_nan_country_code_attr_t;
 
 /* Further Availability MAP attr  */
 typedef BWL_PRE_PACKED_STRUCT struct wifi_nan_favail_attr_s {

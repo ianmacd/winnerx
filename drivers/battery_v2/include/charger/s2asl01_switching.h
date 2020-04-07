@@ -155,6 +155,7 @@ struct s2asl01_platform_data {
 	int bat_int;
 	int bat_enb;
 	int chg_current_limit;
+	int chg_current_max;
 	int eoc; /* for interrupt setting, not used */
 	int float_voltage; /* for interrupt setting, not used */
 	int hys_vchg_level;
@@ -162,6 +163,7 @@ struct s2asl01_platform_data {
 	int hys_ichg_level;
 	int hys_idischg_level;
 	bool tsd_en;
+	unsigned int charging_rate;
 };
 
 struct s2asl01_switching_data {

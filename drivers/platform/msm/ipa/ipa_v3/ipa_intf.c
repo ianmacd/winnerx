@@ -400,6 +400,8 @@ static int wlan_msg_process(struct ipa_msg_meta *meta, void *buff)
 	uint8_t mac[IPA_MAC_ADDR_SIZE];
 	uint8_t mac2[IPA_MAC_ADDR_SIZE];
 
+	if (!buff)
+		return -EINVAL;
 	if (meta->msg_type == WLAN_CLIENT_CONNECT_EX) {
 		/* debug print */
 		event_ex_cur_con = buff;
@@ -726,12 +728,6 @@ ssize_t ipa3_read(struct file *filp, char __user *buf, size_t count,
 		if (msg) {
 			locked = 0;
 			mutex_unlock(&ipa3_ctx->msg_lock);
-			if (count < sizeof(struct ipa_msg_meta)) {
-				kfree(msg);
-				msg = NULL;
-				ret = -EFAULT;
-				break;
-			}
 			if (copy_to_user(buf, &msg->meta,
 					  sizeof(struct ipa_msg_meta))) {
 				ret = -EFAULT;
@@ -742,15 +738,8 @@ ssize_t ipa3_read(struct file *filp, char __user *buf, size_t count,
 			buf += sizeof(struct ipa_msg_meta);
 			count -= sizeof(struct ipa_msg_meta);
 			if (msg->buff) {
-				if (count >= msg->meta.msg_len) {
-					if (copy_to_user(buf, msg->buff,
-							msg->meta.msg_len)) {
-						ret = -EFAULT;
-						kfree(msg);
-						msg = NULL;
-						break;
-					}
-				} else {
+				if (copy_to_user(buf, msg->buff,
+						  msg->meta.msg_len)) {
 					ret = -EFAULT;
 					kfree(msg);
 					msg = NULL;
@@ -764,6 +753,7 @@ ssize_t ipa3_read(struct file *filp, char __user *buf, size_t count,
 			IPA_STATS_INC_CNT(
 				ipa3_ctx->stats.msg_r[msg->meta.msg_type]);
 			kfree(msg);
+			msg = NULL;
 		}
 
 		ret = -EAGAIN;

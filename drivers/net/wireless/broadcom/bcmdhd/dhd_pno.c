@@ -25,7 +25,7 @@
  *
  * <<Broadcom-WL-IPTag/Open:>>
  *
- * $Id: dhd_pno.c 805174 2019-02-15 17:26:01Z $
+ * $Id: dhd_pno.c 812762 2019-04-02 09:36:26Z $
  */
 
 #if defined(GSCAN_SUPPORT) && !defined(PNO_SUPPORT)
@@ -227,12 +227,11 @@ dhd_pno_idx_to_ssid(struct dhd_pno_gscan_params *gscan_params,
 
 	if (gscan_params->epno_cfg.num_epno_ssid > 0) {
 		i = 0;
-#if defined(STRICT_GCC_WARNINGS) && defined(__GNUC__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wcast-qual"
-#endif // endif
+
+		GCC_DIAGNOSTIC_PUSH_SUPPRESS_CAST();
 		list_for_each_entry_safe(iter, next,
 			&gscan_params->epno_cfg.epno_ssid_list, list) {
+			GCC_DIAGNOSTIC_POP();
 			if (i++ == idx) {
 				memcpy(res->ssid, iter->SSID, iter->SSID_len);
 				res->ssid_len = iter->SSID_len;
@@ -650,11 +649,9 @@ _dhd_pno_add_ssid(dhd_pub_t *dhd, struct list_head* ssid_list, int nssid)
 		return BCME_NOMEM;
 	}
 
-#if defined(STRICT_GCC_WARNINGS) && defined(__GNUC__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wcast-qual"
-#endif // endif
+	GCC_DIAGNOSTIC_PUSH_SUPPRESS_CAST();
 	list_for_each_entry_safe(iter, next, ssid_list, list) {
+		GCC_DIAGNOSTIC_POP();
 		pfn_elem_buf[i].infra = htod32(1);
 		pfn_elem_buf[i].auth = htod32(DOT11_OPEN_SYSTEM);
 		pfn_elem_buf[i].wpa_auth = htod32(iter->wpa_auth);
@@ -678,6 +675,7 @@ _dhd_pno_add_ssid(dhd_pub_t *dhd, struct list_head* ssid_list, int nssid)
 			break;
 		}
 	}
+
 	err = dhd_iovar(dhd, 0, "pfn_add", (char *)pfn_elem_buf, mem_needed, NULL, 0, TRUE);
 	if (err < 0) {
 		DHD_ERROR(("%s : failed to execute pfn_add\n", __FUNCTION__));
@@ -810,15 +808,10 @@ _dhd_pno_convert_format(dhd_pub_t *dhd, struct dhd_pno_batch_params *params_batc
 	}
 	DHD_PNO(("%s scancount %d\n", __FUNCTION__, params_batch->get_batch.expired_tot_scan_cnt));
 	/* preestimate scan count until which scan result this report is going to end */
-#if defined(STRICT_GCC_WARNINGS) && defined(__GNUC__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wcast-qual"
-#endif // endif
+	GCC_DIAGNOSTIC_PUSH_SUPPRESS_CAST();
 	list_for_each_entry_safe(siter, snext,
 		&params_batch->get_batch.expired_scan_results_list, list) {
-#if defined(STRICT_GCC_WARNINGS) && defined(__GNUC__)
-#pragma GCC diagnostic pop
-#endif // endif
+		GCC_DIAGNOSTIC_POP();
 		phead = siter->bestnetheader;
 		while (phead != NULL) {
 			/* if left_size is less than bestheader total size , stop this */
@@ -834,15 +827,10 @@ _dhd_pno_convert_format(dhd_pub_t *dhd, struct dhd_pno_batch_params *params_batc
 				bp += nreadsize = snprintf(bp, nleftsize, "trunc\n");
 				nleftsize -= nreadsize;
 			}
-#if defined(STRICT_GCC_WARNINGS) && defined(__GNUC__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wcast-qual"
-#endif // endif
+			GCC_DIAGNOSTIC_PUSH_SUPPRESS_CAST();
 			list_for_each_entry_safe(iter, next,
 				&phead->entry_list, list) {
-#if defined(STRICT_GCC_WARNINGS) && defined(__GNUC__)
-#pragma GCC diagnostic pop
-#endif // endif
+				GCC_DIAGNOSTIC_POP();
 				t_delta = jiffies_to_msecs(jiffies - iter->recorded_time);
 #ifdef PNO_DEBUG
 				_base_bp = bp;
@@ -910,14 +898,9 @@ exit:
 	}
 	params_batch->get_batch.expired_tot_scan_cnt -= cnt;
 	/* set FALSE only if the link list  is empty after returning the data */
-#if defined(STRICT_GCC_WARNINGS) && defined(__GNUC__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wcast-qual"
-#endif // endif
+	GCC_DIAGNOSTIC_PUSH_SUPPRESS_CAST();
 	if (list_empty(&params_batch->get_batch.expired_scan_results_list)) {
-#if defined(STRICT_GCC_WARNINGS) && defined(__GNUC__)
-#pragma GCC diagnostic pop
-#endif // endif
+		GCC_DIAGNOSTIC_POP();
 		params_batch->get_batch.batch_started = FALSE;
 		bp += snprintf(bp, nleftsize, "%s", RESULTS_END_MARKER);
 		DHD_PNO(("%s", RESULTS_END_MARKER));
@@ -939,10 +922,8 @@ _dhd_pno_clear_all_batch_results(dhd_pub_t *dhd, struct list_head *head, bool on
 	NULL_CHECK(head, "head is NULL", err);
 	NULL_CHECK(head->next, "head->next is NULL", err);
 	DHD_PNO(("%s enter\n", __FUNCTION__));
-#if defined(STRICT_GCC_WARNINGS) && defined(__GNUC__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wcast-qual"
-#endif // endif
+
+	GCC_DIAGNOSTIC_PUSH_SUPPRESS_CAST();
 	list_for_each_entry_safe(siter, snext,
 		head, list) {
 		if (only_last) {
@@ -971,9 +952,7 @@ _dhd_pno_clear_all_batch_results(dhd_pub_t *dhd, struct list_head *head, bool on
 			MFREE(dhd->osh, siter, SCAN_RESULTS_SIZE);
 		}
 	}
-#if defined(STRICT_GCC_WARNINGS) && defined(__GNUC__)
-#pragma GCC diagnostic pop
-#endif // endif
+	GCC_DIAGNOSTIC_POP();
 	return removed_scan_cnt;
 }
 
@@ -1023,19 +1002,15 @@ _dhd_pno_reinitialize_prof(dhd_pub_t *dhd, dhd_pno_params_t *params, dhd_pno_mod
 	case DHD_PNO_LEGACY_MODE: {
 		struct dhd_pno_ssid *iter, *next;
 		if (params->params_legacy.nssid > 0) {
-#if defined(STRICT_GCC_WARNINGS) && defined(__GNUC__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wcast-qual"
-#endif // endif
+			GCC_DIAGNOSTIC_PUSH_SUPPRESS_CAST();
 			list_for_each_entry_safe(iter, next,
 				&params->params_legacy.ssid_list, list) {
+				GCC_DIAGNOSTIC_POP();
 				list_del(&iter->list);
 				MFREE(dhd->osh, iter, sizeof(struct dhd_pno_ssid));
 			}
 		}
-#if defined(STRICT_GCC_WARNINGS) && defined(__GNUC__)
-#pragma GCC diagnostic pop
-#endif // endif
+
 		params->params_legacy.nssid = 0;
 		params->params_legacy.scan_fr = 0;
 		params->params_legacy.pno_freq_expo_max = 0;
@@ -1073,18 +1048,13 @@ _dhd_pno_reinitialize_prof(dhd_pub_t *dhd, dhd_pno_params_t *params, dhd_pno_mod
 	case DHD_PNO_HOTLIST_MODE: {
 		struct dhd_pno_bssid *iter, *next;
 		if (params->params_hotlist.nbssid > 0) {
-#if defined(STRICT_GCC_WARNINGS) && defined(__GNUC__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wcast-qual"
-#endif // endif
+			GCC_DIAGNOSTIC_PUSH_SUPPRESS_CAST();
 			list_for_each_entry_safe(iter, next,
 				&params->params_hotlist.bssid_list, list) {
+				GCC_DIAGNOSTIC_POP();
 				list_del(&iter->list);
 				MFREE(dhd->osh, iter, sizeof(struct dhd_pno_ssid));
 			}
-#if defined(STRICT_GCC_WARNINGS) && defined(__GNUC__)
-#pragma GCC diagnostic pop
-#endif // endif
 		}
 		params->params_hotlist.scan_fr = 0;
 		params->params_hotlist.nbssid = 0;
@@ -1212,14 +1182,12 @@ dhd_pno_stop_for_ssid(dhd_pub_t *dhd)
 				goto exit;
 			}
 			/* convert dhd_pno_bssid to wl_pfn_bssid */
-#if defined(STRICT_GCC_WARNINGS) && defined(__GNUC__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wcast-qual"
-#endif // endif
+			GCC_DIAGNOSTIC_PUSH_SUPPRESS_CAST();
 			cnt = 0;
 			tmp_bssid = p_pfn_bssid;
 			list_for_each_entry_safe(iter, next,
 			&_params->params_hotlist.bssid_list, list) {
+				GCC_DIAGNOSTIC_POP();
 				memcpy(&tmp_bssid->macaddr,
 				&iter->macaddr, ETHER_ADDR_LEN);
 				tmp_bssid->flags = iter->flags;
@@ -1232,9 +1200,6 @@ dhd_pno_stop_for_ssid(dhd_pub_t *dhd)
 					break;
 				}
 			}
-#if defined(STRICT_GCC_WARNINGS) && defined(__GNUC__)
-#pragma GCC diagnostic pop
-#endif // endif
 			err = dhd_pno_set_for_hotlist(dhd, p_pfn_bssid, &_params->params_hotlist);
 			if (err < 0) {
 				_pno_state->pno_mode &= ~DHD_PNO_HOTLIST_MODE;
@@ -1751,18 +1716,13 @@ dhd_pno_reset_cfg_gscan(dhd_pub_t *dhd, dhd_pno_params_t *_params,
 	if (flags & GSCAN_FLUSH_HOTLIST_CFG) {
 		struct dhd_pno_bssid *iter, *next;
 		if (_params->params_gscan.nbssid_hotlist > 0) {
-#if defined(STRICT_GCC_WARNINGS) && defined(__GNUC__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wcast-qual"
-#endif // endif
+			GCC_DIAGNOSTIC_PUSH_SUPPRESS_CAST();
 			list_for_each_entry_safe(iter, next,
 				&_params->params_gscan.hotlist_bssid_list, list) {
+				GCC_DIAGNOSTIC_POP();
 				list_del(&iter->list);
 				MFREE(dhd->osh, iter, sizeof(struct dhd_pno_bssid));
 			}
-#if defined(STRICT_GCC_WARNINGS) && defined(__GNUC__)
-#pragma GCC diagnostic pop
-#endif // endif
 		}
 		_params->params_gscan.nbssid_hotlist = 0;
 		DHD_PNO(("Flush Hotlist Config\n"));
@@ -1772,18 +1732,13 @@ dhd_pno_reset_cfg_gscan(dhd_pub_t *dhd, dhd_pno_params_t *_params,
 		dhd_epno_ssid_cfg_t *epno_cfg = &_params->params_gscan.epno_cfg;
 
 		if (epno_cfg->num_epno_ssid > 0) {
-#if defined(STRICT_GCC_WARNINGS) && defined(__GNUC__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wcast-qual"
-#endif // endif
+			GCC_DIAGNOSTIC_PUSH_SUPPRESS_CAST();
 			list_for_each_entry_safe(iter, next,
 				&epno_cfg->epno_ssid_list, list) {
+				GCC_DIAGNOSTIC_POP();
 				list_del(&iter->list);
 				MFREE(dhd->osh, iter, sizeof(struct dhd_pno_bssid));
 			}
-#if defined(STRICT_GCC_WARNINGS) && defined(__GNUC__)
-#pragma GCC diagnostic pop
-#endif // endif
 			epno_cfg->num_epno_ssid = 0;
 		}
 		memset(&epno_cfg->params, 0, sizeof(wl_ssid_ext_params_t));
@@ -2202,13 +2157,11 @@ dhd_pno_set_for_gscan(dhd_pub_t *dhd, struct dhd_pno_gscan_params *gscan_params)
 		ptr = p_pfn_bssid;
 		/* convert dhd_pno_bssid to wl_pfn_bssid */
 		DHD_PNO(("nhotlist %d\n", gscan_params->nbssid_hotlist));
-#if defined(STRICT_GCC_WARNINGS) && defined(__GNUC__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wcast-qual"
-#endif // endif
+		GCC_DIAGNOSTIC_PUSH_SUPPRESS_CAST();
 		list_for_each_entry_safe(iter, next,
 		          &gscan_params->hotlist_bssid_list, list) {
 			char buffer_hotlist[64];
+			GCC_DIAGNOSTIC_POP();
 			memcpy(&ptr->macaddr,
 			&iter->macaddr, ETHER_ADDR_LEN);
 			BCM_REFERENCE(buffer_hotlist);
@@ -2216,9 +2169,6 @@ dhd_pno_set_for_gscan(dhd_pub_t *dhd, struct dhd_pno_gscan_params *gscan_params)
 			ptr->flags = iter->flags;
 			ptr++;
 		}
-#if defined(STRICT_GCC_WARNINGS) && defined(__GNUC__)
-#pragma GCC diagnostic pop
-#endif // endif
 
 		err = _dhd_pno_add_bssid(dhd, p_pfn_bssid, gscan_params->nbssid_hotlist);
 		if (err < 0) {
@@ -3163,18 +3113,13 @@ _dhd_pno_get_for_batch(dhd_pub_t *dhd, char *buf, int bufsize, int reason)
 			/* this is a first try to get batching results */
 			if (!list_empty(&_params->params_batch.get_batch.scan_results_list)) {
 				/* move the scan_results_list to expired_scan_results_lists */
-#if defined(STRICT_GCC_WARNINGS) && defined(__GNUC__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wcast-qual"
-#endif // endif
+				GCC_DIAGNOSTIC_PUSH_SUPPRESS_CAST();
 				list_for_each_entry_safe(siter, snext,
 					&_params->params_batch.get_batch.scan_results_list, list) {
+					GCC_DIAGNOSTIC_POP();
 					list_move_tail(&siter->list,
 					&_params->params_batch.get_batch.expired_scan_results_list);
 				}
-#if defined(STRICT_GCC_WARNINGS) && defined(__GNUC__)
-#pragma GCC diagnostic pop
-#endif // endif
 				_params->params_batch.get_batch.top_node_cnt = 0;
 				_params->params_batch.get_batch.expired_tot_scan_cnt =
 					_params->params_batch.get_batch.tot_scan_cnt;
@@ -3467,18 +3412,13 @@ _dhd_pno_get_for_batch(dhd_pub_t *dhd, char *buf, int bufsize, int reason)
 		/* This is a first try to get batching results */
 		if (!list_empty(&_params->params_batch.get_batch.scan_results_list)) {
 			/* move the scan_results_list to expired_scan_results_lists */
-#if defined(STRICT_GCC_WARNINGS) && defined(__GNUC__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wcast-qual"
-#endif // endif
+			GCC_DIAGNOSTIC_PUSH_SUPPRESS_CAST();
 			list_for_each_entry_safe(siter, snext,
 				&_params->params_batch.get_batch.scan_results_list, list) {
+				GCC_DIAGNOSTIC_POP();
 				list_move_tail(&siter->list,
 					&_params->params_batch.get_batch.expired_scan_results_list);
 			}
-#if defined(STRICT_GCC_WARNINGS) && defined(__GNUC__)
-#pragma GCC diagnostic pop
-#endif // endif
 			/* reset gloval values after  moving to expired list */
 			_params->params_batch.get_batch.top_node_cnt = 0;
 			_params->params_batch.get_batch.expired_tot_scan_cnt =
@@ -3513,14 +3453,10 @@ _dhd_pno_get_batch_handler(struct work_struct *work)
 	dhd_pub_t *dhd;
 	struct dhd_pno_batch_params *params_batch;
 	DHD_PNO(("%s enter\n", __FUNCTION__));
-#if defined(STRICT_GCC_WARNINGS) && defined(__GNUC__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wcast-qual"
-#endif // endif
+	GCC_DIAGNOSTIC_PUSH_SUPPRESS_CAST();
 	_pno_state = container_of(work, struct dhd_pno_status_info, work);
-#if defined(STRICT_GCC_WARNINGS) && defined(__GNUC__)
-#pragma GCC diagnostic pop
-#endif // endif
+	GCC_DIAGNOSTIC_POP();
+
 	dhd = _pno_state->dhd;
 	if (dhd == NULL) {
 		DHD_ERROR(("%s : dhd is NULL\n", __FUNCTION__));
@@ -3673,19 +3609,14 @@ dhd_pno_stop_for_batch(dhd_pub_t *dhd)
 			}
 			i = 0;
 			/* convert dhd_pno_bssid to wl_pfn_bssid */
-#if defined(STRICT_GCC_WARNINGS) && defined(__GNUC__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wcast-qual"
-#endif // endif
+			GCC_DIAGNOSTIC_PUSH_SUPPRESS_CAST();
 			list_for_each_entry_safe(iter, next,
 				&_params->params_hotlist.bssid_list, list) {
+				GCC_DIAGNOSTIC_POP();
 				memcpy(&p_pfn_bssid[i].macaddr, &iter->macaddr, ETHER_ADDR_LEN);
 				p_pfn_bssid[i].flags = iter->flags;
 				i++;
 			}
-#if defined(STRICT_GCC_WARNINGS) && defined(__GNUC__)
-#pragma GCC diagnostic pop
-#endif // endif
 			err = dhd_pno_set_for_hotlist(dhd, p_pfn_bssid, &_params->params_hotlist);
 			if (err < 0) {
 				_pno_state->pno_mode &= ~DHD_PNO_HOTLIST_MODE;
@@ -4012,14 +3943,9 @@ dhd_process_full_gscan_result(dhd_pub_t *dhd, const void *data, uint32 len, int 
 	u32 bi_ie_offset = 0;
 
 	*size = 0;
-#if defined(STRICT_GCC_WARNINGS) && defined(__GNUC__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wcast-qual"
-#endif // endif
+	GCC_DIAGNOSTIC_PUSH_SUPPRESS_CAST();
 	gscan_result = (wl_gscan_result_t *)data;
-#if defined(STRICT_GCC_WARNINGS) && defined(__GNUC__)
-#pragma GCC diagnostic pop
-#endif // endif
+	GCC_DIAGNOSTIC_POP();
 	if (!gscan_result) {
 		DHD_ERROR(("Invalid gscan result (NULL pointer)\n"));
 		goto exit;
@@ -4099,17 +4025,11 @@ dhd_pno_process_epno_result(dhd_pub_t *dhd, const void *data, uint32 event, int 
 	gscan_params = &(_pno_state->pno_params_arr[INDEX_OF_GSCAN_PARAMS].params_gscan);
 
 	if (event == WLC_E_PFN_NET_FOUND || event == WLC_E_PFN_NET_LOST) {
-#if defined(STRICT_GCC_WARNINGS) && defined(__GNUC__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wcast-qual"
-#endif // endif
 		wl_pfn_scanresults_v1_t *pfn_result = (wl_pfn_scanresults_v1_t *)data;
 		wl_pfn_scanresults_v2_t *pfn_result_v2 = (wl_pfn_scanresults_v2_t *)data;
 		wl_pfn_net_info_v1_t *net;
 		wl_pfn_net_info_v2_t *net_v2;
-#if defined(STRICT_GCC_WARNINGS) && defined(__GNUC__)
-#pragma GCC diagnostic pop
-#endif // endif
+
 		if (pfn_result->version == PFN_SCANRESULT_VERSION_V1) {
 			if ((pfn_result->count == 0) || (pfn_result->count > EVENT_MAX_NETCNT_V1)) {
 				DHD_ERROR(("%s event %d: wrong pfn v1 results count %d\n",
@@ -4207,15 +4127,8 @@ dhd_handle_hotlist_scan_evt(dhd_pub_t *dhd, const void *event_data,
 	void *ptr = NULL;
 	dhd_pno_status_info_t *_pno_state = PNO_GET_PNOSTATE(dhd);
 	struct dhd_pno_gscan_params *gscan_params;
-#if defined(STRICT_GCC_WARNINGS) && defined(__GNUC__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wcast-qual"
-#endif // endif
 	wl_pfn_scanresults_v1_t *results_v1 = (wl_pfn_scanresults_v1_t *)event_data;
 	wl_pfn_scanresults_v2_t *results_v2 = (wl_pfn_scanresults_v2_t *)event_data;
-#if defined(STRICT_GCC_WARNINGS) && defined(__GNUC__)
-#pragma GCC diagnostic pop
-#endif // endif
 	wifi_gscan_result_t *hotlist_found_array;
 	wl_pfn_net_info_v1_t *pnetinfo;
 	wl_pfn_net_info_v2_t *pnetinfo_v2;

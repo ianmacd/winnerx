@@ -137,6 +137,7 @@ static void get_tsp_test_result(void *device_data);
 static void increase_disassemble_count(void *device_data);
 static void get_disassemble_count(void *device_data);
 static void get_osc_trim_error(void *device_data);
+static void get_osc_trim_info(void *device_data);
 
 #ifdef CONFIG_GLOVE_TOUCH
 static void glove_mode(void *device_data);
@@ -238,6 +239,7 @@ struct sec_cmd ft_commands[] = {
 	{SEC_CMD("increase_disassemble_count", increase_disassemble_count),},
 	{SEC_CMD("get_disassemble_count", get_disassemble_count),},
 	{SEC_CMD("get_osc_trim_error", get_osc_trim_error),},
+	{SEC_CMD("get_osc_trim_info", get_osc_trim_info),},
 #ifdef CONFIG_GLOVE_TOUCH
 	{SEC_CMD_H("glove_mode", glove_mode),},
 #endif
@@ -824,7 +826,7 @@ static ssize_t get_lp_dump(struct device *dev, struct device_attribute *attr, ch
 	int i, ret;
 	u16 addr;
 
-	if (info->use_sponge)
+	if (!info->use_sponge)
 		return -ENODEV;
 
 	if (info->fts_power_state == FTS_POWER_STATE_POWERDOWN) {
@@ -1455,22 +1457,6 @@ static ssize_t fts_scrub_position(struct device *dev,
 	return snprintf(buf, SEC_CMD_BUF_SIZE, "%s\n", buff);
 }
 
-#if 0 //def CONFIG_TRUSTONIC_TRUSTED_UI
-static void tui_mode_cmd(struct fts_ts_info *info)
-{
-	struct sec_cmd_data *sec = &info->sec;
-	char buff[16] = "TUImode:FAIL";
-
-	sec_cmd_set_default_result(sec);
-	sec_cmd_set_cmd_result(sec, buff, strnlen(buff, sizeof(buff)));
-
-	sec->cmd_state = SEC_CMD_STATUS_NOT_APPLICABLE;
-	sec_cmd_set_cmd_exit(sec);
-
-	input_info(true, &info->client->dev, "%s: %s\n", __func__, buff);
-}
-#endif
-
 static void not_support_cmd(void *device_data)
 {
 	struct sec_cmd_data *sec = (struct sec_cmd_data *)device_data;
@@ -1494,6 +1480,15 @@ static void fw_update(void *device_data)
 	int retval = 0;
 
 	sec_cmd_set_default_result(sec);
+#if defined(CONFIG_SAMSUNG_PRODUCT_SHIP)
+	if (sec->cmd_param[0] == 1) {
+		input_err(true, &info->client->dev, "%s: user_ship, skip\n", __func__);
+		snprintf(buff, sizeof(buff), "OK");
+		sec_cmd_set_cmd_result(sec, buff, strnlen(buff, sizeof(buff)));
+		sec->cmd_state = SEC_CMD_STATUS_OK;
+		return;
+	}
+#endif
 	if (info->fts_power_state == FTS_POWER_STATE_POWERDOWN) {
 		input_err(true, &info->client->dev, "%s: [ERROR] Touch is stopped\n",
 				__func__);
@@ -3700,7 +3695,9 @@ static void run_rawdata_read_all(void *device_data)
 	struct fts_ts_info *info = container_of(sec, struct fts_ts_info, sec);
 	char buff[SEC_CMD_STR_LEN] = { 0 };
 
+#ifdef CONFIG_TOUCHSCREEN_DUAL_FOLDABLE
 	input_raw_data_clear(MAIN_TOUCH);
+#endif
 	info->rawdata_read_lock = true;
 
 	input_raw_info_d(true, &info->client->dev,
@@ -5309,6 +5306,7 @@ static void factory_cmd_result_all(void *device_data)
 	run_self_jitter(sec);
 	get_mis_cal_info(sec);
 	get_osc_trim_error(sec);
+	get_osc_trim_info(sec);
 
 	sec->cmd_all_factory_state = SEC_CMD_STATUS_OK;
 
@@ -5608,6 +5606,60 @@ static void get_osc_trim_error(void *device_data)
 	sec_cmd_set_cmd_result(sec, buff, strnlen(buff, sizeof(buff)));
 	if (sec->cmd_all_factory_state == SEC_CMD_STATUS_RUNNING)
 		sec_cmd_set_cmd_result_all(sec, buff, strnlen(buff, sizeof(buff)), "OSC_TRIM_ERR");
+	sec->cmd_state = SEC_CMD_STATUS_OK;
+	input_info(true, &info->client->dev, "%s: %s\n", __func__, buff);
+}
+
+static void get_osc_trim_info(void *device_data)
+{
+	struct sec_cmd_data *sec = (struct sec_cmd_data *)device_data;
+	struct fts_ts_info *info = container_of(sec, struct fts_ts_info, sec);
+	char buff[SEC_CMD_STR_LEN] = { 0 };
+	int ret;
+	unsigned char data[4];
+	unsigned char regAdd[3];
+
+	sec_cmd_set_default_result(sec);
+
+	if (info->fts_power_state == FTS_POWER_STATE_POWERDOWN) {
+		input_err(true, &info->client->dev, "%s: [ERROR] Touch is stopped\n",
+				__func__);
+		snprintf(buff, sizeof(buff), "NG");
+		sec_cmd_set_cmd_result(sec, buff, strnlen(buff, sizeof(buff)));
+		sec->cmd_state = SEC_CMD_STATUS_FAIL;
+		return;
+	}
+
+	ret = info->fts_get_sysinfo_data(info, FTS_SI_OSC_TRIM_INFO, 2, data);
+	if (ret < 0) {
+		input_err(true, &info->client->dev,
+				"%s: system info read failed. ret: %d\n", __func__, ret);
+		snprintf(buff, sizeof(buff), "NG");
+		sec_cmd_set_cmd_result(sec, buff, strnlen(buff, sizeof(buff)));
+		sec->cmd_state = SEC_CMD_STATUS_FAIL;
+		return;
+	}
+
+	regAdd[0] = 0xA6;
+	regAdd[1] = data[1];
+	regAdd[2] = data[0];
+
+	memset(data, 0x00, 4);
+	ret = info->fts_read_reg(info, regAdd, 3, data, 4);
+	if (ret < 0) {
+		input_err(true, &info->client->dev,
+				"%s: osc trim info read failed. ret: %d\n", __func__, ret);
+		snprintf(buff, sizeof(buff), "NG");
+		sec_cmd_set_cmd_result(sec, buff, strnlen(buff, sizeof(buff)));
+		sec->cmd_state = SEC_CMD_STATUS_FAIL;
+		return;
+	}
+
+	snprintf(buff, sizeof(buff), "%02X%02X%02X%02X", data[0], data[1], data[2], data[3]);
+
+	sec_cmd_set_cmd_result(sec, buff, strnlen(buff, sizeof(buff)));
+	if (sec->cmd_all_factory_state == SEC_CMD_STATUS_RUNNING)
+		sec_cmd_set_cmd_result_all(sec, buff, strnlen(buff, sizeof(buff)), "OSC_TRIM_INFO");
 	sec->cmd_state = SEC_CMD_STATUS_OK;
 	input_info(true, &info->client->dev, "%s: %s\n", __func__, buff);
 }
@@ -5945,24 +5997,8 @@ static void clear_cover_mode(void *device_data)
 		if (sec->cmd_param[0] > 1) {
 			info->flip_enable = true;
 			info->cover_type = sec->cmd_param[1];
-#ifdef CONFIG_TRUSTONIC_TRUSTED_UI
-			if (TRUSTEDUI_MODE_TUI_SESSION & trustedui_get_current_mode()) {
-				fts_delay(500);
-				tui_force_close(1);
-				fts_delay(200);
-				if (TRUSTEDUI_MODE_TUI_SESSION & trustedui_get_current_mode()) {
-					trustedui_clear_mask(TRUSTEDUI_MODE_VIDEO_SECURED|TRUSTEDUI_MODE_INPUT_SECURED);
-					trustedui_set_mode(TRUSTEDUI_MODE_OFF);
-				}
-			}
-
-			tui_cover_mode_set(true);
-#endif
 		} else {
 			info->flip_enable = false;
-#ifdef CONFIG_TRUSTONIC_TRUSTED_UI
-			tui_cover_mode_set(false);
-#endif
 		}
 
 		if (info->fts_power_state != FTS_POWER_STATE_POWERDOWN && info->reinit_done) {

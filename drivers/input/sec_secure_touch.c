@@ -329,6 +329,7 @@ static struct attribute_group sec_secure_touch_attr_group = {
 };
 
 #ifdef CONFIG_TOUCHSCREEN_DUAL_FOLDABLE
+#ifdef CONFIG_FOLDER_HALL
 static void sec_secure_touch_hall_ic_work(struct work_struct *work)
 {
 	struct sec_secure_touch *data = container_of(work, struct sec_secure_touch, folder_work.work);
@@ -337,19 +338,20 @@ static void sec_secure_touch_hall_ic_work(struct work_struct *work)
 	mutex_lock(&data->lock);
 
 	if (data->hall_ic == SECURE_TOUCH_FOLDER_OPEN) {
-		if (data->touch_driver[SECURE_TOUCH_SUB_DEV].enabled) {
-			if (data->touch_driver[SECURE_TOUCH_SUB_DEV].is_running) {
-				schedule_delayed_work(&data->folder_work, msecs_to_jiffies(10));
-				mutex_unlock(&data->lock);
-				return;
+		if (data->touch_driver[SECURE_TOUCH_SUB_DEV].registered) {
+			if (data->touch_driver[SECURE_TOUCH_SUB_DEV].enabled) {
+				if (data->touch_driver[SECURE_TOUCH_SUB_DEV].is_running) {
+					schedule_delayed_work(&data->folder_work, msecs_to_jiffies(10));
+					mutex_unlock(&data->lock);
+					return;
+				}
+
+				sysfs_delete_link(&data->device->kobj, data->touch_driver[SECURE_TOUCH_SUB_DEV].kobj, "secure");
+				data->touch_driver[SECURE_TOUCH_SUB_DEV].enabled = 0;
+			} else {
+				pr_info("%s: %s: error: %d\n", SECLOG, __func__, __LINE__);
 			}
-
-			sysfs_delete_link(&data->device->kobj, data->touch_driver[SECURE_TOUCH_SUB_DEV].kobj, "secure");
-			data->touch_driver[SECURE_TOUCH_SUB_DEV].enabled = 0;
-		} else {
-			pr_info("%s: %s: error: %d\n", SECLOG, __func__, __LINE__);
 		}
-
 		if (data->touch_driver[SECURE_TOUCH_MAIN_DEV].registered) {
 			if (data->touch_driver[SECURE_TOUCH_MAIN_DEV].enabled == 1) {
 				pr_info("%s: %s: already created\n", SECLOG, __func__);
@@ -365,22 +367,21 @@ static void sec_secure_touch_hall_ic_work(struct work_struct *work)
 
 			pr_info("%s: %s: create link ret:%d, %s\n", SECLOG, __func__, ret, data->touch_driver[SECURE_TOUCH_MAIN_DEV].kobj->name);
 			data->touch_driver[SECURE_TOUCH_MAIN_DEV].enabled = 1;
-		} else {
-			pr_info("%s: %s: error: %d\n", SECLOG, __func__, __LINE__);
 		}
 	} else if (data->hall_ic == SECURE_TOUCH_FOLDER_CLOSE) {
-		if (data->touch_driver[SECURE_TOUCH_MAIN_DEV].enabled) {
-			if (data->touch_driver[SECURE_TOUCH_MAIN_DEV].is_running) {
-				schedule_delayed_work(&data->folder_work, msecs_to_jiffies(10));
-				mutex_unlock(&data->lock);
-				return;
+		if (data->touch_driver[SECURE_TOUCH_MAIN_DEV].registered) {
+			if (data->touch_driver[SECURE_TOUCH_MAIN_DEV].enabled) {
+				if (data->touch_driver[SECURE_TOUCH_MAIN_DEV].is_running) {
+					schedule_delayed_work(&data->folder_work, msecs_to_jiffies(10));
+					mutex_unlock(&data->lock);
+					return;
+				}
+				sysfs_delete_link(&data->device->kobj, data->touch_driver[SECURE_TOUCH_MAIN_DEV].kobj, "secure");
+				data->touch_driver[SECURE_TOUCH_MAIN_DEV].enabled = 0;
+			} else {
+				pr_info("%s: %s: error: %d\n", SECLOG, __func__, __LINE__);
 			}
-			sysfs_delete_link(&data->device->kobj, data->touch_driver[SECURE_TOUCH_MAIN_DEV].kobj, "secure");
-			data->touch_driver[SECURE_TOUCH_MAIN_DEV].enabled = 0;
-		} else {
-			pr_info("%s: %s: error: %d\n", SECLOG, __func__, __LINE__);
 		}
-
 		if (data->touch_driver[SECURE_TOUCH_SUB_DEV].registered) {
 			if (data->touch_driver[SECURE_TOUCH_SUB_DEV].enabled == 1) {
 				pr_info("%s: %s: already created\n", SECLOG, __func__);
@@ -396,8 +397,6 @@ static void sec_secure_touch_hall_ic_work(struct work_struct *work)
 
 			pr_info("%s: %s: create link ret:%d, %s\n", SECLOG, __func__, ret, data->touch_driver[SECURE_TOUCH_SUB_DEV].kobj->name);
 			data->touch_driver[SECURE_TOUCH_SUB_DEV].enabled = 1;
-		} else {
-			pr_info("%s: %s: error: %d\n", SECLOG, __func__, __LINE__);
 		}
 	} else {
 		mutex_unlock(&data->lock);
@@ -428,6 +427,7 @@ static int sec_secure_touch_hall_ic_notifier(struct notifier_block *nb, unsigned
 
 	return 0;
 }
+#endif
 #endif
 
 static int sec_secure_touch_probe(struct platform_device *pdev)
@@ -463,10 +463,12 @@ static int sec_secure_touch_probe(struct platform_device *pdev)
 	}
 
 #ifdef CONFIG_TOUCHSCREEN_DUAL_FOLDABLE
+#ifdef CONFIG_FOLDER_HALL
 	data->nb.notifier_call = sec_secure_touch_hall_ic_notifier;
 	data->nb.priority = 1;
 	hall_ic_register_notify(&data->nb);
-	INIT_DELAYED_WORK(&data->folder_work, sec_secure_touch_hall_ic_work);	
+	INIT_DELAYED_WORK(&data->folder_work, sec_secure_touch_hall_ic_work);
+#endif
 #else
 	sec_secure_touch_set_device(data, 1);
 #endif
@@ -483,7 +485,9 @@ static int sec_secure_touch_remove(struct platform_device *pdev)
 	pr_info("%s: %s\n", SECLOG, __func__);
 #ifdef CONFIG_TOUCHSCREEN_DUAL_FOLDABLE
 	mutex_lock(&data->lock);
+#ifdef CONFIG_FOLDER_HALL
 	hall_ic_unregister_notify(&data->nb);
+#endif
 	mutex_unlock(&data->lock);
 #endif
 	for (ii = 0; ii < data->device_number; ii++) {

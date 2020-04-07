@@ -24,7 +24,7 @@
  *
  * <<Broadcom-WL-IPTag/Open:>>
  *
- * $Id: wl_cfgnan.h 808204 2019-03-06 07:00:32Z $
+ * $Id: wl_cfgnan.h 818907 2019-05-09 07:58:57Z $
  */
 
 #ifndef _wl_cfgnan_h_
@@ -33,7 +33,7 @@
 /* NAN structs versioning b/w DHD and HAL
 * define new version if any change in any of the shared structs
 */
-#define NAN_HAL_VERSION_1	0x1
+#define NAN_HAL_VERSION_1	0x2
 
 #define NAN_EVENT_BUFFER_SIZE_LARGE	1024u
 
@@ -211,6 +211,8 @@
 #define NAN_RNG_REQ_ACCEPTED_BY_HOST    1
 #define NAN_RNG_REQ_REJECTED_BY_HOST    0
 
+#define NAN_RNG_GEOFENCE_MAX_RNG_REJ_CNT	3u
+
 typedef uint32 nan_data_path_id;
 
 typedef enum nan_stop_reason_code {
@@ -284,6 +286,8 @@ typedef struct nan_ranging_inst {
 	nan_svc_info_t *svc_idx[MAX_SUBSCRIBES];
 	uint32 prev_distance_mm;
 	nan_range_role_t range_role;
+	bool in_use;
+	uint8 geof_resp_rej_count;
 } nan_ranging_inst_t;
 
 #define DUMP_NAN_RTT_INST(inst) { printf("svc instance ID %d", (inst)->svc_inst_id); \
@@ -614,12 +618,13 @@ typedef struct _nan_hal_resp {
 	int32 value;
 	/* Identifier for the instance of the NDP */
 	uint16 ndp_instance_id;
-	nan_hal_capabilities_t capabilities;
 	/* Publisher NMI */
 	uint8 pub_nmi[NAN_MAC_ADDR_LEN];
 	/* SVC_HASH */
 	uint8 svc_hash[WL_NAN_SVC_HASH_LEN];
 	char nan_reason[NAN_ERROR_STR_LEN]; /* Describe the NAN reason type */
+	char pad[3];
+	nan_hal_capabilities_t capabilities;
 } nan_hal_resp_t;
 
 typedef struct wl_nan_iov {
@@ -718,10 +723,12 @@ extern nan_ranging_inst_t *wl_cfgnan_get_ranging_inst(struct bcm_cfg80211 *cfg,
 	struct ether_addr *peer, nan_range_role_t range_role);
 extern nan_ranging_inst_t* wl_cfgnan_check_for_ranging(struct bcm_cfg80211 *cfg,
 	struct ether_addr *peer);
+#ifdef RTT_SUPPORT
 extern int wl_cfgnan_trigger_geofencing_ranging(struct net_device *dev,
 	struct ether_addr *peer_addr);
+#endif /* RTT_SUPPORT */
 extern int wl_cfgnan_suspend_geofence_rng_session(struct net_device *ndev,
-	struct ether_addr *peer, int suspend_reason);
+	struct ether_addr *peer, int suspend_reason, u8 cancel_flags);
 extern nan_ndp_peer_t* wl_cfgnan_data_get_peer(struct bcm_cfg80211 *cfg,
 	struct ether_addr *peer_addr);
 bool wl_cfgnan_data_dp_exists(struct bcm_cfg80211 *cfg);
@@ -874,6 +881,7 @@ enum geofence_suspend_reason {
 	RTT_GEO_SUSPN_HOST_DIR_RTT_TRIG = 0,
 	RTT_GEO_SUSPN_PEER_RTT_TRIGGER = 1,
 	RTT_GEO_SUSPN_HOST_NDP_TRIGGER = 2,
-	RTT_GEO_SUSPN_PEER_NDP_TRIGGER = 3
+	RTT_GEO_SUSPN_PEER_NDP_TRIGGER = 3,
+	RTT_GEO_SUSPN_RANGE_RES_REPORTED = 4
 };
 #endif	/* _wl_cfgnan_h_ */

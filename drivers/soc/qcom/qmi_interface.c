@@ -323,7 +323,6 @@ int qmi_txn_init(struct qmi_handle *qmi, struct qmi_txn *txn,
 
 	memset(txn, 0, sizeof(*txn));
 
-	mutex_init(&txn->lock);
 	init_completion(&txn->completion);
 	txn->qmi = qmi;
 	txn->ei = ei;
@@ -335,7 +334,7 @@ int qmi_txn_init(struct qmi_handle *qmi, struct qmi_txn *txn,
 		pr_err("failed to allocate transaction id\n");
 
 	txn->id = ret;
-	QMI_INFO("%s qmi[%p] txn[%p] id[%d]\n", __func__, qmi, txn, txn->id);
+	QMI_INFO("%s [%d:%s] qmi[%p] txn[%p] id[%d]\n", __func__, current->pid, current->comm, qmi, txn, txn->id); 
 	mutex_unlock(&qmi->txn_lock);
 
 	return ret;
@@ -358,22 +357,17 @@ int qmi_txn_wait(struct qmi_txn *txn, unsigned long timeout)
 	struct qmi_handle *qmi = txn->qmi;
 	int ret;
 
-	QMI_INFO("%s before wait qmi[%p] txn[%p] id[%d]\n", __func__, qmi, txn, txn->id);
+	QMI_INFO("%s [%d:%s] before wait qmi[%p] txn[%p] id[%d]\n", __func__, current->pid, current->comm, qmi, txn, txn->id); 
 	ret = wait_for_completion_timeout(&txn->completion, timeout);
 
-	mutex_lock(&txn->lock);
 	if (txn->result == -ENETRESET) {
-		QMI_INFO("%s after wait -ENETRESET qmi[%p] txn[%p] id[%d]\n", __func__, qmi, txn, txn->id);
-		mutex_unlock(&txn->lock);
+		QMI_INFO("%s [%d:%s] after wait -ENETRESET qmi[%p] txn[%p] id[%d]\n", __func__, current->pid, current->comm, qmi, txn, txn->id); 
 		return txn->result;
 	}
-	mutex_unlock(&txn->lock);
 
 	mutex_lock(&qmi->txn_lock);
-	mutex_lock(&txn->lock);
-	QMI_INFO("%s After wait REMOVE qmi[%p] txn[%p] id[%d]\n", __func__, qmi, txn, txn->id);
+	QMI_INFO("%s [%d:%s] After wait REMOVE qmi[%p] txn[%p] id[%d]\n", __func__, current->pid, current->comm, qmi, txn, txn->id); 
 	idr_remove(&qmi->txns, txn->id);
-	mutex_unlock(&txn->lock);
 	mutex_unlock(&qmi->txn_lock);
 
 	if (ret == 0)
@@ -392,10 +386,8 @@ void qmi_txn_cancel(struct qmi_txn *txn)
 	struct qmi_handle *qmi = txn->qmi;
 
 	mutex_lock(&qmi->txn_lock);
-	mutex_lock(&txn->lock);
-	QMI_INFO("%s qmi[%p] txn[%p] id[%d]\n", __func__, qmi, txn, txn->id);
+	QMI_INFO("%s [%d:%s] qmi[%p] txn[%p] id[%d]\n", __func__, current->pid, current->comm, qmi, txn, txn->id); 
 	idr_remove(&qmi->txns, txn->id);
-	mutex_unlock(&txn->lock);
 	mutex_unlock(&qmi->txn_lock);
 }
 EXPORT_SYMBOL(qmi_txn_cancel);
@@ -480,6 +472,7 @@ static void qmi_handle_net_reset(struct qmi_handle *qmi)
 	/* Already qmi_handle_release() started */
 	if (!qmi->sock) {
 		sock_release(sock);
+		mutex_unlock(&qmi->sock_lock);
 		return;
 	}
 	sock_release(qmi->sock);
@@ -518,26 +511,21 @@ static void qmi_handle_message(struct qmi_handle *qmi,
 	if (hdr->type == QMI_RESPONSE) {
 		mutex_lock(&qmi->txn_lock);
 		txn = idr_find(&qmi->txns, hdr->txn_id);
-		if (txn)
-			mutex_lock(&txn->lock);
-		else
+		/* Ignore unexpected responses */
+		if (!txn) {
 			mutex_unlock(&qmi->txn_lock);
-	}
+			return;
+		}
+		if (txn->dest && txn->ei) {
+			ret = qmi_decode_message(buf, len, txn->ei, txn->dest);
+			if (ret < 0)
+				pr_err("failed to decode incoming message\n");
 
-	if (txn && txn->dest && txn->ei) {
-		ret = qmi_decode_message(buf, len, txn->ei, txn->dest);
-		if (ret < 0)
-			pr_err("failed to decode incoming message\n");
-
-		txn->result = ret;
-		complete(&txn->completion);
-
-		mutex_unlock(&txn->lock);
-		mutex_unlock(&qmi->txn_lock);
-	} else if (txn) {
-		qmi_invoke_handler(qmi, sq, txn, buf, len);
-
-		mutex_unlock(&txn->lock);
+			txn->result = ret;
+			complete(&txn->completion);
+		} else {
+			qmi_invoke_handler(qmi, sq, txn, buf, len);
+		}
 		mutex_unlock(&qmi->txn_lock);
 	} else {
 		/* Create a txn based on the txn_id of the incoming message */
@@ -752,12 +740,10 @@ void qmi_handle_release(struct qmi_handle *qmi)
 
 	mutex_lock(&qmi->txn_lock);
 	idr_for_each_entry(&qmi->txns, txn, txn_id) {
-		mutex_lock(&txn->lock);
-		QMI_INFO("%s qmi[%p] txn[%p] id[%d]\n", __func__, qmi, txn, txn->id);
+		QMI_INFO("%s [%d:%s] qmi[%p] txn[%p] id[%d]\n", __func__, current->pid, current->comm, qmi, txn, txn->id); 
 		idr_remove(&qmi->txns, txn->id);
 		txn->result = -ENETRESET;
 		complete(&txn->completion);
-		mutex_unlock(&txn->lock);
 	}
 	mutex_unlock(&qmi->txn_lock);
 	idr_destroy(&qmi->txns);

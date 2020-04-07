@@ -2312,6 +2312,7 @@ static int __init samsung_panel_initialize(void)
 	struct samsung_display_driver_data *vdd;
 	enum ss_display_ndx ndx;
 	char panel_string[] = "ss_dsi_panel_S6E3HA9_AMB611WE01_WQHD";
+	char panel_string2[] = "ss_dsi_panel_S6E3HA9_AMB611WE01_FHD";
 	char panel_name[MAX_CMDLINE_PARAM_LEN];
 	char panel_secondary_name[MAX_CMDLINE_PARAM_LEN];
 
@@ -2321,7 +2322,7 @@ static int __init samsung_panel_initialize(void)
 	/* TODO: use component_bind with panel_func
 	 * and match by panel_string, instead.
 	 */
-	if (!strncmp(panel_string, panel_name, strlen(panel_string)))
+	if (!strncmp(panel_string, panel_name, strlen(panel_string))||(!strncmp(panel_string2, panel_name, strlen(panel_string2))))
 		ndx = PRIMARY_DISPLAY_NDX;
 	else if (!strncmp(panel_string, panel_secondary_name,
 				strlen(panel_string)))

@@ -56,7 +56,28 @@ extern uint8_t ois_tele_center_shift[OIS_CENTER_SHIFT_SIZE];
 extern uint8_t ois_tele_cal_mark;
 #endif
 
-extern unsigned int sec_hw_rev(void);
+static unsigned int system_rev __read_mostly;
+
+static int __init sec_hw_rev_setup(char *p)
+{
+	int ret;
+
+	ret = kstrtouint(p, 0, &system_rev);
+	if (unlikely(ret < 0)) {
+		pr_warn("androidboot.revision is malformed (%s)\n", p);
+		return -EINVAL;
+	}
+
+	pr_info("androidboot.revision %x\n", system_rev);
+
+	return 0;
+}
+early_param("androidboot.revision", sec_hw_rev_setup);
+
+static unsigned int sec_hw_rev(void)
+{
+	return system_rev;
+}
 
 int total_fw_size;
 
@@ -646,6 +667,10 @@ int sysboot_i2c_write(struct cam_ois_ctrl_t *o_ctrl, uint32_t address, uint8_t *
 			mdelay(BOOT_I2C_SYNC_RETRY_INTVL);
 			continue;
 		}
+#if defined(CONFIG_SEC_D2XQ_PROJECT) || defined(CONFIG_SEC_D2Q_PROJECT) || defined(CONFIG_SEC_D1Q_PROJECT)\
+	|| defined(CONFIG_SEC_D2XQ2_PROJECT)
+		mdelay(2);
+#endif
 		kfree(buf);
 
 		return 0;
@@ -746,7 +771,7 @@ int sysboot_i2c_erase(struct cam_ois_ctrl_t *o_ctrl, uint32_t address, size_t le
 				pbuf[ix] = HTONS((erase.page + ix));
 			}
 			CAM_INFO(CAM_OIS, "erase.count %d", erase.count);
-			CAM_INFO(CAM_OIS, "&pbuf[ix] %p,xmit %p", &pbuf[ix], xmit);
+			CAM_INFO(CAM_OIS, "&pbuf[ix] %pK,xmit %pK", &pbuf[ix], xmit);
 			xmit_bytes = 2 * erase.count;
 			*((uint8_t *)&pbuf[ix]) = sysboot_checksum(xmit, xmit_bytes);
 			CAM_INFO(CAM_OIS, "xmit_bytes %d", xmit_bytes);
@@ -1072,13 +1097,24 @@ int target_option_update(struct cam_ois_ctrl_t *o_ctrl){
 
 	for(retry = 0; retry < 3; retry ++ ){
 		ret = sysboot_i2c_read(o_ctrl,memory_map.optionbyte, (uint8_t *)&optionbyte, sizeof(optionbyte));
-		if(ret < 0){
+#if defined(CONFIG_SEC_D2XQ_PROJECT) || defined(CONFIG_SEC_D2Q_PROJECT) || defined(CONFIG_SEC_D1Q_PROJECT)\
+	|| defined(CONFIG_SEC_D2XQ2_PROJECT)
+		if((ret < 0) || ((optionbyte&0x000000ff) != 0xaa))
+#else
+		if(ret < 0)
+#endif
+		{
 			ret = sysboot_i2c_read_unprotect(o_ctrl);
 			if(ret < 0){
 				CAM_ERR(CAM_OIS, "[mao]ois_mcu_read_unprotect failed ");
 			}else{
 				CAM_INFO(CAM_OIS, "[mao]ois_mcu_read_unprotect ok ");
 			}
+#if defined(CONFIG_SEC_D2XQ_PROJECT) || defined(CONFIG_SEC_D2Q_PROJECT) || defined(CONFIG_SEC_D1Q_PROJECT)\
+	|| defined(CONFIG_SEC_D2XQ2_PROJECT)
+			msleep(60);
+			ret = sysboot_connect(o_ctrl);
+#endif
 			//try connection again
 			continue;
 		}
@@ -1187,14 +1223,39 @@ int target_empty_check_clear(struct cam_ois_ctrl_t * o_ctrl)
 	CAM_INFO(CAM_OIS,"Option Byte write 0x%x ", optionbyte);
 
 	/* Put little delay for Target program option byte and self-reset */
+#if defined(CONFIG_SEC_D2XQ_PROJECT) || defined(CONFIG_SEC_D2Q_PROJECT) || defined(CONFIG_SEC_D1Q_PROJECT)\
+	|| defined(CONFIG_SEC_D2XQ2_PROJECT)
+	mdelay(150);
+	/* Option byte read for checking protection status ------------------------ */
+	/* 1> Re-connect to the target */
+	ret = sysboot_connect(o_ctrl);
+	if (ret) {
+		CAM_ERR(CAM_OIS,"Cannot connect to the target for RDP check (%d)",ret);
+		goto empty_check_clear_fail;
+	}
+
+	/* 2> Read from target for status checking and recover it if needed */
+	ret = sysboot_i2c_read(o_ctrl, memory_map.optionbyte, (uint8_t *)&optionbyte, sizeof(optionbyte));
+	if ((ret < 0) || ((optionbyte & 0x000000FF) != 0xAA)) {
+		CAM_ERR(CAM_OIS,"Failed to read option byte from target (%d)",ret);
+		/* Tryout the RDP level to 0 */
+		ret = sysboot_i2c_read_unprotect(o_ctrl);
+		if (ret) {
+			CAM_INFO(CAM_OIS,"Readout unprotect Not OK ... Host restart and try again");
+		} else {
+			CAM_INFO(CAM_OIS,"Readout unprotect OK ... Host restart and try again");
+		}
+		/* Put little delay for Target erase all of pages */
+		mdelay(50);
+		goto empty_check_clear_fail;
+	}
+#else
 	mdelay(50);
+#endif
 
 	return 0;
-
 empty_check_clear_fail:
-
 	return -1;
-
 }
 
 #if 0
@@ -1340,7 +1401,10 @@ int cam_ois_wait_idle(struct cam_ois_ctrl_t *o_ctrl, int retries)
 int cam_ois_init(struct cam_ois_ctrl_t *o_ctrl)
 {
 	uint32_t status = 0;
+#if !defined(CONFIG_SEC_D2XQ_PROJECT) && !defined(CONFIG_SEC_D2Q_PROJECT) && !defined(CONFIG_SEC_D1Q_PROJECT)\
+	&& !defined(CONFIG_SEC_D2XQ2_PROJECT)
 	uint32_t read_value = 0;
+#endif
 	int rc = 0, retries = 0;
 #if defined(CONFIG_USE_CAMERA_HW_BIG_DATA)
 	struct cam_hw_param *hw_param = NULL;
@@ -1482,6 +1546,8 @@ int cam_ois_init(struct cam_ois_ctrl_t *o_ctrl)
 		return rc;
 	}
 
+#if !defined(CONFIG_SEC_D2XQ_PROJECT) && !defined(CONFIG_SEC_D2Q_PROJECT) && !defined(CONFIG_SEC_D1Q_PROJECT)\
+	&& !defined(CONFIG_SEC_D2XQ2_PROJECT)
 	// OIS Hall Center Read
 	rc = cam_ois_i2c_read(o_ctrl, 0x021A, &read_value,
 		CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_WORD);
@@ -1509,6 +1575,7 @@ int cam_ois_init(struct cam_ois_ctrl_t *o_ctrl)
 		CAM_ERR(CAM_OIS, "ois set angle for compensation failed %d", rc);
 		return rc;
 	}
+#endif
 
 	// Init Setting(Dual OIS Setting)
 	mutex_lock(&(o_ctrl->i2c_init_data_mutex));
@@ -2108,7 +2175,10 @@ int32_t cam_ois_fw_update(struct cam_ois_ctrl_t *o_ctrl,
 	int ret = 0;
 	uint8_t sendData[OIS_FW_UPDATE_PACKET_SIZE] = "";
 	uint16_t checkSum = 0;
+#if !defined(CONFIG_SEC_D2XQ_PROJECT) && !defined(CONFIG_SEC_D2Q_PROJECT) && !defined(CONFIG_SEC_D1Q_PROJECT)\
+	&& !defined(CONFIG_SEC_D2XQ2_PROJECT)
 	uint32_t val = 0;
+#endif
 	struct file *ois_filp = NULL;
 	unsigned char *buffer = NULL;
 	char	bin_ver[OIS_VER_SIZE + 1] = "";
@@ -2154,10 +2224,13 @@ int32_t cam_ois_fw_update(struct cam_ois_ctrl_t *o_ctrl,
 		goto ERROR;
 	}
 
+#if !defined(CONFIG_SEC_D2XQ_PROJECT) && !defined(CONFIG_SEC_D2Q_PROJECT) && !defined(CONFIG_SEC_D1Q_PROJECT)\
+	&& !defined(CONFIG_SEC_D2XQ2_PROJECT)
 	/* update a program code */
 	cam_ois_i2c_write(o_ctrl, 0x0C, 0xB5,
 		CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
 	msleep(55);
+#endif
 
 	/* verify checkSum */
 	checkSum = cam_ois_calcchecksum(buffer, fw_size);
@@ -2166,6 +2239,12 @@ int32_t cam_ois_fw_update(struct cam_ois_ctrl_t *o_ctrl,
 	//enter system bootloader mode
 	CAM_ERR(CAM_OIS,"need update MCU FW, enter system bootloader mode");
 	o_ctrl->io_master_info.client->addr = 0x51;
+
+#if defined(CONFIG_SEC_D2XQ_PROJECT) || defined(CONFIG_SEC_D2Q_PROJECT) || defined(CONFIG_SEC_D1Q_PROJECT)\
+	|| defined(CONFIG_SEC_D2XQ2_PROJECT)
+	msleep(50);
+#endif
+
 	ret = target_validation(o_ctrl);
 	if(ret < 0){
 	    CAM_ERR(CAM_OIS,"mcu connect failed");
@@ -2180,6 +2259,7 @@ int32_t cam_ois_fw_update(struct cam_ois_ctrl_t *o_ctrl,
 
 	address = memory_map.flashbase;
 	len = fw_size;
+
 	/* Write UserProgram Data */
 	while (len > 0)
 	{
@@ -2205,12 +2285,24 @@ int32_t cam_ois_fw_update(struct cam_ois_ctrl_t *o_ctrl,
 	//target_read_vdrinfo
 	target_read_vdrinfo(o_ctrl);
 	if(empty_check_en > 0){
+#if defined(CONFIG_SEC_D2XQ_PROJECT) || defined(CONFIG_SEC_D2Q_PROJECT) || defined(CONFIG_SEC_D1Q_PROJECT)\
+	|| defined(CONFIG_SEC_D2XQ2_PROJECT)
+		if(target_empty_check_clear(o_ctrl)<0) {
+				ret = -1;
+				goto ERROR;
+		}
+	    sysboot_disconnect(o_ctrl);
+#else
 		target_empty_check_clear(o_ctrl);
+#endif
 	}else{
 	    //sysboot_disconnect
 	    sysboot_disconnect(o_ctrl);
 	}
 	o_ctrl->io_master_info.client->addr = 0xA2;
+
+#if !defined(CONFIG_SEC_D2XQ_PROJECT) && !defined(CONFIG_SEC_D2Q_PROJECT) && !defined(CONFIG_SEC_D1Q_PROJECT)\
+	&& !defined(CONFIG_SEC_D2XQ2_PROJECT)
 	/* write checkSum */
 	sendData[0] = (checkSum & 0x00FF);
 	sendData[1] = (checkSum & 0xFF00) >> 8;
@@ -2237,6 +2329,7 @@ int32_t cam_ois_fw_update(struct cam_ois_ctrl_t *o_ctrl,
 		CAM_ERR(CAM_OIS, "[OIS_FW_DBG] s/w reset i2c write error : 0x000E");
 
 	msleep(50);
+#endif
 
 #if 0
 	/* Param init - Flash to Rumba */
@@ -2248,6 +2341,11 @@ int32_t cam_ois_fw_update(struct cam_ois_ctrl_t *o_ctrl,
 	ret = cam_ois_read_module_ver(o_ctrl);
 	if(ret < 0){
 	    CAM_ERR(CAM_OIS,"cam_ois_read_module_ver failed after update FW, ret %d",ret);
+	}
+
+	ret = cam_ois_read_phone_ver(o_ctrl);
+	if(ret < 0){
+	    CAM_ERR(CAM_OIS,"cam_ois_read_phone_ver failed after update FW, ret %d",ret);
 	}
 
 	memcpy(bin_ver, &o_ctrl->phone_ver, OIS_VER_SIZE * sizeof(char));
@@ -2701,8 +2799,14 @@ int cam_ois_check_fw(struct cam_ois_ctrl_t *o_ctrl)
 	int update_retries = 3;
 	bool is_fw_crack = false;
 	char ois_dev_core[] = {'A', 'B', 'E', 'F', 'I', 'J', 'M', 'N'};
+#if defined(CONFIG_SEC_D2XQ_PROJECT) || defined(CONFIG_SEC_D2Q_PROJECT) || defined(CONFIG_SEC_D1Q_PROJECT)\
+	|| defined(CONFIG_SEC_D2XQ2_PROJECT)
+	char fw_ver_ng[OIS_VER_SIZE + 1] = "NG";
+	char cal_ver_ng[OIS_VER_SIZE + 1] = "NG";
+#else
 	char fw_ver_ng[OIS_VER_SIZE + 1] = "NG_FW2";
 	char cal_ver_ng[OIS_VER_SIZE + 1] = "NG_CD2";
+#endif
 
 	CAM_INFO(CAM_OIS, "E");
 FW_UPDATE_RETRY:
@@ -3073,12 +3177,36 @@ int cam_ois_write_gyro_orientation(struct cam_ois_ctrl_t *o_ctrl)
 #endif
 #endif
 
-#if defined(CONFIG_SEC_WINNERLTE_PROJECT) || defined(CONFIG_SEC_WINNERX_PROJECT) || defined(CONFIG_SEC_D2XQ_PROJECT)
+#if defined(CONFIG_SEC_WINNERLTE_PROJECT) || defined(CONFIG_SEC_WINNERX_PROJECT) || defined(CONFIG_SEC_ZODIAC_PROJECT)
 	uint8_t data1[3] = { 0x00, 0x00, 0x11 };
 	uint8_t data2[2] = { 0x01, 0x01 };
 
 	memcpy(SendData1, data1, sizeof(data1));
 	memcpy(SendData2, data2, sizeof(data2));
+#endif
+
+#if defined(CONFIG_SEC_D1Q_PROJECT)
+	uint8_t data1[3] = { 0x01, 0x01, 0x10 };
+	uint8_t data2[2] = { 0x00, 0x00 };
+
+	memcpy(SendData1, data1, sizeof(data1));
+	memcpy(SendData2, data2, sizeof(data2));
+#endif
+
+#if defined(CONFIG_SEC_D2XQ_PROJECT) || defined(CONFIG_SEC_D2Q_PROJECT) || defined(CONFIG_SEC_D2XQ2_PROJECT)
+	uint8_t old_data1[3] = { 0x01, 0x01, 0x10 };
+	uint8_t old_data2[2] = { 0x00, 0x00 };
+
+	uint8_t new_data1[3] = { 0x01, 0x00, 0x11 };
+	uint8_t new_data2[2] = { 0x01, 0x00 };
+
+	if (rev <= 5) {
+		memcpy(SendData1, old_data1, sizeof(old_data1));
+		memcpy(SendData2, old_data2, sizeof(old_data2));
+	} else {
+		memcpy(SendData1, new_data1, sizeof(new_data1));
+		memcpy(SendData2, new_data2, sizeof(new_data2));
+	}
 #endif
 
 	if (!o_ctrl)

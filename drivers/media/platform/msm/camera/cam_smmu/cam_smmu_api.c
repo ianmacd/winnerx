@@ -2406,7 +2406,7 @@ static int cam_smmu_map_stage2_buffer_and_add_to_list(int idx, int ion_fd,
 	mapping_info->ref_count = 1;
 	mapping_info->buf = dmabuf;
 
-	CAM_INFO(CAM_SMMU, "idx=%d, ion_fd=%d, dev=%p, paddr=%p, len=%u",
+	CAM_INFO(CAM_SMMU, "idx=%d, ion_fd=%d, dev=%pK, paddr=%pK, len=%u",
 			idx, ion_fd,
 			(void *)iommu_cb_set.cb_info[idx].dev,
 			(void *)*paddr_ptr, (unsigned int)*len_ptr);
@@ -3131,6 +3131,7 @@ static int cam_smmu_setup_cb(struct cam_context_bank_info *cb,
 	struct device *dev)
 {
 	int rc = 0;
+	int32_t stall_disable = 1;
 
 	if (!cb || !dev) {
 		CAM_ERR(CAM_SMMU, "Error: invalid input params");
@@ -3194,6 +3195,12 @@ static int cam_smmu_setup_cb(struct cam_context_bank_info *cb,
 		if (iommu_domain_set_attr(cb->mapping->domain,
 			DOMAIN_ATTR_NON_FATAL_FAULTS,
 			&iommu_cb_set.non_fatal_fault) < 0) {
+			CAM_ERR(CAM_SMMU,
+				"Error: failed to set non fatal fault attribute");
+		}
+		if (iommu_domain_set_attr(cb->mapping->domain,
+			DOMAIN_ATTR_CB_STALL_DISABLE,
+			&stall_disable) < 0) {
 			CAM_ERR(CAM_SMMU,
 				"Error: failed to set non fatal fault attribute");
 		}

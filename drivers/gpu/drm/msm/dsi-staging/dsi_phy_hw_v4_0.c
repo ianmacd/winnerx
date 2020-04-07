@@ -131,7 +131,6 @@ static void dsi_phy_hw_v4_0_lane_settings(struct dsi_phy_hw *phy,
 		 * to the logical data lane 0
 		 */
 		DSI_W32(phy, DSIPHY_LNX_LPRX_CTRL(i), 0);
-		DSI_W32(phy, DSIPHY_LNX_PIN_SWAP(i), 0x0);
 	}
 	dsi_phy_hw_v4_0_config_lpcdrx(phy, cfg, true);
 
@@ -141,6 +140,8 @@ static void dsi_phy_hw_v4_0_lane_settings(struct dsi_phy_hw *phy,
 		DSI_W32(phy, DSIPHY_LNX_CFG1(i), cfg->lanecfg.lane[i][1]);
 		DSI_W32(phy, DSIPHY_LNX_CFG2(i), cfg->lanecfg.lane[i][2]);
 		DSI_W32(phy, DSIPHY_LNX_TX_DCTRL(i), tx_dctrl[i]);
+		DSI_W32(phy, DSIPHY_LNX_PIN_SWAP(i),
+					(cfg->lane_pnswap >> i) & 0x1);
 	}
 
 }
@@ -250,16 +251,6 @@ void dsi_phy_hw_v4_0_enable(struct dsi_phy_hw *phy,
 
 	pr_debug("[DSI_%d]Phy enabled ", phy->index);
 }
-
-#if defined(CONFIG_DISPLAY_SAMSUNG)
-void update_phy_temp_code(struct dsi_phy_hw *phy)
-{
-	if (phy->index ==0)
-		DSI_W32(phy, DSIPHY_CMN_CLK_CFG1, 0x31); /* set PLL src */
-	else
-		DSI_W32(phy, DSIPHY_CMN_CLK_CFG1, 0x34); /* set PLL src */
-}
-#endif
 
 /**
  * disable() - Disable PHY hardware

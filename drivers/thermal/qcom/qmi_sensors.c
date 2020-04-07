@@ -51,6 +51,19 @@ enum qmi_ts_sensor {
 	QMI_TS_MODEM_SKIN,
 	QMI_TS_QFE_PA_MDM,
 	QMI_TS_QFE_PA_WTR,
+	QMI_TS_STREAMER_0,
+	QMI_TS_MOD_MMW_0,
+	QMI_TS_MOD_MMW_1,
+	QMI_TS_MOD_MMW_2,
+	QMI_TS_MOD_MMW_3,
+	QMI_TS_RET_PA_0,
+	QMI_TS_WTR_PA_0,
+	QMI_TS_WTR_PA_1,
+	QMI_TS_WTR_PA_2,
+	QMI_TS_WTR_PA_3,
+	QMI_SYS_THERM1,
+	QMI_SYS_THERM2,
+	QMI_TS_TSENS_1,
 	QMI_TS_MAX_NR
 };
 
@@ -66,6 +79,7 @@ struct qmi_sensor {
 	struct qmi_ts_instance		*ts;
 	enum qmi_ts_sensor		sens_type;
 	struct work_struct		therm_notify_work;
+	struct completion complete;
 };
 
 struct qmi_ts_instance {
@@ -95,6 +109,19 @@ static char sensor_clients[QMI_TS_MAX_NR][QMI_CLIENT_NAME_LENGTH] = {
 	{"xo_therm"},
 	{"qfe_pa_mdm"},
 	{"qfe_pa_wtr"},
+	{"qfe_mmw_streamer0"},
+	{"qfe_mmw0_mod"},
+	{"qfe_mmw1_mod"},
+	{"qfe_mmw2_mod"},
+	{"qfe_mmw3_mod"},
+	{"qfe_ret_pa0"},
+	{"qfe_wtr_pa0"},
+	{"qfe_wtr_pa1"},
+	{"qfe_wtr_pa2"},
+	{"qfe_wtr_pa3"},
+	{"sys_therm1"},
+	{"sys_therm2"},
+	{"modem_tsens1"},
 };
 
 static int32_t encode_qmi(int32_t val)
@@ -187,6 +214,7 @@ static void qmi_ts_update_temperature(struct qmi_ts_instance *ts,
 			decode_qmi(ind_msg->temp) * 1000;
 		pr_debug("sensor:%s temperature:%d\n",
 				qmi_sens->qmi_name, qmi_sens->last_reading);
+		complete(&qmi_sens->complete);
 		if (!qmi_sens->tz_dev)
 			return;
 		if (notify &&
@@ -300,9 +328,11 @@ qmi_send_exit:
 static int qmi_sensor_read(void *data, int *temp)
 {
 	struct qmi_sensor *qmi_sens = (struct qmi_sensor *)data;
+	reinit_completion(&qmi_sens->complete);
 
 	if (qmi_sens->connection_active && !atomic_read(&in_suspend))
 		qmi_ts_request(qmi_sens, true);
+	wait_for_completion_timeout(&qmi_sens->complete, msecs_to_jiffies(1000));
 	*temp = qmi_sens->last_reading;
 
 	return 0;
@@ -620,6 +650,7 @@ static int of_get_qmi_ts_platform_data(struct device *dev)
 			qmi_sens->low_thresh = INT_MIN;
 			INIT_WORK(&qmi_sens->therm_notify_work,
 					qmi_ts_thresh_notify);
+			init_completion(&qmi_sens->complete);
 			list_add(&qmi_sens->ts_node, &ts[idx].ts_sensor_list);
 		}
 		idx++;

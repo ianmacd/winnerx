@@ -1,8 +1,8 @@
 /*
- *	Linux INET6 implementation 
+ *	Linux INET6 implementation
  *
  *	Authors:
- *	Pedro Roque		<roque@di.fc.ul.pt>	
+ *	Pedro Roque		<roque@di.fc.ul.pt>
  *
  *	This program is free software; you can redistribute it and/or
  *      modify it under the terms of the GNU General Public License
@@ -22,9 +22,6 @@
 #include <net/netlink.h>
 #include <net/inetpeer.h>
 #include <net/fib_notifier.h>
-
-
-#include <linux/netlog.h>
 
 #ifdef CONFIG_IPV6_MULTIPLE_TABLES
 #define FIB6_TABLE_HASHSZ 256
@@ -230,9 +227,6 @@ static inline void rt6_hold(struct rt6_info *rt)
 static inline void rt6_release(struct rt6_info *rt)
 {
 	if (atomic_dec_and_test(&rt->rt6i_ref)) {
-		if (strstr(rt->dst.dev->name, "rmnet_data"))
-			net_log("rt6_release(): %s : Prefix: %pI6/%u, GW: %pI6, prot: %u\n",
-				rt->dst.dev->name, &rt->rt6i_dst.addr, rt->rt6i_dst.plen, &rt->rt6i_gateway, rt->rt6i_protocol);
 		rt6_free_pcpu(rt);
 		dst_dev_put(&rt->dst);
 		dst_release(&rt->dst);

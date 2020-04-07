@@ -65,11 +65,7 @@ int apr_tal_write(struct apr_svc_ch_dev *apr_ch, void *data,
 	spin_unlock_irqrestore(&apr_ch->w_lock, flags);
 
 	if (rc)
-#ifdef CONFIG_SEC_SND_DEBUG
-		panic("Unable to send the packet\n");
-#else
 		pr_err_ratelimited("%s: Unable to send the packet, rc:%d\n", __func__, rc);
-#endif
 	else
 		rc = len;
 

@@ -26,3 +26,6 @@ obj-$(CONFIG_XILINX_PR_DECOUPLER)	+= xilinx-pr-decoupler.o
 
 # High Level Interfaces
 obj-$(CONFIG_FPGA_REGION)		+= fpga-region.o
+
+# POGO
+obj-$(CONFIG_POGO_FPGA)			+= pogo_fpga_dev.o
