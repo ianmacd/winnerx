@@ -63,13 +63,13 @@ enum freq_type {
  */
 static struct ss_vib *g_vib;
 
-int32_t g_nlra_gp_clk_m = GP_CLK_M_DEFAULT;
-int32_t g_nlra_gp_clk_n = GP_CLK_N_DEFAULT;
-int32_t g_nlra_gp_clk_d = GP_CLK_D_DEFAULT;
-int32_t g_nlra_gp_clk_pwm_mul = IMM_PWM_MULTIPLIER;
-int32_t motor_strength = MOTOR_STRENGTH;
-int32_t f_multi_freq;
-int32_t motor_min_strength;
+static int32_t g_nlra_gp_clk_m = GP_CLK_M_DEFAULT;
+static int32_t g_nlra_gp_clk_n = GP_CLK_N_DEFAULT;
+static int32_t g_nlra_gp_clk_d = GP_CLK_D_DEFAULT;
+static int32_t g_nlra_gp_clk_pwm_mul = IMM_PWM_MULTIPLIER;
+static int32_t motor_strength = MOTOR_STRENGTH;
+static int32_t f_multi_freq;
+static int32_t motor_min_strength;
 
 #define __inp(port) ioread8(port)
 

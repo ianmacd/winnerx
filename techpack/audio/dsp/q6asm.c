@@ -1960,10 +1960,8 @@ static int32_t q6asm_callback(struct apr_client_data *data, void *priv)
 	    (data->opcode != ASM_DATA_EVENT_EOS) &&
 	    (data->opcode != ASM_SESSION_EVENTX_OVERFLOW) &&
 	    (data->opcode != ASM_SESSION_EVENT_RX_UNDERFLOW)) {
-		if (payload == NULL ||
-				(data->payload_size < (2 * sizeof(uint32_t)))) {
-			pr_err("%s: payload is null or invalid size[%d]\n",
-				__func__, data->payload_size);
+		if (payload == NULL) {
+			pr_err("%s: payload is null\n", __func__);
 			spin_unlock_irqrestore(
 				&(session[session_id].session_lock), flags);
 			return -EINVAL;
@@ -8487,7 +8485,8 @@ static int q6asm_memory_unmap_regions(struct audio_client *ac, int dir)
 	}
 
 	rc = wait_event_timeout(ac->mem_wait,
-			(atomic_read(&ac->mem_state) >= 0), 5*HZ);
+			(atomic_read(&ac->mem_state) >= 0),
+			msecs_to_jiffies(TIMEOUT_MS));
 	if (!rc) {
 		pr_err("%s: timeout. waited for memory_unmap of handle 0x%x\n",
 			__func__, mem_unmap.mem_map_handle);
@@ -9172,7 +9171,7 @@ static int __q6asm_read(struct audio_client *ac, bool is_custom_len_reqd,
 			buf_node = list_entry(ptr, struct asm_buffer_node,
 					list);
 			if (buf_node->buf_phys_addr == ab->phys) {
- 				read.mem_map_handle = buf_node->mmap_hdl;
+				read.mem_map_handle = buf_node->mmap_hdl;
 				break;
 			}
 		}
@@ -9722,16 +9721,17 @@ int q6asm_get_session_time(struct audio_client *ac, uint64_t *tstamp)
 		 ac->session, mtmx_params.hdr.opcode);
 	rc = apr_send_pkt(ac->apr, (uint32_t *) &mtmx_params);
 	if (rc < 0) {
-		pr_err("%s: Commmand 0x%x failed %d\n", __func__,
-		       mtmx_params.hdr.opcode, rc);
-		goto fail_cmd;
+		dev_err_ratelimited(ac->dev, "%s: Get Session Time failed %d\n",
+				    __func__, rc);
+		return rc;
 	}
+
 	rc = wait_event_timeout(ac->time_wait,
 			(atomic_read(&ac->time_flag) == 0),
 			msecs_to_jiffies(TIMEOUT_MS));
 	if (!rc) {
 		pr_err("%s: timeout in getting session time from DSP\n",
-				__func__);
+		       __func__);
 		goto fail_cmd;
 	}
 

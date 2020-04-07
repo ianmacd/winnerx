@@ -234,6 +234,7 @@ typedef struct _muic_data_t {
 #endif
 #if defined(CONFIG_MUIC_SUPPORT_KEYBOARDDOCK)
 	int keyboard_state;
+	int adc_rescan_count;
 #endif
 }muic_data_t;
 

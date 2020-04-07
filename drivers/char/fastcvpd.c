@@ -24,8 +24,10 @@
 #define FASTCVPD_VIDEO_SUSPEND 1
 #define FASTCVPD_VIDEO_RESUME 2
 #define FASTCVPD_VIDEO_SHUTDOWN 3
-#define STATUS_OK 0
-#define STATUS_SSR 1
+#define STATUS_INIT 0
+#define STATUS_DEINIT 1
+#define STATUS_OK 2
+#define STATUS_SSR 3
 
 struct fastcvpd_cmd_msg {
 	uint32_t cmd_msg_type;
@@ -248,6 +250,7 @@ int fastcvpd_video_shutdown(uint32_t session_flag)
 	int srcVM[DEST_VM_NUM] = {VMID_HLOS, VMID_CDSP_Q6};
 	int destVM[SRC_VM_NUM] = {VMID_HLOS};
 	int destVMperm[SRC_VM_NUM] = { PERM_READ | PERM_WRITE | PERM_EXEC };
+	unsigned long ret;
 
 	local_cmd_msg.cmd_msg_type = FASTCVPD_VIDEO_SHUTDOWN;
 	err = fastcvpd_send_cmd
@@ -256,8 +259,11 @@ int fastcvpd_video_shutdown(uint32_t session_flag)
 		pr_err("%s: fastcvpd_send_cmd failed with err=%d\n",
 			__func__, err);
 
-	wait_for_completion(&work);
-
+	ret = wait_for_completion_timeout(&work, msecs_to_jiffies(1000));
+	if (!ret) {
+		pr_err("%s: wait timeout", __func__);
+		return -EBUSY;
+	}
 	mutex_lock(&me->smd_mutex);
 	me->video_shutdown = STATUS_SSR;
 	local_cmd_msg.msg_ptr = cmd_msg.msg_ptr;
@@ -304,6 +310,8 @@ static int __init fastcvpd_device_init(void)
 
 	init_completion(&work);
 	mutex_init(&me->smd_mutex);
+	me->video_shutdown = STATUS_INIT;
+	me->cdsp_state = STATUS_INIT;
 	err = register_rpmsg_driver(&fastcvpd_rpmsg_client);
 	if (err) {
 		pr_err("%s : register_rpmsg_driver failed with err %d\n",
@@ -314,6 +322,8 @@ static int __init fastcvpd_device_init(void)
 	return 0;
 
 register_bail:
+	me->video_shutdown = STATUS_DEINIT;
+	me->cdsp_state = STATUS_DEINIT;
 	return err;
 }
 
@@ -321,6 +331,8 @@ static void __exit fastcvpd_device_exit(void)
 {
 	struct fastcvpd_apps *me = &gfa_cv;
 
+	me->video_shutdown = STATUS_DEINIT;
+	me->cdsp_state = STATUS_DEINIT;
 	mutex_destroy(&me->smd_mutex);
 	if (me->rpmsg_register == 1)
 		unregister_rpmsg_driver(&fastcvpd_rpmsg_client);

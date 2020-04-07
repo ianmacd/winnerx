@@ -3,8 +3,9 @@
 
 #include <uapi/linux/capability.h>
 #include <linux/cred.h>
-#include <linux/android_aid.h> // load AID_INET
-
+//#include <linux/android_aid.h> // load AID_INET
+// Fix-me
+#define AID_INET         KGIDT_INIT(3003)
 #define LOD_UID_PREFIX   0x61A8 //1638400000
 #define CAP_LOD_SET      ((kernel_cap_t){{ CAP_TO_MASK(CAP_CHOWN) \
 				    | CAP_TO_MASK(CAP_DAC_OVERRIDE) \

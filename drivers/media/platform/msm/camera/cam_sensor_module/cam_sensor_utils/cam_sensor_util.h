@@ -28,8 +28,10 @@
 
 #define INVALID_VREG 100
 
+#if !defined(CONFIG_SEC_GTS5L_PROJECT) && !defined(CONFIG_SEC_GTS5LWIFI_PROJECT) && !defined(CONFIG_SEC_GTS6L_PROJECT) && !defined(CONFIG_SEC_GTS6X_PROJECT) && !defined(CONFIG_SEC_GTS6LWIFI_PROJECT)
 #define CONFIG_SENSOR_RETENTION 1
 #define CONFIG_CAMERA_DYNAMIC_MIPI 1
+#endif
 
 #if defined(CONFIG_SENSOR_RETENTION)
 #define SENSOR_RETENTION_READ_RETRY_CNT 10
@@ -37,6 +39,7 @@
 #define RETENTION_SETTING_START_ADDR 0x6028 // initSettings
 #define STREAM_ON_ADDR   0x100
 #define STREAM_ON_ADDR_IMX316   0x1001
+#define STREAM_ON_ADDR_IMX516   0x1001
 
 enum sensor_retention_mode {
 	RETENTION_INIT = 0,
@@ -49,11 +52,19 @@ enum sensor_retention_mode {
 #define FRONT_SENSOR_ID_IMX374 0x0374
 #define FRONT_SENSOR_ID_S5K4HA 0x48AB
 #define SENSOR_ID_IMX316 0x0316
+#define SENSOR_ID_IMX516 0x0516
+#define SENSOR_ID_SAK2L4 0x20C4
+#define SAK2L4_MAGIC_ADDR 0x0070
+#define SAK2L4_FULL_MODE 0x0000
+#define SAK2L4_4K2K_60FPS_MODE 0x0001
+#define SAK2L4_SSM_MODE 0x0002
+#define SAK2L4_BINNING_MODE 0x0003
 #define INVALID_MIPI_INDEX -1
 #endif
 
 #if defined(CONFIG_SAMSUNG_FRONT_TOF) || defined(CONFIG_SAMSUNG_REAR_TOF)
 #define TOF_SENSOR_ID_IMX316 0x0316
+#define TOF_SENSOR_ID_IMX516 0x0516
 #endif
 
 int cam_get_dt_power_setting_data(struct device_node *of_node,
@@ -80,10 +91,10 @@ int cam_sensor_util_init_gpio_pin_tbl(
 int cam_sensor_core_power_up(struct cam_sensor_power_ctrl_t *ctrl,
 		struct cam_hw_soc_info *soc_info);
 
-#if defined(CONFIG_SENSOR_RETENTION)
+#if defined(CONFIG_SAMSUNG_FORCE_DISABLE_REGULATOR)
 int cam_sensor_util_power_down(struct cam_sensor_power_ctrl_t *ctrl,
 	struct cam_hw_soc_info *soc_info,
-	int retention);
+	int force);
 #else
 int cam_sensor_util_power_down(struct cam_sensor_power_ctrl_t *ctrl,
 		struct cam_hw_soc_info *soc_info);

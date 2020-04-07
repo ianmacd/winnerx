@@ -13,6 +13,7 @@
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/clk.h>
+#include <linux/clk-provider.h>
 #include <linux/io.h>
 #include <linux/platform_device.h>
 #include <linux/regmap.h>
@@ -140,6 +141,7 @@ struct tx_macro_priv {
 	struct clk *tx_npl_clk;
 	struct mutex mclk_lock;
 	struct mutex swr_clk_lock;
+	struct mutex clk_lock;
 	struct snd_soc_codec *codec;
 	struct device_node *tx_swr_gpio_p;
 	struct tx_macro_swr_ctrl_data *swr_ctrl_data;
@@ -158,6 +160,7 @@ struct tx_macro_priv {
 	struct platform_device *pdev_child_devices
 			[TX_MACRO_CHILD_DEVICES_MAX];
 	int child_count;
+	bool bcs_enable;
 };
 
 static bool tx_macro_get_data(struct snd_soc_codec *codec,
@@ -284,11 +287,34 @@ static int tx_macro_mclk_event(struct snd_soc_dapm_widget *w,
 	return ret;
 }
 
+static int tx_macro_mclk_reset(struct device *dev)
+{
+	struct tx_macro_priv *tx_priv = dev_get_drvdata(dev);
+	int count = 0;
+
+	mutex_lock(&tx_priv->clk_lock);
+	while (__clk_is_enabled(tx_priv->tx_core_clk)) {
+		clk_disable_unprepare(tx_priv->tx_npl_clk);
+		clk_disable_unprepare(tx_priv->tx_core_clk);
+		count++;
+	}
+	dev_dbg(tx_priv->dev,
+			"%s: clock reset after ssr, count %d\n", __func__, count);
+	while (count) {
+		clk_prepare_enable(tx_priv->tx_core_clk);
+		clk_prepare_enable(tx_priv->tx_npl_clk);
+		count--;
+	}
+	mutex_unlock(&tx_priv->clk_lock);
+	return 0;
+}
+
 static int tx_macro_mclk_ctrl(struct device *dev, bool enable)
 {
 	struct tx_macro_priv *tx_priv = dev_get_drvdata(dev);
 	int ret = 0;
 
+	mutex_lock(&tx_priv->clk_lock);
 	if (enable) {
 		ret = clk_prepare_enable(tx_priv->tx_core_clk);
 		if (ret < 0) {
@@ -308,6 +334,7 @@ static int tx_macro_mclk_ctrl(struct device *dev, bool enable)
 	}
 
 exit:
+	mutex_unlock(&tx_priv->clk_lock);
 	return ret;
 }
 
@@ -335,6 +362,9 @@ static int tx_macro_event_handler(struct snd_soc_codec *codec, u16 event,
 		swrm_wcd_notify(
 			tx_priv->swr_ctrl_data[0].tx_swr_pdev,
 			SWR_DEVICE_SSR_UP, NULL);
+		break;
+	case BOLERO_MACRO_EVT_CLK_RESET:
+		tx_macro_mclk_reset(tx_dev);
 		break;
 	}
 	return 0;
@@ -543,6 +573,36 @@ static int tx_macro_tx_mixer_put(struct snd_kcontrol *kcontrol,
 
 	return 0;
 }
+static int tx_macro_get_bcs(struct snd_kcontrol *kcontrol,
+			    struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_codec *codec = snd_soc_kcontrol_codec(kcontrol);
+	struct tx_macro_priv *tx_priv = NULL;
+	struct device *tx_dev = NULL;
+
+	if (!tx_macro_get_data(codec, &tx_dev, &tx_priv, __func__))
+		return -EINVAL;
+
+	ucontrol->value.integer.value[0] = tx_priv->bcs_enable;
+
+	return 0;
+}
+
+static int tx_macro_set_bcs(struct snd_kcontrol *kcontrol,
+			    struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_codec *codec = snd_soc_kcontrol_codec(kcontrol);
+	struct tx_macro_priv *tx_priv = NULL;
+	struct device *tx_dev = NULL;
+	int value = ucontrol->value.integer.value[0];
+
+	if (!tx_macro_get_data(codec, &tx_dev, &tx_priv, __func__))
+		return -EINVAL;
+
+	tx_priv->bcs_enable = value;
+
+	return 0;
+}
 
 static int tx_macro_enable_dmic(struct snd_soc_dapm_widget *w,
 		struct snd_kcontrol *kcontrol, int event)
@@ -692,6 +752,12 @@ static int tx_macro_enable_dec(struct snd_soc_dapm_widget *w,
 		/* apply gain after decimator is enabled */
 		snd_soc_write(codec, tx_gain_ctl_reg,
 			      snd_soc_read(codec, tx_gain_ctl_reg));
+		if (tx_priv->bcs_enable) {
+			snd_soc_update_bits(codec, dec_cfg_reg,
+					0x01, 0x01);
+			snd_soc_update_bits(codec, BOLERO_CDC_TX0_TX_PATH_SEC7,
+					    0x40, 0x40);
+		}
 		break;
 	case SND_SOC_DAPM_PRE_PMD:
 		hpf_cut_off_freq =
@@ -720,6 +786,12 @@ static int tx_macro_enable_dec(struct snd_soc_dapm_widget *w,
 	case SND_SOC_DAPM_POST_PMD:
 		snd_soc_update_bits(codec, tx_vol_ctl_reg, 0x20, 0x00);
 		snd_soc_update_bits(codec, tx_vol_ctl_reg, 0x10, 0x00);
+		if (tx_priv->bcs_enable) {
+			snd_soc_update_bits(codec, dec_cfg_reg,
+					0x01, 0x00);
+			snd_soc_update_bits(codec, BOLERO_CDC_TX0_TX_PATH_SEC7,
+					    0x40, 0x00);
+		}
 		break;
 	}
 	return 0;
@@ -1390,6 +1462,9 @@ static const struct snd_kcontrol_new tx_macro_snd_controls[] = {
 	SOC_SINGLE_SX_TLV("TX_DEC7 Volume",
 			  BOLERO_CDC_TX7_TX_VOL_CTL,
 			  0, -84, 40, digital_gain),
+
+	SOC_SINGLE_EXT("DEC0_BCS Switch", SND_SOC_NOPM, 0, 1, 0,
+		       tx_macro_get_bcs, tx_macro_set_bcs),
 };
 
 static int tx_macro_swrm_clock(void *handle, bool enable)
@@ -1585,6 +1660,8 @@ static int tx_macro_init(struct snd_soc_codec *codec)
 			  tx_macro_mute_update_callback);
 	}
 	tx_priv->codec = codec;
+	snd_soc_update_bits(codec,
+		BOLERO_CDC_TX0_TX_PATH_SEC7, 0x3F, 0x0E);
 
 	return 0;
 }
@@ -1803,6 +1880,7 @@ static int tx_macro_probe(struct platform_device *pdev)
 
 	mutex_init(&tx_priv->mclk_lock);
 	mutex_init(&tx_priv->swr_clk_lock);
+	mutex_init(&tx_priv->clk_lock);
 	tx_macro_init_ops(&ops, tx_io_base);
 	ret = bolero_register_macro(&pdev->dev, TX_MACRO, &ops);
 	if (ret) {
@@ -1815,6 +1893,7 @@ static int tx_macro_probe(struct platform_device *pdev)
 err_reg_macro:
 	mutex_destroy(&tx_priv->mclk_lock);
 	mutex_destroy(&tx_priv->swr_clk_lock);
+	mutex_destroy(&tx_priv->clk_lock);
 	return ret;
 }
 
@@ -1835,6 +1914,7 @@ static int tx_macro_remove(struct platform_device *pdev)
 
 	mutex_destroy(&tx_priv->mclk_lock);
 	mutex_destroy(&tx_priv->swr_clk_lock);
+	mutex_destroy(&tx_priv->clk_lock);
 	bolero_unregister_macro(&pdev->dev, TX_MACRO);
 	return 0;
 }

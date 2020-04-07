@@ -434,12 +434,12 @@ done:
 static void rx_fill(struct eth_dev *dev, gfp_t gfp_flags)
 {
 	struct usb_request	*req;
-	struct usb_request	*tmp;
 	unsigned long		flags;
 
 	/* fill unused rxq slots with some skb */
 	spin_lock_irqsave(&dev->req_lock, flags);
-	list_for_each_entry_safe(req, tmp, &dev->rx_reqs, list) {
+	while (!list_empty(&dev->rx_reqs)) {
+		req = list_first_entry(&dev->rx_reqs, struct usb_request, list);
 		list_del_init(&req->list);
 		spin_unlock_irqrestore(&dev->req_lock, flags);
 
@@ -953,7 +953,7 @@ int gether_get_dev_addr(struct net_device *net, char *dev_addr, int len)
 
 	dev = netdev_priv(net);
 	ret = get_ether_addr_str(dev->dev_mac, dev_addr, len);
-	if (ret + 1 < len) {
+	if (ret + 1 < len && ret > 0) {
 		dev_addr[ret++] = '\n';
 		dev_addr[ret] = '\0';
 	}
@@ -982,7 +982,7 @@ int gether_get_host_addr(struct net_device *net, char *host_addr, int len)
 
 	dev = netdev_priv(net);
 	ret = get_ether_addr_str(dev->host_mac, host_addr, len);
-	if (ret + 1 < len) {
+	if (ret + 1 < len && ret > 0) {
 		host_addr[ret++] = '\n';
 		host_addr[ret] = '\0';
 	}
@@ -1159,7 +1159,6 @@ void gether_disconnect(struct gether *link)
 {
 	struct eth_dev		*dev = link->ioport;
 	struct usb_request	*req;
-	struct usb_request	*tmp;
 
 	WARN_ON(!dev);
 	if (!dev)
@@ -1176,7 +1175,8 @@ void gether_disconnect(struct gether *link)
 	 */
 	usb_ep_disable(link->in_ep);
 	spin_lock(&dev->req_lock);
-	list_for_each_entry_safe(req, tmp, &dev->tx_reqs, list) {
+	while (!list_empty(&dev->tx_reqs)) {
+		req = list_first_entry(&dev->tx_reqs, struct usb_request, list);
 		list_del(&req->list);
 
 		spin_unlock(&dev->req_lock);
@@ -1188,7 +1188,8 @@ void gether_disconnect(struct gether *link)
 
 	usb_ep_disable(link->out_ep);
 	spin_lock(&dev->req_lock);
-	list_for_each_entry_safe(req, tmp, &dev->rx_reqs, list) {
+	while (!list_empty(&dev->rx_reqs)) {
+		req = list_first_entry(&dev->rx_reqs, struct usb_request, list);
 		list_del(&req->list);
 
 		spin_unlock(&dev->req_lock);

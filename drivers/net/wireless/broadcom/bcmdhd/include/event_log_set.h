@@ -24,7 +24,7 @@
  *
  * <<Broadcom-WL-IPTag/Open:>>
  *
- * $Id: event_log_set.h 802617 2019-02-04 03:38:10Z $
+ * $Id: event_log_set.h 818566 2019-05-08 04:01:45Z $
  */
 
 #ifndef _EVENT_LOG_SET_H_
@@ -97,6 +97,10 @@
 /* BUS preserve chatty */
 #define EVENT_LOG_SET_PRSRV_BUS_CHATTY	(24u)
 
+/* PRESERVE_PREIODIC_LOG_SET */
+/* flush if host is in D0 at every period */
+#define EVENT_LOG_SET_PRSV_PERIODIC	(25u)
+
 #ifndef NUM_EVENT_LOG_SETS
 /* Set a maximum number of sets here.  It is not dynamic for
  * efficiency of the EVENT_LOG calls. Old branches could define
@@ -105,9 +109,9 @@
  */
 #ifdef NUM_EVENT_LOG_SETS_V2
 /* for v2, everything has became unsigned */
-#define NUM_EVENT_LOG_SETS (25u)
+#define NUM_EVENT_LOG_SETS (26u)
 #else /* NUM_EVENT_LOG_SETS_V2 */
-#define NUM_EVENT_LOG_SETS (25)
+#define NUM_EVENT_LOG_SETS (26)
 #endif /* NUM_EVENT_LOG_SETS_V2 */
 #endif /* NUM_EVENT_LOG_SETS */
 

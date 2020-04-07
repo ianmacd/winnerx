@@ -22,6 +22,7 @@
 #include "rmnet_vnd.h"
 #include "rmnet_private.h"
 #include "rmnet_map.h"
+#include "rmnet_descriptor.h"
 #include <soc/qcom/rmnet_qmi.h>
 #include <soc/qcom/qmi_rmnet.h>
 #include <linux/proc_fs.h>
@@ -47,10 +48,25 @@
 
 /* Local Definitions and Declarations */
 
-static const struct nla_policy rmnet_policy[IFLA_RMNET_MAX + 2] = {
-	[IFLA_RMNET_MUX_ID]	= { .type = NLA_U16 },
-	[IFLA_RMNET_FLAGS]	= { .len = sizeof(struct ifla_rmnet_flags) },
-	[IFLA_VLAN_EGRESS_QOS]	= { .len = sizeof(struct tcmsg) },
+enum {
+	IFLA_RMNET_DFC_QOS = __IFLA_RMNET_MAX,
+	IFLA_RMNET_UL_AGG_PARAMS,
+	__IFLA_RMNET_EXT_MAX,
+};
+
+static const struct nla_policy rmnet_policy[__IFLA_RMNET_EXT_MAX] = {
+	[IFLA_RMNET_MUX_ID] = {
+		.type = NLA_U16
+	},
+	[IFLA_RMNET_FLAGS] = {
+		.len = sizeof(struct ifla_rmnet_flags)
+	},
+	[IFLA_RMNET_DFC_QOS] = {
+		.len = sizeof(struct tcmsg)
+	},
+	[IFLA_RMNET_UL_AGG_PARAMS] = {
+		.len = sizeof(struct rmnet_egress_agg_params)
+	},
 };
 
 int rmnet_is_real_dev_registered(const struct net_device *real_dev)
@@ -74,6 +90,8 @@ static int rmnet_unregister_real_device(struct net_device *real_dev,
 
 	rmnet_map_cmd_exit(port);
 	rmnet_map_tx_aggregate_exit(port);
+
+	rmnet_descriptor_deinit(port);
 
 	kfree(port);
 
@@ -111,6 +129,12 @@ static int rmnet_register_real_device(struct net_device *real_dev)
 
 	for (entry = 0; entry < RMNET_MAX_LOGICAL_EP; entry++)
 		INIT_HLIST_HEAD(&port->muxed_ep[entry]);
+
+	rc = rmnet_descriptor_init(port);
+	if (rc) {
+		rmnet_descriptor_deinit(port);
+		return rc;
+	}
 
 	rmnet_map_tx_aggregate_init(port);
 	rmnet_map_cmd_init(port);
@@ -191,6 +215,17 @@ static int rmnet_newlink(struct net *src_net, struct net_device *dev,
 	netdev_dbg(dev, "data format [0x%08X]\n", data_format);
 	port->data_format = data_format;
 
+	if (data[IFLA_RMNET_UL_AGG_PARAMS]) {
+		void *agg_params;
+		unsigned long irq_flags;
+
+		agg_params = nla_data(data[IFLA_RMNET_UL_AGG_PARAMS]);
+		spin_lock_irqsave(&port->agg_lock, irq_flags);
+		memcpy(&port->egress_agg_params, agg_params,
+		       sizeof(port->egress_agg_params));
+		spin_unlock_irqrestore(&port->agg_lock, irq_flags);
+	}
+
 	return 0;
 
 err1:
@@ -229,9 +264,9 @@ static void rmnet_dellink(struct net_device *dev, struct list_head *head)
 	if (!port->nr_rmnet_devs)
 		qmi_rmnet_qmi_exit(port->qmi_info, port);
 
-	rmnet_unregister_real_device(real_dev, port);
+	unregister_netdevice(dev);
 
-	unregister_netdevice_queue(dev, head);
+	rmnet_unregister_real_device(real_dev, port);
 }
 
 static void rmnet_force_unassociate_device(struct net_device *dev)
@@ -261,7 +296,9 @@ static void rmnet_force_unassociate_device(struct net_device *dev)
 		synchronize_rcu();
 		kfree(ep);
 	}
-
+	/* Unregistering devices in context before freeing port.
+	 * If this API becomes non-context their order should switch.
+	 */
 	unregister_netdevice_many(&list);
 
 	rmnet_unregister_real_device(real_dev, port);
@@ -295,6 +332,7 @@ static struct notifier_block rmnet_dev_notifier __read_mostly = {
 static int rmnet_rtnl_validate(struct nlattr *tb[], struct nlattr *data[],
 			       struct netlink_ext_ack *extack)
 {
+	struct rmnet_egress_agg_params *agg_params;
 	u16 mux_id;
 
 	if (!data) {
@@ -304,6 +342,12 @@ static int rmnet_rtnl_validate(struct nlattr *tb[], struct nlattr *data[],
 			mux_id = nla_get_u16(data[IFLA_RMNET_MUX_ID]);
 			if (mux_id > (RMNET_MAX_LOGICAL_EP - 1))
 				return -ERANGE;
+		}
+
+		if (data[IFLA_RMNET_UL_AGG_PARAMS]) {
+			agg_params = nla_data(data[IFLA_RMNET_UL_AGG_PARAMS]);
+			if (agg_params->agg_time < 3000000)
+				return -EINVAL;
 		}
 	}
 
@@ -348,11 +392,21 @@ static int rmnet_changelink(struct net_device *dev, struct nlattr *tb[],
 		port->data_format = flags->flags & flags->mask;
 	}
 
-	if (data[IFLA_VLAN_EGRESS_QOS]) {
+	if (data[IFLA_RMNET_DFC_QOS]) {
 		struct tcmsg *tcm;
 
-		tcm = nla_data(data[IFLA_VLAN_EGRESS_QOS]);
+		tcm = nla_data(data[IFLA_RMNET_DFC_QOS]);
 		qmi_rmnet_change_link(dev, port, tcm);
+	}
+
+	if (data[IFLA_RMNET_UL_AGG_PARAMS]) {
+		struct rmnet_egress_agg_params *agg_params;
+
+		agg_params = nla_data(data[IFLA_RMNET_UL_AGG_PARAMS]);
+		rmnet_map_update_ul_agg_config(port, agg_params->agg_size,
+					       agg_params->agg_count,
+					       agg_params->agg_features,
+					       agg_params->agg_time);
 	}
 
 	return 0;
@@ -365,7 +419,10 @@ static size_t rmnet_get_size(const struct net_device *dev)
 		nla_total_size(2) +
 		/* IFLA_RMNET_FLAGS */
 		nla_total_size(sizeof(struct ifla_rmnet_flags)) +
-		nla_total_size(sizeof(struct tcmsg));
+		/* IFLA_RMNET_DFC_QOS */
+		nla_total_size(sizeof(struct tcmsg)) +
+		/* IFLA_RMNET_UL_AGG_PARAMS */
+		nla_total_size(sizeof(struct rmnet_egress_agg_params));
 }
 
 static int rmnet_fill_info(struct sk_buff *skb, const struct net_device *dev)
@@ -373,7 +430,7 @@ static int rmnet_fill_info(struct sk_buff *skb, const struct net_device *dev)
 	struct rmnet_priv *priv = netdev_priv(dev);
 	struct net_device *real_dev;
 	struct ifla_rmnet_flags f;
-	struct rmnet_port *port;
+	struct rmnet_port *port = NULL;
 
 	real_dev = priv->real_dev;
 
@@ -392,6 +449,13 @@ static int rmnet_fill_info(struct sk_buff *skb, const struct net_device *dev)
 	if (nla_put(skb, IFLA_RMNET_FLAGS, sizeof(f), &f))
 		goto nla_put_failure;
 
+	if (port) {
+		if (nla_put(skb, IFLA_RMNET_UL_AGG_PARAMS,
+			    sizeof(port->egress_agg_params),
+			    &port->egress_agg_params))
+			goto nla_put_failure;
+	}
+
 	return 0;
 
 nla_put_failure:
@@ -400,7 +464,7 @@ nla_put_failure:
 
 struct rtnl_link_ops rmnet_link_ops __read_mostly = {
 	.kind		= "rmnet",
-	.maxtype	= __IFLA_RMNET_MAX,
+	.maxtype	= __IFLA_RMNET_EXT_MAX,
 	.priv_size	= sizeof(struct rmnet_priv),
 	.setup		= rmnet_vnd_setup,
 	.validate	= rmnet_rtnl_validate,
@@ -642,9 +706,19 @@ int rmnet_get_powersave_notif(void *port)
 	return ((struct rmnet_port *)port)->data_format & RMNET_FORMAT_PS_NOTIF;
 }
 EXPORT_SYMBOL(rmnet_get_powersave_notif);
+
+struct net_device *rmnet_get_real_dev(void *port)
+{
+	if (port)
+		return ((struct rmnet_port *)port)->dev;
+
+	return NULL;
+}
+EXPORT_SYMBOL(rmnet_get_real_dev);
+
 #endif
 
-u32 config_flushcount;
+#if defined(CONFIG_ARGOS)
 #define PROC_BUFSIZE 20
 
 static ssize_t rmnet_set_dl_flush_count(struct file *file,
@@ -695,13 +769,13 @@ static const struct file_operations rmnet_fops = {
 	.read		= rmnet_get_dl_flush_count,
 	.write		= rmnet_set_dl_flush_count,
 };
+#endif
 
 /* Startup/Shutdown */
 
 static int __init rmnet_init(void)
 {
 	int rc;
-	struct proc_dir_entry *pde;
 
 	rc = register_netdevice_notifier(&rmnet_dev_notifier);
 	if (rc != 0)
@@ -712,11 +786,18 @@ static int __init rmnet_init(void)
 		unregister_netdevice_notifier(&rmnet_dev_notifier);
 		return rc;
 	}
+	
+#if defined(CONFIG_ARGOS) 
+{
+	struct proc_dir_entry *pde;
+
 	/* default gro flush count*/
 	config_flushcount = 2;
 	pde = proc_create("rmnet_flush_count", 0444, NULL, &rmnet_fops);
 	if (!pde)
 		return -ENOMEM;
+}
+#endif
 	return rc;
 }
 

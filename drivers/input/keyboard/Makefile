@@ -25,6 +25,7 @@ obj-$(CONFIG_KEYBOARD_GPIO)		+= gpio_keys.o
 obj-$(CONFIG_SENSORS_HALL)		+= hall_ic.o
 obj-$(CONFIG_CERTIFY_HALL)		+= certify_hall_ic.o
 obj-$(CONFIG_FOLDER_HALL)		+= folder_hall_ic.o
+obj-$(CONFIG_WACOM_HALL)		+= hall_ic_wacom.o
 obj-$(CONFIG_KEYBOARD_GPIO_POLLED)	+= gpio_keys_polled.o
 obj-$(CONFIG_KEYBOARD_TCA6416)		+= tca6416-keypad.o
 obj-$(CONFIG_KEYBOARD_TCA8418)		+= tca8418_keypad.o
@@ -70,6 +71,6 @@ obj-$(CONFIG_KEYBOARD_TM2_TOUCHKEY)	+= tm2-touchkey.o
 obj-$(CONFIG_KEYBOARD_TWL4030)		+= twl4030_keypad.o
 obj-$(CONFIG_KEYBOARD_XTKBD)		+= xtkbd.o
 obj-$(CONFIG_KEYBOARD_W90P910)		+= w90p910_keypad.o
-obj-$(CONFIG_INPUT_NDT)			+= ndt_force_f61.o
 obj-$(CONFIG_KEYBOARD_STM_FSR)		+= stm/fsr1ad04/
-
+obj-$(CONFIG_KEYBOARD_STM32_POGO)	+= stm/stm32l0/
+obj-$(CONFIG_LOGICAL_HALL)		+= hall_ic_logical.o

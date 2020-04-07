@@ -309,7 +309,7 @@ static int pfk_get_key_for_bio(const struct bio *bio,
 	/*
 	 * If blk-crypt is used, get a key from a bio instead of an inode
 	 */
-	if (bio && (bio->bi_opf & REQ_CRYPT))
+	if (blk_crypt_encrypted(bio))
 		key = (const struct blk_encryption_key *)(bio->bi_cryptd);
 
 	if (key) {
@@ -501,10 +501,12 @@ bool pfk_allow_merge_bio(const struct bio *bio1, const struct bio *bio2)
 {
 	const struct blk_encryption_key *key1 = NULL;
 	const struct blk_encryption_key *key2 = NULL;
+#ifndef CONFIG_BLK_DEV_CRYPT
 	const struct inode *inode1;
 	const struct inode *inode2;
 	enum pfe_type which_pfe1;
 	enum pfe_type which_pfe2;
+#endif
 
 #ifdef CONFIG_DM_DEFAULT_KEY
 	key1 = bio1->bi_crypt_key;
@@ -523,8 +525,7 @@ bool pfk_allow_merge_bio(const struct bio *bio1, const struct bio *bio2)
 #ifdef CONFIG_BLK_DEV_CRYPT
 	if (!blk_crypt_mergeable(bio1, bio2))
 		return false;
-#endif
-
+#else
 	inode1 = pfk_bio_get_inode(bio1);
 	inode2 = pfk_bio_get_inode(bio2);
 
@@ -544,6 +545,7 @@ bool pfk_allow_merge_bio(const struct bio *bio1, const struct bio *bio2)
 		return (*(pfk_allow_merge_bio_ftable[which_pfe1]))(bio1, bio2,
 				inode1, inode2);
 	}
+#endif
 
 	/*
 	 * Neither bio is for an encrypted file.  Merge only if the default keys

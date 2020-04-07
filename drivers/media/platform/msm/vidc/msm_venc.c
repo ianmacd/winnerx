@@ -683,11 +683,12 @@ static struct msm_vidc_ctrl msm_venc_ctrls[] = {
 		.name = "Extradata Type",
 		.type = V4L2_CTRL_TYPE_MENU,
 		.minimum = V4L2_MPEG_VIDC_EXTRADATA_NONE,
-		.maximum = V4L2_MPEG_VIDC_EXTRADATA_UBWC_CR_STATS_INFO,
+		.maximum = V4L2_MPEG_VIDC_EXTRADATA_ENC_FRAME_QP,
 		.default_value = V4L2_MPEG_VIDC_EXTRADATA_NONE,
 		.menu_skip_mask = ~(
 			(1 << V4L2_MPEG_VIDC_EXTRADATA_NONE) |
 			(1 << V4L2_MPEG_VIDC_EXTRADATA_INTERLACE_VIDEO) |
+			(1 << V4L2_MPEG_VIDC_EXTRADATA_ENC_DTS) |
 			(1 << V4L2_MPEG_VIDC_EXTRADATA_TIMESTAMP) |
 			(1 << V4L2_MPEG_VIDC_EXTRADATA_S3D_FRAME_PACKING) |
 			(1 << V4L2_MPEG_VIDC_EXTRADATA_FRAME_RATE) |
@@ -697,7 +698,9 @@ static struct msm_vidc_ctrl msm_venc_ctrls[] = {
 			(1 << V4L2_MPEG_VIDC_EXTRADATA_ASPECT_RATIO) |
 			(1 << V4L2_MPEG_VIDC_EXTRADATA_LTR) |
 			(1 << V4L2_MPEG_VIDC_EXTRADATA_ROI_QP) |
-			(1 << V4L2_MPEG_VIDC_EXTRADATA_HDR10PLUS_METADATA)
+			(1 << V4L2_MPEG_VIDC_EXTRADATA_HDR10PLUS_METADATA) |
+			(1 << V4L2_MPEG_VIDC_EXTRADATA_INPUT_CROP) |
+			(1ULL << V4L2_MPEG_VIDC_EXTRADATA_ENC_FRAME_QP)
 			),
 		.qmenu = mpeg_video_vidc_extradata,
 	},
@@ -1349,6 +1352,7 @@ int msm_venc_s_ctrl(struct msm_vidc_inst *inst, struct v4l2_ctrl *ctrl)
 	struct hal_nal_stream_format_select stream_format;
 	struct hal_heic_frame_quality frame_quality;
 	struct hal_heic_grid_enable grid_enable;
+	enum hal_flip flip = HAL_FLIP_NONE;
 
 	if (!inst || !inst->core || !inst->core->device) {
 		dprintk(VIDC_ERR, "%s invalid parameters\n", __func__);
@@ -1604,6 +1608,7 @@ int msm_venc_s_ctrl(struct msm_vidc_inst *inst, struct v4l2_ctrl *ctrl)
 				V4L2_CID_MPEG_VIDC_VIDEO_HEVC_TIER_LEVEL,
 				temp_ctrl->val);
 		pdata = &profile_level;
+		inst->profile = profile_level.profile;
 		break;
 	case V4L2_CID_MPEG_VIDC_VIDEO_HEVC_TIER_LEVEL:
 		temp_ctrl = TRY_GET_CTRL(V4L2_CID_MPEG_VIDC_VIDEO_HEVC_PROFILE);
@@ -1652,6 +1657,14 @@ int msm_venc_s_ctrl(struct msm_vidc_inst *inst, struct v4l2_ctrl *ctrl)
 	case V4L2_CID_MPEG_VIDC_VIDEO_FLIP:
 	{
 		dprintk(VIDC_DBG, "Flip %d\n", ctrl->val);
+		if (inst->state >= MSM_VIDC_START_DONE &&
+			inst->state <= MSM_VIDC_STOP_DONE) {
+			property_id = HAL_CONFIG_VPE_FLIP;
+			flip = msm_comm_v4l2_to_hal(
+				V4L2_CID_MPEG_VIDC_VIDEO_FLIP,
+				ctrl->val);
+			pdata = &flip;
+		}
 		break;
 	}
 	case V4L2_CID_MPEG_VIDEO_MULTI_SLICE_MODE: {
@@ -1825,9 +1838,12 @@ int msm_venc_s_ctrl(struct msm_vidc_inst *inst, struct v4l2_ctrl *ctrl)
 		case V4L2_MPEG_VIDC_EXTRADATA_ASPECT_RATIO:
 		case V4L2_MPEG_VIDC_EXTRADATA_ROI_QP:
 		case V4L2_MPEG_VIDC_EXTRADATA_HDR10PLUS_METADATA:
+		case V4L2_MPEG_VIDC_EXTRADATA_INPUT_CROP:
 			inst->bufq[OUTPUT_PORT].num_planes = 2;
 			break;
 		case V4L2_MPEG_VIDC_EXTRADATA_LTR:
+		case V4L2_MPEG_VIDC_EXTRADATA_ENC_FRAME_QP:
+		case V4L2_MPEG_VIDC_EXTRADATA_ENC_DTS:
 			inst->bufq[CAPTURE_PORT].num_planes = 2;
 			break;
 		default:

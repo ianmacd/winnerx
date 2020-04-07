@@ -27,7 +27,7 @@
  *
  * <<Broadcom-WL-IPTag/Open:>>
  *
- * $Id: event_log_payload.h 809551 2019-03-14 08:16:16Z $
+ * $Id: event_log_payload.h 820855 2019-05-21 05:33:53Z $
  */
 
 #ifndef _EVENT_LOG_PAYLOAD_H_
@@ -334,6 +334,12 @@ typedef enum {
 	WL_AMPDU_STATS_TYPE_RX_HE_DLOFDMAOK	= 36,	/* DL OFDMA Frame per MCS */
 	WL_AMPDU_STATS_TYPE_RX_HE_DLOFDMA_DENS	= 37,	/* DL OFDMA AMPDU Density */
 	WL_AMPDU_STATS_TYPE_RX_HE_DLOFDMA_HIST	= 38,	/* DL OFDMA frame RU histogram */
+	WL_AMPDU_STATS_TYPE_TX_HE_MCSALL	= 39,	/* TX HE (SU+MU) frames, all rates */
+	WL_AMPDU_STATS_TYPE_TX_HE_MCSOK		= 40,	/* TX HE (SU+MU) frames succeeded */
+	WL_AMPDU_STATS_TYPE_TX_HE_MUALL		= 41,	/* TX MU (UL OFDMA) frames all rates */
+	WL_AMPDU_STATS_TYPE_TX_HE_MUOK		= 42,	/* TX MU (UL OFDMA) frames succeeded */
+	WL_AMPDU_STATS_TYPE_TX_HE_RUBW		= 43,	/* TX UL RU by BW histogram */
+	WL_AMPDU_STATS_TYPE_TX_HE_PADDING	= 44,	/* TX padding total (single value) */
 	WL_AMPDU_STATS_MAX_CNTS			= 64
 } wl_ampdu_stat_enum_t;
 typedef struct {
@@ -352,6 +358,14 @@ typedef struct {
 	uint32	total_mpdu;
 	uint32	aggr_dist[WL_AMPDU_STATS_MAX_CNTS + 1];
 } wl_ampdu_stats_aggrsz_t;
+
+/* Sub-block type for WL_IFSTATS_XTLV_HE_TXMU_STATS */
+typedef enum {
+	/* Reserve 0 to avoid potential concerns */
+	WL_HE_TXMU_STATS_TYPE_TIME		= 1,	/* per-dBm, total usecs transmitted */
+	WL_HE_TXMU_STATS_TYPE_PAD_TIME		= 2,	/* per-dBm, padding usecs transmitted */
+} wl_he_txmu_stat_enum_t;
+#define WL_IFSTATS_HE_TXMU_MAX	32u
 
 /* Sub-block type for EVENT_LOG_TAG_MSCHPROFILE */
 #define WL_MSCH_PROFILER_START		0	/* start event check */
@@ -867,4 +881,85 @@ typedef struct phy_periodic_log_v2 {
 	phy_periodic_log_core_t phy_perilog_core[MAX_CORE_4357];
 } phy_periodic_log_v2_t;
 
+/* Event log payload for enhanced roam log */
+typedef enum {
+	ROAM_LOG_SCANSTART = 1,		/* EVT log for roam scan start */
+	ROAM_LOG_SCAN_CMPLT = 2,	/* EVT log for roam scan completeted */
+	ROAM_LOG_ROAM_CMPLT = 3,	/* EVT log for roam done */
+	ROAM_LOG_NBR_REQ = 4,		/* EVT log for Neighbor REQ */
+	ROAM_LOG_NBR_REP = 5,		/* EVT log for Neighbor REP */
+	PRSV_PERIODIC_ID_MAX
+} prsv_periodic_id_enum_t;
+
+typedef struct prsv_periodic_log_hdr {
+	uint8 version;
+	uint8 id;
+	uint16 length;
+} prsv_periodic_log_hdr_t;
+
+#define ROAM_LOG_VER_1	(1u)
+#define ROAM_LOG_TRIG_VER	(1u)
+typedef struct roam_log_trig_v1 {
+	prsv_periodic_log_hdr_t hdr;
+	int8 rssi;
+	uint8 current_cu;
+	uint8 pad[2];
+	uint reason;
+	int result;
+	union {
+		struct {
+			uint rcvd_reason;
+		} prt_roam;
+		struct {
+			uint8 req_mode;
+			uint8 token;
+			uint16 nbrlist_size;
+			uint32 disassoc_dur;
+			uint32 validity_dur;
+			uint32 bss_term_dur;
+		} bss_trans;
+	};
+} roam_log_trig_v1_t;
+
+#define ROAM_LOG_RPT_SCAN_LIST_SIZE 3
+#define ROAM_LOG_INVALID_TPUT 0xFFFFFFFFu
+typedef struct roam_scan_ap_info {
+	int8 rssi;
+	uint8 pad[3];
+	uint32 score;
+	uint16 chanspec;
+	struct ether_addr addr;
+	uint32 estm_tput;
+} roam_scan_ap_info_t;
+
+typedef struct roam_log_scan_cmplt_v1 {
+	prsv_periodic_log_hdr_t hdr;
+	uint8 full_scan;
+	uint8 scan_count;
+	uint8 scan_list_size;
+	uint8 pad;
+	int32 score_delta;
+	roam_scan_ap_info_t cur_info;
+	roam_scan_ap_info_t scan_list[ROAM_LOG_RPT_SCAN_LIST_SIZE];
+} roam_log_scan_cmplt_v1_t;
+
+typedef struct roam_log_cmplt_v1 {
+	prsv_periodic_log_hdr_t hdr;
+	uint status;
+	uint reason;
+	uint16	chanspec;
+	struct ether_addr addr;
+	uint8 pad[3];
+	uint8 retry;
+} roam_log_cmplt_v1_t;
+
+typedef struct roam_log_nbrrep {
+	prsv_periodic_log_hdr_t hdr;
+	uint channel_num;
+} roam_log_nbrrep_v1_t;
+
+typedef struct roam_log_nbrreq {
+	prsv_periodic_log_hdr_t hdr;
+	uint token;
+} roam_log_nbrreq_v1_t;
 #endif /* _EVENT_LOG_PAYLOAD_H_ */

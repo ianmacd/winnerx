@@ -519,6 +519,37 @@ static int cam_vfe_camif_handle_irq_top_half(uint32_t evt_id,
 	return -EPERM;
 }
 
+static void cam_vfe_camif_dump_dmi_reg(
+	void __iomem    *mem_base,
+	uint32_t        lut_word_size,
+	uint32_t        lut_size,
+	uint32_t        lut_bank_sel)
+{
+	uint32_t        i;
+	uint32_t        val_0;
+	uint32_t        val_1;
+
+	val_0 = 0x00000100 | lut_bank_sel;
+	cam_io_w_mb(val_0, mem_base + 0x00000C24);
+	cam_io_w_mb(0, mem_base + 0x00000C28);
+	for (i = 0; i < lut_size; i++) {
+		if (lut_word_size == 1) {
+			val_0 = cam_io_r_mb(mem_base + 0x00000C30);
+			val_1 = cam_io_r_mb(mem_base + 0x00000C2C);
+			CAM_INFO(CAM_ISP,
+				"Bank%d : 0x%x, LO: 0x%x, HI:0x%x",
+				lut_bank_sel, i, val_0, val_1);
+		} else {
+			val_0 = cam_io_r_mb(mem_base + 0x00000C30);
+			CAM_INFO(CAM_ISP, "Bank%d : 0x%x, LO: 0x%x",
+				lut_bank_sel, i, val_0);
+		}
+	}
+	cam_io_w_mb(0, mem_base + 0x00000C24);
+	cam_io_w_mb(0, mem_base + 0x00000C28);
+}
+
+
 static int cam_vfe_camif_handle_irq_bottom_half(void *handler_priv,
 	void *evt_payload_priv)
 {
@@ -598,6 +629,16 @@ static int cam_vfe_camif_handle_irq_bottom_half(void *handler_priv,
 				camif_priv->camif_reg->vfe_diag_sensor_status);
 			CAM_DBG(CAM_ISP, "VFE_DIAG_SENSOR_STATUS: 0x%x",
 				camif_priv->mem_base, val);
+		}
+		if (irq_status1 & 0x00040000) {
+			CAM_INFO(CAM_ISP, "BAF RGN offset cfg 0x%08x",
+				cam_io_r(camif_priv->mem_base + 0xAE4));
+			CAM_INFO(CAM_ISP, "BAF DMI Bank0");
+			cam_vfe_camif_dump_dmi_reg(camif_priv->mem_base,
+				1, 180, 0x40);
+			CAM_INFO(CAM_ISP, "BAF DMI Bank1");
+			cam_vfe_camif_dump_dmi_reg(camif_priv->mem_base,
+				1, 180, 0x41);
 		}
 		break;
 	default:

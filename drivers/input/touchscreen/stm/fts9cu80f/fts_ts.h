@@ -260,6 +260,8 @@ struct fts_touchkey {
 };
 #endif
 
+#define FTS_TS_LOCATION_DETECT_SIZE	6
+
 #define FTS_STATUS_UNFOLDING	0x00
 #define FTS_STATUS_FOLDING		0x01
 
@@ -341,10 +343,13 @@ enum grip_set_data {
  */
 struct fts_finger {
 	u8 id;
+	u8 prev_ttype;
 	u8 ttype;
 	u8 action;
 	u16 x;
 	u16 y;
+	u16 p_x;
+	u16 p_y;
 	u8 z;
 	u8 hover_flag;
 	u8 glove_flag;
@@ -409,7 +414,8 @@ enum {
 };
 
 enum fts_system_information_address {
-	FTS_SI_CONFIG_CHECKSUM = 0x58, /* 4 bytes */
+	FTS_SI_CONFIG_CHECKSUM = 0x58,	/* 4 bytes */
+	FTS_SI_OSC_TRIM_INFO = 0x60,	/* 4 bytes */
 };
 
 enum fts_ito_test_mode {
@@ -657,6 +663,9 @@ struct fts_i2c_platform_data {
 #ifdef CONFIG_INPUT_SEC_SECURE_TOUCH
 	int ss_touch_num;
 #endif
+	u32 area_indicator;
+	u32 area_navigation;
+	u32 area_edge;
 };
 
 struct fts_ts_info {
@@ -791,9 +800,6 @@ struct fts_ts_info {
 	struct completion st_powerdown;
 	struct completion st_interrupt;
 	struct sec_touch_driver *ss_drv;
-#if defined(CONFIG_TRUSTONIC_TRUSTED_UI_QC)
-	struct completion st_irq_received;
-#endif
 #endif
 	struct mutex i2c_mutex;
 	struct mutex irq_mutex;
@@ -929,11 +935,6 @@ extern struct class *sec_class;
 #endif
 #ifdef CONFIG_BATTERY_SAMSUNG
 extern unsigned int lpcharge;
-#endif
-#ifdef CONFIG_TRUSTONIC_TRUSTED_UI
-extern void trustedui_mode_on(void);
-extern int tui_force_close(uint32_t arg);
-extern void tui_cover_mode_set(bool arg);
 #endif
 #if defined(CONFIG_DISPLAY_SAMSUNG)
 extern int get_lcd_attached(char *mode);

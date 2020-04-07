@@ -24,7 +24,7 @@
  *
  * <<Broadcom-WL-IPTag/Open:>>
  *
- * $Id: wl_cfgvendor.c 831648 2019-07-24 10:31:17Z $
+ * $Id: wl_cfgvendor.c 823734 2019-06-05 07:36:47Z $
  */
 
 /*
@@ -1965,14 +1965,15 @@ wl_cfgvendor_priv_string_handler(struct wiphy *wiphy,
 		return BCME_BADARG;
 	}
 
-	if (len <= sizeof(struct bcm_nlmsg_hdr)) {
+	if (len <= 0) {
 		WL_ERR(("invalid len %d\n", len));
 		return BCME_BADARG;
 	}
 
 	WL_DBG(("entry: cmd = %d\n", nlioc->cmd));
 
-	if (nlioc->offset != sizeof(struct bcm_nlmsg_hdr)) {
+	if (nlioc->offset != sizeof(struct bcm_nlmsg_hdr) ||
+		len <= sizeof(struct bcm_nlmsg_hdr)) {
 		WL_ERR(("invalid offset %d\n", nlioc->offset));
 		return BCME_BADARG;
 	}

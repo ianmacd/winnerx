@@ -232,6 +232,8 @@ enum max77705_vcon_role {
 #define FW_WAIT_TIMEOUT			(1000 * 5) /* 5 sec */
 #define I2C_SMBUS_BLOCK_HALF	(I2C_SMBUS_BLOCK_MAX / 2)
 
+#define GET_CONTROL3_LOCK_ERROR_EN(_x)		((_x & (0x1 << 1)) >> 1)
+
 typedef struct {
 	u32 magic;     /* magic number */
 	u8 major;         /* major version */
@@ -396,7 +398,9 @@ enum max77705_usbc_SYSMsg {
 	SYSMSG_SBUx_GND_SHORT = 0x62,
 	SYSMSG_SBUx_5V_SHORT = 0x63,
 
+#ifdef CONFIG_MAX77705_GRL_ENABLE
 	SYSMSG_SET_GRL = 0x64,
+#endif
 
 	SYSMSG_PD_CCx_5V_SHORT = 0x65,
 	SYSMSG_PD_SBUx_5V_SHORT = 0x66,
@@ -404,10 +408,21 @@ enum max77705_usbc_SYSMsg {
 
 	SYSERROR_DROP5V_SRCRDY = 0x68,
 	SYSERROR_DROP5V_SNKRDY = 0x69,
+	SYSMSG_PD_GENDER_SHORT = 0x6A,
+
 	SYSERROR_FACTORY_RID0 = 0x70,
 	SYSERROR_POWER_NEGO = 0x80,
 	SYSERROR_CCRP_HIGH = 0x90, /* PD Charger Connected while Water state */
 	SYSERROR_CCRP_LOW = 0x91, /* PD Charger Disconnected while Water state */
+
+	/* TypeC earphone is attached during PD charging */
+	SYSMSG_10K_TO_22K = 0xB0,
+	SYSMSG_10K_TO_56K = 0xB1,
+	SYSMSG_22K_TO_56K = 0xB2,
+	/* TypeC earphone is detached during PD charging */
+	SYSMSG_56K_TO_22K = 0xB3,
+	SYSMSG_56K_TO_10K = 0xB4,
+	SYSMSG_22K_TO_10K = 0xB5,
 };
 
 enum max77705_pdmsg {
@@ -422,6 +437,7 @@ enum max77705_pdmsg {
 	PD_PR_Swap_Request_Received	= 0x08,
 	PD_VCONN_Swap_Request_Received = 0x09,
 	Received_PD_Message_in_illegal_state = 0x0A,
+	SRC_CAP_RECEIVED = 0x0B,
 
 	Samsung_Accessory_is_attached = 0x10,
 	VDM_Attention_message_Received = 0x11,
@@ -451,6 +467,7 @@ enum max77705_pdmsg {
 	Battery_Capabilities_Received = 0x37,
 	Battery_Status_Received = 0x38,
 	Manufacturer_Info_Received = 0x39,
+	Alert_Message = 0x3e,
 	VDM_NAK_Recevied = 0x40,
 	VDM_BUSY_Recevied = 0x41,
 	VDM_ACK_Recevied = 0x42,
@@ -529,6 +546,8 @@ typedef enum {
 	OPCODE_CHGIN_ILIM2_W,
 	OPCODE_CTRLREG_INIT_R = 0x1A,
 	OPCODE_CTRLREG_INIT_W,
+	OPCODE_CTRLREG3_R = 0x1C,
+	OPCODE_CTRLREG3_W = 0x1D,
 	OPCODE_AFC_HV_W = 0x20,
 	OPCODE_AFC_RESULT_R,
 	OPCODE_QC2P0_SET = 0x22,
@@ -557,7 +576,12 @@ typedef enum {
 	OPCODE_SET_ALTERNATEMODE = 0x55,
 	OPCODE_SAMSUNG_FW_AUTOIBUS = 0x57,
 	OPCODE_READ_SELFTEST = 0x59,
+	OPCODE_SAMSUNG_READ_MESSAGE = 0x5D,
+#ifdef CONFIG_MAX77705_GRL_ENABLE
 	OPCODE_GRL_COMMAND = 0x70,
+#else
+	OPCODE_FW_OPCODE_CLEAR = 0x70,
+#endif
 	OPCODE_RAM_TEST_COMMAND = 0xD1,
 	OPCODE_NONE = 0xff,
 } max77705_opcode_list;

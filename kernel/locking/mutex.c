@@ -29,6 +29,9 @@
 #include <linux/debug_locks.h>
 #include <linux/osq_lock.h>
 #include <linux/delay.h>
+#ifdef CONFIG_KPERFMON
+#include <linux/ologk.h>
+#endif
 
 #ifdef CONFIG_DEBUG_MUTEXES
 # include "mutex-debug.h"
@@ -624,6 +627,12 @@ void __sched mutex_unlock(struct mutex *lock)
 		return;
 #endif
 	__mutex_unlock_slowpath(lock, _RET_IP_);
+#ifdef CONFIG_KPERFMON
+	if(lock != 0) {
+		perflog_evt(PERFLOG_UNKNOWN, jiffies - lock->time);
+		//printk("mutex %u", jiffies - lock->time);
+	}
+#endif
 }
 EXPORT_SYMBOL(mutex_unlock);
 
@@ -757,6 +766,12 @@ __mutex_lock_common(struct mutex *lock, long state, unsigned int subclass,
 	int ret;
 
 	might_sleep();
+
+#ifdef CONFIG_KPERFMON
+	if(lock != 0) {
+		lock->time = jiffies;
+	}
+#endif
 
 	ww = container_of(lock, struct ww_mutex, base);
 	if (use_ww_ctx && ww_ctx) {

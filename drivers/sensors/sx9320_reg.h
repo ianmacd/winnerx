@@ -178,7 +178,7 @@ static struct smtc_reg_data setup_reg[] = {
 },
 {
 	.reg = SX9320_AFECTRL4_REG, /* 5 - Sampling freq ph 0/1 */
-	.val = 0x47, /* [sampling req : 83.33kHz]*/
+	.val = 0x07, /* [sampling req : 250kHz]*/
 },
 {
 	.reg = SX9320_AFECTRL6_REG,
@@ -208,7 +208,7 @@ static struct smtc_reg_data setup_reg[] = {
 },
 {
 	.reg = SX9320_PROXCTRL0_REG, /* 12 - Rawfilt & Gain ph 0/1 */
-	.val = 0x09, /* [GAIN : x1] [RAWFILT : 1-1/2] */
+	.val = 0x0B, /* [GAIN : x1] [RAWFILT : 1-1/8] */
 },
 {
 	.reg = SX9320_PROXCTRL1_REG, /* 13 - Rawfilt & Gain ph 2/3 */
@@ -232,7 +232,7 @@ static struct smtc_reg_data setup_reg[] = {
 },
 {
 	.reg = SX9320_PROXCTRL6_REG, /* 18 - threshold ph 0/1 */
-	.val = 0x14, /* 32 */
+	.val = 0x1D, /* 32 */
 },
 {
 	.reg = SX9320_PROXCTRL7_REG, /* 19 - threshold ph 2/3 */

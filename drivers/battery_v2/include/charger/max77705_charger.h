@@ -31,6 +31,7 @@ enum {
 };
 
 extern unsigned int lpcharge;
+extern bool mfc_fw_update; 
 //extern int is_debug_level_low;
 
 #if defined(CONFIG_SEC_FACTORY)
@@ -337,6 +338,7 @@ struct max77705_charger_data {
 	struct i2c_client       *i2c;
 	struct i2c_client       *pmic_i2c;
 	struct mutex            charger_mutex;
+	struct mutex            mode_mutex;
 
 	struct max77705_platform_data *max77705_pdata;
 
@@ -348,16 +350,21 @@ struct max77705_charger_data {
 	struct delayed_work	aicl_work;
 	struct delayed_work	isr_work;
 	struct delayed_work	recovery_work;	/*  softreg recovery work */
+#if defined(CONFIG_USE_POGO)
 	struct delayed_work	wpc_work;	/*  wpc detect work */
+#endif
 	struct delayed_work	chgin_init_work;	/*  chgin init work */
 	struct delayed_work wc_current_work;
+	struct delayed_work skipmode_work;
 
-/* mutex */
+	/* mutex */
 	struct mutex irq_lock;
 	struct mutex ops_lock;
 
 	/* wakelock */
+#if defined(CONFIG_USE_POGO)
 	struct wake_lock wpc_wake_lock;
+#endif
 	struct wake_lock chgin_wake_lock;
 	struct wake_lock wc_current_wake_lock;
 	struct wake_lock aicl_wake_lock;
@@ -391,27 +398,16 @@ struct max77705_charger_data {
 	int		irq_wcin;
 	int		irq_chgin;
 	int		irq_aicl;
-	int             irq_aicl_enabled;
-	/* software regulation */
-	bool		soft_reg_state;
-	int		soft_reg_current;
-
-	/* unsufficient power */
-	bool		reg_loop_deted;
+	int		irq_aicl_enabled;
 
 	/* wireless charge, w(wpc), v(vbus) */
-	int		wc_w_gpio;
+#if defined(CONFIG_USE_POGO)
 	int		wc_w_irq;
-	int		wc_w_state;
-	int		wc_v_gpio;
-	int		wc_v_irq;
-	int		wc_v_state;
-	bool		wc_pwr_det;
-	int		soft_reg_recovery_cnt;
+#endif
 	int		wc_current;
 	int		wc_pre_current;
 
-	bool            jig_low_active;
+	bool	jig_low_active;
 	int		jig_gpio;
 
 	bool enable_sysovlo_irq;

@@ -23,7 +23,7 @@
  *
  * <<Broadcom-WL-IPTag/Open:>>
  *
- * $Id: dhd_custom_exynos.c 805819 2019-02-20 10:49:35Z $
+ * $Id: dhd_custom_exynos.c 816788 2019-04-26 07:59:47Z $
  */
 #include <linux/device.h>
 #include <linux/gpio.h>
@@ -54,21 +54,14 @@
 
 #if defined(CONFIG_64BIT)
 #include <asm-generic/gpio.h>
-#else
-#if !defined(CONFIG_ARCH_SWA100) && !defined(CONFIG_MACH_UNIVERSAL7580)
-#include <mach/gpio.h>
-#endif /* !CONFIG_ARCH_SWA100 && !CONFIG_MACH_UNIVERSAL7580 */
 #endif /* CONFIG_64BIT */
 
-#if defined(CONFIG_MACH_UNIVERSAL7580) || defined(CONFIG_MACH_UNIVERSAL5430) || \
-	defined(CONFIG_MACH_UNIVERSAL5422)
-#include <mach/irqs.h>
-#endif /* CONFIG_MACH_UNIVERSAL7580 || CONFIG_MACH_UNIVERSAL5430 || CONFIG_MACH_UNIVERSAL5422 */
+#if defined (CONFIG_SEC_SYSFS)
 #include <linux/sec_sysfs.h>
+#elif defined (CONFIG_DRV_SAMSUNG)
+#include <linux/sec_class.h>
+#endif
 
-#ifdef CONFIG_MACH_A7LTE
-#define PINCTL_DELAY 150
-#endif /* CONFIG_MACH_A7LTE */
 #ifdef CONFIG_BROADCOM_WIFI_RESERVED_MEM
 extern int dhd_init_wlan_mem(void);
 extern void *dhd_wlan_mem_prealloc(int section, unsigned long size);
@@ -82,47 +75,30 @@ static int wlan_host_wake_irq = 0;
 EXPORT_SYMBOL(wlan_host_wake_irq);
 static unsigned int wlan_host_wake_up = -1;
 #endif /* CONFIG_BCMDHD_OOB_HOST_WAKE */
-#ifdef CONFIG_MACH_A7LTE
-extern struct device *mmc_dev_for_wlan;
-#endif /* CONFIG_MACH_A7LTE */
 
 #ifdef CONFIG_BCMDHD_PCIE
 #define EXYNOS_PCIE_RC_ONOFF
 #endif /* CONFIG_BCMDHD_PCIE */
 
 #ifdef EXYNOS_PCIE_RC_ONOFF
-#ifdef CONFIG_MACH_UNIVERSAL5433
-#define SAMSUNG_PCIE_CH_NUM
-#elif defined(CONFIG_MACH_UNIVERSAL7420) || defined(CONFIG_MACH_EXSOM7420)
+#if defined(CONFIG_MACH_UNIVERSAL7420) || defined(CONFIG_MACH_EXSOM7420)
 #define SAMSUNG_PCIE_CH_NUM 1
 #elif defined(CONFIG_SOC_EXYNOS8890)|| defined(CONFIG_SOC_EXYNOS8895) || \
 	defined(CONFIG_SOC_EXYNOS9810) || defined(CONFIG_SOC_EXYNOS9820)
 #define SAMSUNG_PCIE_CH_NUM 0
 #endif // endif
-#ifdef CONFIG_MACH_UNIVERSAL5433
-extern void exynos_pcie_pm_resume(void);
-extern void exynos_pcie_pm_suspend(void);
-#else
 extern void exynos_pcie_pm_resume(int);
 extern void exynos_pcie_pm_suspend(int);
-#endif /* CONFIG_MACH_UNIVERSAL5433 */
 #endif /* EXYNOS_PCIE_RC_ONOFF */
 
-#if (defined(CONFIG_MACH_UNIVERSAL3475) || defined(CONFIG_SOC_EXYNOS7870) || \
-	defined(CONFIG_MACH_UNIVERSAL7580))
+#if defined(CONFIG_SOC_EXYNOS7870)
 extern struct mmc_host *wlan_mmc;
 extern void mmc_ctrl_power(struct mmc_host *host, bool onoff);
-#endif /* MACH_UNIVERSAL3475 || SOC_EXYNOS7870 || MACH_UNIVERSAL7580 */
+#endif /* SOC_EXYNOS7870 */
 
 static int
 dhd_wlan_power(int onoff)
 {
-#ifdef CONFIG_MACH_A7LTE
-	struct pinctrl *pinctrl = NULL;
-#endif /* CONFIG_MACH_A7LTE */
-
-	printk(KERN_INFO"------------------------------------------------");
-	printk(KERN_INFO"------------------------------------------------\n");
 	printk(KERN_INFO"%s Enter: power %s\n", __FUNCTION__, onoff ? "on" : "off");
 
 #ifdef EXYNOS_PCIE_RC_ONOFF
@@ -145,33 +121,15 @@ dhd_wlan_power(int onoff)
 		exynos_pcie_pm_resume(SAMSUNG_PCIE_CH_NUM);
 	}
 #else
-#ifdef CONFIG_MACH_A7LTE
-	if (onoff) {
-		pinctrl = devm_pinctrl_get_select(mmc_dev_for_wlan, "sdio_wifi_on");
-		if (IS_ERR(pinctrl))
-			printk(KERN_INFO "%s WLAN SDIO GPIO control error\n", __FUNCTION__);
-		msleep(PINCTL_DELAY);
-	}
-#endif /* CONFIG_MACH_A7LTE */
-
 	if (gpio_direction_output(wlan_pwr_on, onoff)) {
 		printk(KERN_ERR "%s failed to control WLAN_REG_ON to %s\n",
 			__FUNCTION__, onoff ? "HIGH" : "LOW");
 		return -EIO;
 	}
-
-#ifdef CONFIG_MACH_A7LTE
-	if (!onoff) {
-		pinctrl = devm_pinctrl_get_select(mmc_dev_for_wlan, "sdio_wifi_off");
-		if (IS_ERR(pinctrl))
-			printk(KERN_INFO "%s WLAN SDIO GPIO control error\n", __FUNCTION__);
-	}
-#endif /* CONFIG_MACH_A7LTE */
-#if (defined(CONFIG_MACH_UNIVERSAL3475) || defined(CONFIG_SOC_EXYNOS7870) || \
-	defined(CONFIG_MACH_UNIVERSAL7580))
+#if defined(CONFIG_SOC_EXYNOS7870)
 	if (wlan_mmc)
 		mmc_ctrl_power(wlan_mmc, onoff);
-#endif /* MACH_UNIVERSAL3475 || SOC_EXYNOS7870 || MACH_UNIVERSAL7580 */
+#endif /* SOC_EXYNOS7870 */
 #endif /* EXYNOS_PCIE_RC_ONOFF */
 	return 0;
 }
@@ -263,37 +221,6 @@ dhd_wlan_init_gpio(void)
 #endif /* CONFIG_BCMDHD_OOB_HOST_WAKE */
 
 	return 0;
-}
-
-void
-interrupt_set_cpucore(int set, unsigned int dpc_cpucore, unsigned int primary_cpucore)
-{
-	printk(KERN_INFO "%s: set: %d\n", __FUNCTION__, set);
-	if (set) {
-#if defined(CONFIG_MACH_UNIVERSAL5422)
-		irq_set_affinity(EXYNOS5_IRQ_HSMMC1, cpumask_of(dpc_cpucore));
-		irq_set_affinity(EXYNOS_IRQ_EINT16_31, cpumask_of(dpc_cpucore));
-#endif /* CONFIG_MACH_UNIVERSAL5422 */
-#if defined(CONFIG_MACH_UNIVERSAL5430)
-		irq_set_affinity(IRQ_SPI(226), cpumask_of(dpc_cpucore));
-		irq_set_affinity(IRQ_SPI(2), cpumask_of(dpc_cpucore));
-#endif /* CONFIG_MACH_UNIVERSAL5430 */
-#if defined(CONFIG_MACH_UNIVERSAL7580)
-		irq_set_affinity(IRQ_SPI(246), cpumask_of(dpc_cpucore));
-#endif /* CONFIG_MACH_UNIVERSAL7580 */
-	} else {
-#if defined(CONFIG_MACH_UNIVERSAL5422)
-		irq_set_affinity(EXYNOS5_IRQ_HSMMC1, cpumask_of(primary_cpucore));
-		irq_set_affinity(EXYNOS_IRQ_EINT16_31, cpumask_of(primary_cpucore));
-#endif /* CONFIG_MACH_UNIVERSAL5422 */
-#if defined(CONFIG_MACH_UNIVERSAL5430)
-		irq_set_affinity(IRQ_SPI(226), cpumask_of(primary_cpucore));
-		irq_set_affinity(IRQ_SPI(2), cpumask_of(primary_cpucore));
-#endif /* CONFIG_MACH_UNIVERSAL5430 */
-#if defined(CONFIG_MACH_UNIVERSAL7580)
-		irq_set_affinity(IRQ_SPI(246), cpumask_of(primary_cpucore));
-#endif /* CONFIG_MACH_UNIVERSAL7580 */
-	}
 }
 
 #if defined(CONFIG_BCMDHD_OOB_HOST_WAKE) && defined(CONFIG_BCMDHD_GET_OOB_STATE)

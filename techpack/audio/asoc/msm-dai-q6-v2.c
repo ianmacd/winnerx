@@ -221,6 +221,7 @@ struct msm_dai_q6_dai_data {
 	struct afe_dec_config dec_config;
 	union afe_port_config port_config;
 	u16 vi_feed_mono;
+	u32 xt_logging_disable;
 };
 
 struct msm_dai_q6_spdif_dai_data {
@@ -325,6 +326,15 @@ static const char *const sb_format[] = {
 
 static const struct soc_enum sb_config_enum[] = {
 	SOC_ENUM_SINGLE_EXT(3, sb_format),
+};
+
+static const char * const xt_logging_disable_text[] = {
+	"FALSE",
+	"TRUE",
+};
+
+static const struct soc_enum xt_logging_disable_enum[] = {
+	SOC_ENUM_SINGLE_EXT(2, xt_logging_disable_text),
 };
 
 static const char *const tdm_data_format[] = {
@@ -730,6 +740,7 @@ static int msm_dai_q6_dai_add_route(struct snd_soc_dai *dai)
 		dev_dbg(dai->dev, "%s: src %s sink %s\n",
 				__func__, intercon.source, intercon.sink);
 		snd_soc_dapm_add_routes(dapm, &intercon, 1);
+		snd_soc_dapm_ignore_suspend(dapm, intercon.sink);
 	}
 	if (dai->driver->capture.stream_name &&
 		dai->driver->capture.aif_name) {
@@ -740,6 +751,7 @@ static int msm_dai_q6_dai_add_route(struct snd_soc_dai *dai)
 		dev_dbg(dai->dev, "%s: src %s sink %s\n",
 				__func__, intercon.source, intercon.sink);
 		snd_soc_dapm_add_routes(dapm, &intercon, 1);
+		snd_soc_dapm_ignore_suspend(dapm, intercon.source);
 	}
 	return 0;
 }
@@ -2635,12 +2647,34 @@ static int msm_dai_q6_set_channel_map(struct snd_soc_dai *dai,
 	return rc;
 }
 
+/* all ports with excursion logging requirement can use this digital_mute api */
+static int msm_dai_q6_spk_digital_mute(struct snd_soc_dai *dai,
+				       int mute)
+{
+	int port_id = dai->id;
+	struct msm_dai_q6_dai_data *dai_data = dev_get_drvdata(dai->dev);
+
+	if (mute && !dai_data->xt_logging_disable)
+		afe_get_sp_xt_logging_data(port_id);
+
+	return 0;
+}
+
 static struct snd_soc_dai_ops msm_dai_q6_ops = {
 	.prepare	= msm_dai_q6_prepare,
 	.hw_params	= msm_dai_q6_hw_params,
 	.shutdown	= msm_dai_q6_shutdown,
 	.set_fmt	= msm_dai_q6_set_fmt,
 	.set_channel_map = msm_dai_q6_set_channel_map,
+};
+
+static struct snd_soc_dai_ops msm_dai_slimbus_0_rx_ops = {
+	.prepare	= msm_dai_q6_prepare,
+	.hw_params	= msm_dai_q6_hw_params,
+	.shutdown	= msm_dai_q6_shutdown,
+	.set_fmt	= msm_dai_q6_set_fmt,
+	.set_channel_map = msm_dai_q6_set_channel_map,
+	.digital_mute = msm_dai_q6_spk_digital_mute,
 };
 
 static int msm_dai_q6_cal_info_put(struct snd_kcontrol *kcontrol,
@@ -2664,6 +2698,27 @@ static int msm_dai_q6_cal_info_get(struct snd_kcontrol *kcontrol,
 	struct msm_dai_q6_dai_data *dai_data = kcontrol->private_data;
 
 	ucontrol->value.integer.value[0] = dai_data->cal_mode;
+	return 0;
+}
+
+static int msm_dai_q6_xt_logging_disable_put(struct snd_kcontrol *kcontrol,
+				    struct snd_ctl_elem_value *ucontrol)
+{
+	struct msm_dai_q6_dai_data *dai_data = kcontrol->private_data;
+
+	dai_data->xt_logging_disable = ucontrol->value.integer.value[0];
+	pr_debug("%s: setting xt logging disable to %d\n",
+		__func__, dai_data->xt_logging_disable);
+
+	return 0;
+}
+
+static int msm_dai_q6_xt_logging_disable_get(struct snd_kcontrol *kcontrol,
+				    struct snd_ctl_elem_value *ucontrol)
+{
+	struct msm_dai_q6_dai_data *dai_data = kcontrol->private_data;
+
+	ucontrol->value.integer.value[0] = dai_data->xt_logging_disable;
 	return 0;
 }
 
@@ -2885,7 +2940,7 @@ static int msm_dai_q6_afe_enc_cfg_put(struct snd_kcontrol *kcontrol,
 		case ENC_FMT_SBC_SS:
 			memcpy(&dai_data->enc_config.data,
 				ucontrol->value.bytes.data + format_size,
-				sizeof(struct asm_sbc_enc_cfg_t));
+				sizeof(struct asm_ss_sbc_enc_cfg_t));
 			break;
 		case ENC_FMT_SBC:
 			memcpy(&dai_data->enc_config.data,
@@ -3228,6 +3283,47 @@ static int msm_dai_q6_afe_input_bit_format_put(
 	return 0;
 }
 
+static int msm_dai_q6_afe_slimbus_dynamic_bitrate_get(
+            struct snd_kcontrol *kcontrol,
+            struct snd_ctl_elem_value *ucontrol)
+{
+    struct msm_dai_q6_dai_data *dai_data = kcontrol->private_data;
+
+    if (!dai_data) {
+        pr_err("%s: Invalid dai data\n", __func__);
+        return -EINVAL;
+    }
+
+    ucontrol->value.enumerated.item[0] = dai_data->dyn_bitrate;
+    pr_debug("%s: afe dynamic bitrate : %ld\n",
+          __func__, ucontrol->value.integer.value[0]);
+
+    return 0;
+}
+
+static int msm_dai_q6_afe_slimbus_dynamic_bitrate_put(
+            struct snd_kcontrol *kcontrol,
+            struct snd_ctl_elem_value *ucontrol)
+{
+    int rc = 0;
+    struct msm_dai_q6_dai_data *dai_data = kcontrol->private_data;
+
+    if (!dai_data) {
+        pr_err("%s: Invalid dai data\n", __func__);
+        return -EINVAL;
+    }
+    dai_data->dyn_bitrate = ucontrol->value.enumerated.item[0];
+    pr_debug("%s: updating afe dynamic bitrate : %d\n",
+        __func__, dai_data->dyn_bitrate);
+
+    rc = afe_q6_slimbus_update_dyn_bitrate(dai_data->dyn_bitrate);
+    if (rc < 0) {
+        pr_debug("%s: fail to update dynamic bitrate for AFE APR\n", __func__);
+    }
+
+    return rc;
+}
+
 static int msm_dai_q6_afe_output_bit_format_get(
 			struct snd_kcontrol *kcontrol,
 			struct snd_ctl_elem_value *ucontrol)
@@ -3366,7 +3462,10 @@ static const struct snd_kcontrol_new afe_enc_config_controls[] = {
 		       msm_dai_q6_afe_scrambler_mode_put),
 	SOC_ENUM_EXT("TWS Channel Mode", tws_chs_mode_enum[0],
 		       msm_dai_q6_tws_channel_mode_get,
-		       msm_dai_q6_tws_channel_mode_put)
+		       msm_dai_q6_tws_channel_mode_put),
+	SOC_SINGLE_EXT("AFE Dynamic Bitrate", 0, 0, UINT_MAX, 0,
+		       msm_dai_q6_afe_slimbus_dynamic_bitrate_get,
+		       msm_dai_q6_afe_slimbus_dynamic_bitrate_put),
 };
 
 static int  msm_dai_q6_afe_dec_cfg_info(struct snd_kcontrol *kcontrol,
@@ -3403,6 +3502,8 @@ static int msm_dai_q6_afe_dec_cfg_get(struct snd_kcontrol *kcontrol,
 	case DEC_FMT_MP3:
 		/* No decoder specific data available */
 		break;
+	case ENC_FMT_SBC_SS:
+	case ENC_FMT_SSC:
 	default:
 		pr_debug("%s: Default decoder config for %d format: Expect abr_dec_cfg\n",
 				__func__, dai_data->dec_config.format);
@@ -3444,6 +3545,8 @@ static int msm_dai_q6_afe_dec_cfg_put(struct snd_kcontrol *kcontrol,
 	case DEC_FMT_MP3:
 		/* No decoder specific data available */
 		break;
+	case ENC_FMT_SBC_SS:
+	case ENC_FMT_SSC:
 	default:
 		pr_debug("%s: Default decoder config for %d format: Expect abr_dec_cfg\n",
 				__func__, dai_data->dec_config.format);
@@ -3572,7 +3675,10 @@ static const struct snd_kcontrol_new sb_config_controls[] = {
 		     msm_dai_q6_cal_info_put),
 	SOC_ENUM_EXT("SLIM_2_RX Format", sb_config_enum[0],
 		     msm_dai_q6_sb_format_get,
-		     msm_dai_q6_sb_format_put)
+			 msm_dai_q6_sb_format_put),
+	SOC_ENUM_EXT("SLIM_0_RX XTLoggingDisable", xt_logging_disable_enum[0],
+			 msm_dai_q6_xt_logging_disable_get,
+			 msm_dai_q6_xt_logging_disable_put),
 };
 
 static const struct snd_kcontrol_new rt_proxy_config_controls[] = {
@@ -3680,6 +3786,9 @@ static int msm_dai_q6_dai_probe(struct snd_soc_dai *dai)
 				 snd_ctl_new1(&afe_enc_config_controls[4],
 				 dai));
 		rc = snd_ctl_add(dai->component->card->snd_card,
+				 snd_ctl_new1(&afe_enc_config_controls[5],
+				 dai_data));
+		rc = snd_ctl_add(dai->component->card->snd_card,
 				snd_ctl_new1(&avd_drift_config_controls[2],
 					dai));
 		break;
@@ -3732,6 +3841,9 @@ static int msm_dai_q6_dai_probe(struct snd_soc_dai *dai)
 		rc = snd_ctl_add(dai->component->card->snd_card,
 				snd_ctl_new1(&avd_drift_config_controls[0],
 					dai));
+		rc = snd_ctl_add(dai->component->card->snd_card,
+			snd_ctl_new1(&sb_config_controls[3],
+			dai_data));
 		break;
 	case SLIMBUS_6_RX:
 		rc = snd_ctl_add(dai->component->card->snd_card,
@@ -4354,7 +4466,7 @@ static struct snd_soc_dai_driver msm_dai_q6_slimbus_rx_dai[] = {
 			.rate_min = 8000,
 			.rate_max = 384000,
 		},
-		.ops = &msm_dai_q6_ops,
+		.ops = &msm_dai_slimbus_0_rx_ops,
 		.id = SLIMBUS_0_RX,
 		.probe = msm_dai_q6_dai_probe,
 		.remove = msm_dai_q6_dai_remove,
@@ -5090,75 +5202,21 @@ static int msm_dai_q6_mi2s_prepare(struct snd_pcm_substream *substream,
 					__func__, rc);
 		}
 
-		/* PORT START should be set if prepare called
-		 * in active state.
-		 */
-		rc = afe_port_start(port_id, &dai_data->port_config,
-				    dai_data->rate);
-		if (rc < 0)
-			dev_err(dai->dev, "fail to open AFE port 0x%x\n",
-				dai->id);
-		else
-			set_bit(STATUS_PORT_STARTED,
-				dai_data->status_mask);
-	}
-	if (!test_bit(STATUS_PORT_STARTED, dai_data->hwfree_status)) {
-		set_bit(STATUS_PORT_STARTED, dai_data->hwfree_status);
-		dev_dbg(dai->dev, "%s: set hwfree_status to started\n",
-				__func__);
-	}
-	return rc;
-}
-
-static int msm_dai_q6_bt_mi2s_prepare(struct snd_pcm_substream *substream,
-		struct snd_soc_dai *dai)
-{
-	struct msm_dai_q6_mi2s_dai_data *mi2s_dai_data =
-		dev_get_drvdata(dai->dev);
-	struct msm_dai_q6_dai_data *dai_data =
-		(substream->stream == SNDRV_PCM_STREAM_PLAYBACK ?
-		&mi2s_dai_data->rx_dai.mi2s_dai_data :
-		&mi2s_dai_data->tx_dai.mi2s_dai_data);
-	u16 port_id = 0;
-	int rc = 0;
-
-	if (msm_mi2s_get_port_id(dai->id, substream->stream,
-				&port_id) != 0) {
-		dev_err(dai->dev, "%s: Invalid Port ID 0x%x\n",
-				__func__, port_id);
-		return -EINVAL;
-	}
-
-	dev_info(dai->dev, "%s: dai id %d, afe port id = 0x%x\n"
-		"dai_data->channels = %u sample_rate = %u\n", __func__,
-		dai->id, port_id, dai_data->channels, dai_data->rate);
-
-	if (!test_bit(STATUS_PORT_STARTED, dai_data->status_mask)) {
-		if (q6core_get_avcs_api_version_per_service(
-		APRV2_IDS_SERVICE_ID_ADSP_AFE_V) >= AFE_API_VERSION_V4) {
-			/*
-			 * send island mode config.
-			 * This should be the first configuration
-			 */
-			rc = afe_send_port_island_mode(port_id);
-			if (rc)
-				dev_err(dai->dev, "%s: afe send island mode failed %d\n",
-					__func__, rc);
-		}
-
-		/* PORT START should be set if prepare called
-		 * in active state.
-		 */
-		if ((dai_data->enc_config.format != ENC_FMT_NONE) &&
-			(substream->stream == SNDRV_PCM_STREAM_PLAYBACK)) {
+		if (dai_data->enc_config.format != ENC_FMT_NONE) {
 			int bitwidth = 0;
 
-			if (dai_data->afe_rx_in_bitformat ==
-				SNDRV_PCM_FORMAT_S24_LE)
+			switch (dai_data->afe_rx_in_bitformat) {
+			case SNDRV_PCM_FORMAT_S32_LE:
+				bitwidth = 32;
+				break;
+			case SNDRV_PCM_FORMAT_S24_LE:
 				bitwidth = 24;
-			else if (dai_data->afe_rx_in_bitformat ==
-				SNDRV_PCM_FORMAT_S16_LE)
+				break;
+			case SNDRV_PCM_FORMAT_S16_LE:
+			default:
 				bitwidth = 16;
+				break;
+			}
 			pr_info("%s: calling AFE_PORT_START_V2 with enc_format: %d\n",
 				__func__, dai_data->enc_config.format);
 			rc = afe_port_start_v2(port_id, &dai_data->port_config,
@@ -5170,10 +5228,12 @@ static int msm_dai_q6_bt_mi2s_prepare(struct snd_pcm_substream *substream,
 				pr_err("%s: afe_port_start_v2 failed error: %d\n",
 					__func__, rc);
 		} else {
+			/* PORT START should be set if prepare called
+			 * in active state.
+			 */
 			rc = afe_port_start(port_id, &dai_data->port_config,
 					dai_data->rate);
 		}
-
 		if (rc < 0)
 			dev_err(dai->dev, "fail to open AFE port 0x%x\n",
 				dai->id);
@@ -5508,15 +5568,6 @@ static struct snd_soc_dai_ops msm_dai_q6_mi2s_ops = {
 	.shutdown	= msm_dai_q6_mi2s_shutdown,
 };
 
-static struct snd_soc_dai_ops msm_dai_q6_bt_mi2s_ops = {
-	.startup    = msm_dai_q6_mi2s_startup,
-	.prepare    = msm_dai_q6_bt_mi2s_prepare,
-	.hw_params    = msm_dai_q6_mi2s_hw_params,
-	.hw_free    = msm_dai_q6_mi2s_hw_free,
-	.set_fmt    = msm_dai_q6_mi2s_set_fmt,
-	.shutdown    = msm_dai_q6_mi2s_shutdown,
-};
-
 /* Channel min and max are initialized base on platform data */
 static struct snd_soc_dai_driver msm_dai_q6_mi2s_dai[] = {
 	{
@@ -5641,7 +5692,7 @@ static struct snd_soc_dai_driver msm_dai_q6_mi2s_dai[] = {
 			.rate_min =     8000,
 			.rate_max =     192000,
 		},
-		.ops = &msm_dai_q6_bt_mi2s_ops,
+		.ops = &msm_dai_q6_mi2s_ops,
 		.name = "Quaternary MI2S",
 		.id = MSM_QUAT_MI2S,
 		.probe = msm_dai_q6_dai_mi2s_probe,
@@ -10517,6 +10568,9 @@ static const struct snd_kcontrol_new cdc_dma_config_controls[] = {
 	SOC_ENUM_EXT("WSA_CDC_DMA_0 TX Format", cdc_dma_config_enum[0],
 		     msm_dai_q6_cdc_dma_format_get,
 		     msm_dai_q6_cdc_dma_format_put),
+	SOC_ENUM_EXT("WSA_CDC_DMA_0 RX XTLoggingDisable", xt_logging_disable_enum[0],
+		     msm_dai_q6_xt_logging_disable_get,
+		     msm_dai_q6_xt_logging_disable_put),
 };
 
 /* SOC probe for codec DMA interface */
@@ -10541,6 +10595,11 @@ static int msm_dai_q6_dai_cdc_dma_probe(struct snd_soc_dai *dai)
 	case AFE_PORT_ID_WSA_CODEC_DMA_TX_0:
 		rc = snd_ctl_add(dai->component->card->snd_card,
 				 snd_ctl_new1(&cdc_dma_config_controls[0],
+				 dai_data));
+		break;
+	case AFE_PORT_ID_WSA_CODEC_DMA_RX_0:
+		rc = snd_ctl_add(dai->component->card->snd_card,
+				 snd_ctl_new1(&cdc_dma_config_controls[1],
 				 dai_data));
 		break;
 	default:
@@ -10747,18 +10806,6 @@ static void msm_dai_q6_cdc_dma_shutdown(struct snd_pcm_substream *substream,
 
 	if (test_bit(STATUS_PORT_STARTED, dai_data->hwfree_status))
 		clear_bit(STATUS_PORT_STARTED, dai_data->hwfree_status);
-}
-
-/* all ports with same WSA requirement can use this digital mute API */
-static int msm_dai_q6_spk_digital_mute(struct snd_soc_dai *dai,
-				       int mute)
-{
-	int port_id = dai->id;
-
-	if (mute)
-		afe_get_sp_xt_logging_data(port_id);
-
-	return 0;
 }
 
 static struct snd_soc_dai_ops msm_dai_q6_cdc_dma_ops = {

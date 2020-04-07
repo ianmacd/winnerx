@@ -238,3 +238,10 @@ config BCMDHD_GET_OOB_STATE
         default y
         ---help---
           Support WLAN_HOST_WAKE pin level information
+
+config WLAN_BCM4375_ENHANCED_FEATURES
+	bool "Support BCM4375 Enhanced Feature"
+	depends on BCM4375
+	default n
+	---help---
+	Support BCM4375 Enahanced Feature

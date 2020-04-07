@@ -836,7 +836,7 @@ static int ufs_qcom_suspend(struct ufs_hba *hba, enum ufs_pm_op pm_op)
 	struct ufs_qcom_host *host = ufshcd_get_variant(hba);
 	struct phy *phy = host->generic_phy;
 	struct ufs_qcom_phy *qphy;
-	int ret = 0, phy_err = 0;
+	int ret = 0;
 
 	qphy = (struct ufs_qcom_phy*)phy_get_drvdata(phy);
 	/*
@@ -846,14 +846,13 @@ static int ufs_qcom_suspend(struct ufs_hba *hba, enum ufs_pm_op pm_op)
 	 */
 	if (!ufs_qcom_is_link_active(hba)) {
 		ufs_qcom_disable_lane_clks(host);
-		if (host->is_phy_pwr_on) {
-			phy_err = phy_power_off(phy);
-			if (phy_err)
-				dev_err(hba->dev, "%s: phy_err [%d]\n", __func__, phy_err);
-			host->is_phy_pwr_on = false;
-			if ((qphy->is_powered_on != host->is_phy_pwr_on) ||
-					(phy->power_count != 0))
-				BUG_ON(1);
+		if (qphy->is_powered_on && phy->power_count) {
+			ret = phy_power_off(phy);
+			if (ret) {
+				dev_err(hba->dev, "%s: failed disabling regs, err = %d\n",
+						__func__, ret);
+				goto out;
+			}
 		}
 		if (host->vddp_ref_clk && ufs_qcom_is_link_off(hba))
 			ret = ufs_qcom_disable_vreg(hba->dev,
@@ -881,17 +880,13 @@ static int ufs_qcom_resume(struct ufs_hba *hba, enum ufs_pm_op pm_op)
 
 	qphy = (struct ufs_qcom_phy*)phy_get_drvdata(phy);
 
-	if (!host->is_phy_pwr_on) {
+	if (!qphy->is_powered_on && !phy->power_count) {
 		err = phy_power_on(phy);
 		if (err) {
 			dev_err(hba->dev, "%s: failed enabling regs, err = %d\n",
 				__func__, err);
 			goto out;
 		}
-		host->is_phy_pwr_on = true;
-		if ((qphy->is_powered_on != host->is_phy_pwr_on) ||
-				(phy->power_count == 0))
-			BUG_ON(1);
 	}
 	if (host->vddp_ref_clk && (hba->rpm_lvl > UFS_PM_LVL_3 ||
 				   hba->spm_lvl > UFS_PM_LVL_3))
@@ -998,7 +993,9 @@ int ufs_qcom_crytpo_engine_cfg_start(struct ufs_hba *hba, unsigned int task_tag)
 	int err = 0;
 
 	if (!host->ice.pdev ||
-	    !lrbp->cmd || lrbp->command_type != UTP_CMD_TYPE_SCSI)
+	    !lrbp->cmd ||
+		(lrbp->command_type != UTP_CMD_TYPE_SCSI &&
+		 lrbp->command_type != UTP_CMD_TYPE_UFS_STORAGE))
 		goto out;
 
 	err = ufs_qcom_ice_cfg_start(host, lrbp->cmd);
@@ -1013,7 +1010,8 @@ int ufs_qcom_crytpo_engine_cfg_end(struct ufs_hba *hba,
 	struct ufs_qcom_host *host = ufshcd_get_variant(hba);
 	int err = 0;
 
-	if (!host->ice.pdev || lrbp->command_type != UTP_CMD_TYPE_SCSI)
+	if (!host->ice.pdev || (lrbp->command_type != UTP_CMD_TYPE_SCSI &&
+		lrbp->command_type != UTP_CMD_TYPE_UFS_STORAGE))
 		goto out;
 
 	err = ufs_qcom_ice_cfg_end(host, req);
@@ -1635,7 +1633,7 @@ static int ufs_qcom_setup_clocks(struct ufs_hba *hba, bool on,
 	struct ufs_qcom_host *host = ufshcd_get_variant(hba);
 	struct phy *phy = NULL;
 	struct ufs_qcom_phy *qphy;
-	int err = 0, phy_err = 0;
+	int err = 0;
 
 	/*
 	 * In case ufs_qcom_init() is not yet done, simply ignore.
@@ -1650,14 +1648,13 @@ static int ufs_qcom_setup_clocks(struct ufs_hba *hba, bool on,
 	qphy = (struct ufs_qcom_phy*)phy_get_drvdata(phy);
 
 	if (on && (status == POST_CHANGE)) {
-		if (!host->is_phy_pwr_on) {
-			phy_err = phy_power_on(host->generic_phy);
-			if (phy_err)
-				dev_err(hba->dev, "%s: phy_err [%d]\n", __func__, phy_err);
-			host->is_phy_pwr_on = true;
-			if ((qphy->is_powered_on != host->is_phy_pwr_on) ||
-					(phy->power_count == 0))
-				BUG_ON(1);
+		if (!qphy->is_powered_on && !phy->power_count) {
+			err = phy_power_on(phy);
+			if (err) {
+				dev_err(hba->dev, "%s: failed enabling regs, err = %d\n",
+						__func__, err);
+				goto out;
+			}
 		}
 		/* enable the device ref clock for HS mode*/
 		if (ufshcd_is_hs_mode(&hba->pwr_info))
@@ -1682,15 +1679,13 @@ static int ufs_qcom_setup_clocks(struct ufs_hba *hba, bool on,
 			ufs_qcom_dev_ref_clk_ctrl(host, false);
 
 			/* powering off PHY during aggressive clk gating */
-			if (host->is_phy_pwr_on) {
-				phy_err = phy_power_off(host->generic_phy);
-				if (phy_err)
-					dev_err(hba->dev, "%s: phy_err [%d]\n", __func__, phy_err);
-				host->is_phy_pwr_on = false;
-				if ((qphy->is_powered_on != host->is_phy_pwr_on) ||
-						(phy->power_count != 0))
-					BUG_ON(1);
-
+			if (qphy->is_powered_on && phy->power_count) {
+				err = phy_power_off(phy);
+				if (err) {
+					dev_err(hba->dev, "%s: failed disabling regs, err = %d\n",
+							__func__, err);
+					goto out;
+				}
 			}
 		}
 	}
@@ -2101,6 +2096,19 @@ __setup("androidboot.bootdevice=", get_android_boot_dev);
 #endif
 
 /*
+ * ufs_qcom_parse_enable_tw - read from DTS whether TW should be enabled.
+ */
+static void ufs_qcom_parse_enable_tw(struct ufs_qcom_host *host)
+{
+	struct device_node *node = host->hba->dev->of_node;
+
+	if (of_find_property(node, "enable_tw", NULL)) {
+		host->enable_tw = true;
+		dev_info(host->hba->dev, "host supports UFS Turbo Write\n");
+	}
+}
+
+/*
  * ufs_qcom_parse_lpm - read from DTS whether LPM modes should be disabled.
  */
 static void ufs_qcom_parse_lpm(struct ufs_qcom_host *host)
@@ -2333,6 +2341,7 @@ static int ufs_qcom_init(struct ufs_hba *hba)
 	ufs_qcom_parse_lpm(host);
 	if (host->disable_lpm)
 		pm_runtime_forbid(host->hba->dev);
+	ufs_qcom_parse_enable_tw(host);
 	ufs_qcom_set_caps(hba);
 	ufs_qcom_advertise_quirks(hba);
 
@@ -2377,20 +2386,17 @@ static void ufs_qcom_exit(struct ufs_hba *hba)
 	struct ufs_qcom_host *host = ufshcd_get_variant(hba);
 	struct phy *phy = host->generic_phy;
 	struct ufs_qcom_phy *qphy;
-	int phy_err = 0;
+	int err = 0;
 
 	qphy = (struct ufs_qcom_phy*)phy_get_drvdata(phy);
 
 	msm_bus_scale_unregister_client(host->bus_vote.client_handle);
 	ufs_qcom_disable_lane_clks(host);
-	if (host->is_phy_pwr_on) {
-		phy_err = phy_power_off(host->generic_phy);
-		if (phy_err)
-			dev_err(hba->dev, "%s: phy_err [%d]\n", __func__, phy_err);
-		host->is_phy_pwr_on = false;
-		if ((qphy->is_powered_on != host->is_phy_pwr_on) ||
-				(phy->power_count != 0))
-			BUG_ON(1);
+	if (qphy->is_powered_on && phy->power_count) {
+		err = phy_power_off(phy);
+		if (err)
+			dev_err(hba->dev, "%s: failed disabling regs, err = %d\n",
+					__func__, err);
 	}
 	phy_exit(host->generic_phy);
 	ufs_qcom_pm_qos_remove(host);
@@ -3010,6 +3016,9 @@ static const struct dev_pm_ops ufs_qcom_pm_ops = {
 	.runtime_suspend = ufshcd_pltfrm_runtime_suspend,
 	.runtime_resume  = ufshcd_pltfrm_runtime_resume,
 	.runtime_idle    = ufshcd_pltfrm_runtime_idle,
+	.freeze		= ufshcd_pltfrm_freeze,
+	.restore	= ufshcd_pltfrm_restore,
+	.thaw		= ufshcd_pltfrm_thaw,
 };
 
 static struct platform_driver ufs_qcom_pltform = {

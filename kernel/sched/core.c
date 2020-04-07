@@ -32,6 +32,7 @@
 #include <linux/kthread.h>
 
 #include <asm/switch_to.h>
+#include <linux/msm_rtb.h>
 #include <asm/tlb.h>
 #ifdef CONFIG_PARAVIRT
 #include <asm/paravirt.h>
@@ -39,7 +40,6 @@
 
 #ifdef CONFIG_SEC_DEBUG_SUMMARY
 #include <linux/sec_debug.h>
-#include <linux/sec_debug_summary.h>
 #endif
 
 #include "sched.h"
@@ -781,8 +781,10 @@ static inline void enqueue_task(struct rq *rq, struct task_struct *p, int flags)
 	if (!(flags & ENQUEUE_NOCLOCK))
 		update_rq_clock(rq);
 
-	if (!(flags & ENQUEUE_RESTORE))
+	if (!(flags & ENQUEUE_RESTORE)) {
 		sched_info_queued(rq, p);
+		psi_enqueue(p, flags & ENQUEUE_WAKEUP);
+	}
 
 	p->sched_class->enqueue_task(rq, p, flags);
 	walt_update_last_enqueue(p);
@@ -794,8 +796,10 @@ static inline void dequeue_task(struct rq *rq, struct task_struct *p, int flags)
 	if (!(flags & DEQUEUE_NOCLOCK))
 		update_rq_clock(rq);
 
-	if (!(flags & DEQUEUE_SAVE))
+	if (!(flags & DEQUEUE_SAVE)) {
 		sched_info_dequeued(rq, p);
+		psi_dequeue(p, flags & DEQUEUE_SLEEP);
+	}
 
 	p->sched_class->dequeue_task(rq, p, flags);
 #ifdef CONFIG_SCHED_WALT
@@ -2176,6 +2180,7 @@ try_to_wake_up(struct task_struct *p, unsigned int state, int wake_flags,
 			     sibling_count_hint);
 	if (task_cpu(p) != cpu) {
 		wake_flags |= WF_MIGRATED;
+		psi_ttwu_dequeue(p);
 		set_task_cpu(p, cpu);
 	}
 
@@ -2301,6 +2306,9 @@ static void __sched_fork(unsigned long clone_flags, struct task_struct *p)
 	p->se.nr_migrations		= 0;
 	p->se.vruntime			= 0;
 	p->last_sleep_ts		= 0;
+	p->boost                = 0;
+	p->boost_expires        = 0;
+	p->boost_period         = 0;
 
 	INIT_LIST_HEAD(&p->se.group_node);
 
@@ -2930,7 +2938,7 @@ context_switch(struct rq *rq, struct task_struct *prev,
 	 */
 	rq_unpin_lock(rq, rf);
 	spin_release(&rq->lock.dep_map, 1, _THIS_IP_);
-
+	uncached_logk(LOGK_CTXID, (void *)(u64)next->pid);
 	/* Here we just switch the register state and the stack. */
 	switch_to(prev, next, prev);
 	barrier();
@@ -3171,6 +3179,7 @@ void scheduler_tick(void)
 	curr->sched_class->task_tick(rq, curr, 0);
 	cpu_load_update_active(rq);
 	calc_global_load_tick(rq);
+	psi_task_tick(rq);
 
 	early_notif = early_detection_notify(rq, wallclock);
 	if (early_notif)
@@ -4906,6 +4915,9 @@ again:
 		retval = -EINVAL;
 	}
 
+	if (!retval && !(p->flags & PF_KTHREAD))
+		cpumask_and(&p->cpus_requested, in_mask, cpu_possible_mask);
+
 out_free_new_mask:
 	free_cpumask_var(new_mask);
 out_free_cpus_allowed:
@@ -4916,9 +4928,8 @@ out_put_task:
 }
 
 char sched_lib_name[LIB_PATH_LENGTH];
-unsigned int sched_lib_mask_check;
 unsigned int sched_lib_mask_force;
-static inline bool is_sched_lib_based_app(pid_t pid)
+bool is_sched_lib_based_app(pid_t pid)
 {
 	const char *name = NULL;
 	struct vm_area_struct *vma;
@@ -4970,19 +4981,6 @@ put_task_struct:
 	return found;
 }
 
-long msm_sched_setaffinity(pid_t pid, struct cpumask *new_mask)
-{
-	if (sched_lib_mask_check != 0 && sched_lib_mask_force != 0 &&
-		(cpumask_bits(new_mask)[0] == sched_lib_mask_check) &&
-		is_sched_lib_based_app(pid)) {
-
-		cpumask_t forced_mask = { {sched_lib_mask_force} };
-
-		cpumask_copy(new_mask, &forced_mask);
-	}
-	return sched_setaffinity(pid, new_mask);
-}
-
 static int get_user_cpu_mask(unsigned long __user *user_mask_ptr, unsigned len,
 			     struct cpumask *new_mask)
 {
@@ -5013,7 +5011,7 @@ SYSCALL_DEFINE3(sched_setaffinity, pid_t, pid, unsigned int, len,
 
 	retval = get_user_cpu_mask(user_mask_ptr, len, new_mask);
 	if (retval == 0)
-		retval = msm_sched_setaffinity(pid, new_mask);
+		retval = sched_setaffinity(pid, new_mask);
 	free_cpumask_var(new_mask);
 	return retval;
 }
@@ -5103,9 +5101,7 @@ SYSCALL_DEFINE0(sched_yield)
 	struct rq_flags rf;
 	struct rq *rq;
 
-	local_irq_disable();
-	rq = this_rq();
-	rq_lock(rq, &rf);
+	rq = this_rq_lock_irq(&rf);
 
 	schedstat_inc(rq->yld_count);
 	current->sched_class->yield_task(rq);
@@ -6189,15 +6185,10 @@ int sched_cpu_activate(unsigned int cpu)
 
 #ifdef CONFIG_SCHED_SMT
 	/*
-	 * The sched_smt_present static key needs to be evaluated on every
-	 * hotplug event because at boot time SMT might be disabled when
-	 * the number of booted CPUs is limited.
-	 *
-	 * If then later a sibling gets hotplugged, then the key would stay
-	 * off and SMT scheduling would never be functional.
+	 * When going up, increment the number of cores with SMT present.
 	 */
-	if (cpumask_weight(cpu_smt_mask(cpu)) > 1)
-		static_branch_enable_cpuslocked(&sched_smt_present);
+	if (cpumask_weight(cpu_smt_mask(cpu)) == 2)
+		static_branch_inc_cpuslocked(&sched_smt_present);
 #endif
 	set_cpu_active(cpu, true);
 
@@ -6240,10 +6231,19 @@ int sched_cpu_deactivate(unsigned int cpu)
 	 *
 	 * Do sync before park smpboot threads to take care the rcu boost case.
 	 */
+
 #ifdef CONFIG_PREEMPT
 	synchronize_sched();
 #endif
 	synchronize_rcu(); 
+
+#ifdef CONFIG_SCHED_SMT
+	/*
+	 * When going down, decrement the number of cores with SMT present.
+	 */
+	if (cpumask_weight(cpu_smt_mask(cpu)) == 2)
+		static_branch_dec_cpuslocked(&sched_smt_present);
+#endif
 
 	if (!sched_smp_initialized)
 		return 0;
@@ -6275,6 +6275,7 @@ int sched_cpu_starting(unsigned int cpu)
 {
 	set_cpu_rq_start_time(cpu);
 	sched_rq_cpu_starting(cpu);
+	clear_walt_request(cpu);
 	return 0;
 }
 
@@ -6318,20 +6319,24 @@ void __init sched_init_smp(void)
 	/*
 	 * There's no userspace yet to cause hotplug operations; hence all the
 	 * CPU masks are stable and all blatant races in the below code cannot
-	 * happen.
+	 * happen. The hotplug lock is nevertheless taken to satisfy lockdep,
+	 * but there won't be any contention on it.
 	 */
+	cpus_read_lock();
 	mutex_lock(&sched_domains_mutex);
 	sched_init_domains(cpu_active_mask);
 	cpumask_andnot(non_isolated_cpus, cpu_possible_mask, cpu_isolated_map);
 	if (cpumask_empty(non_isolated_cpus))
 		cpumask_set_cpu(smp_processor_id(), non_isolated_cpus);
 	mutex_unlock(&sched_domains_mutex);
+	cpus_read_unlock();
 
 	update_cluster_topology();
 
 	/* Move init over to a non-isolated CPU */
 	if (set_cpus_allowed_ptr(current, non_isolated_cpus) < 0)
 		BUG();
+	cpumask_copy(&current->cpus_requested, cpu_possible_mask);
 	sched_init_granularity();
 	free_cpumask_var(non_isolated_cpus);
 
@@ -6381,11 +6386,6 @@ void __init sched_init(void)
 {
 	int i, j;
 	unsigned long alloc_size = 0, ptr;
-
-#ifdef CONFIG_SEC_DEBUG
-	sec_gaf_supply_rqinfo(offsetof(struct rq, curr),
-		offsetof(struct cfs_rq, rq));
-#endif
 
 	sched_clock_init();
 	wait_bit_init();
@@ -6557,6 +6557,8 @@ void __init sched_init(void)
 	init_sched_fair_class();
 
 	init_schedstats();
+
+	psi_init();
 
 	scheduler_running = 1;
 }
@@ -7506,6 +7508,26 @@ const u32 sched_prio_to_wmult[40] = {
  /*  10 */  39045157,  49367440,  61356676,  76695844,  95443717,
  /*  15 */ 119304647, 148102320, 186737708, 238609294, 286331153,
 };
+
+/*
+ *@boost:should be 0,1,2.
+ *@period:boost time based on ms units.
+ */
+int set_task_boost(int boost, u64 period)
+{
+	if (boost < 0 || boost > 2)
+		return -EINVAL;
+	if (boost) {
+		current->boost = boost;
+		current->boost_period = (u64)period * 1000 * 1000;
+		current->boost_expires = sched_clock() + current->boost_period;
+	} else {
+		current->boost = 0;
+		current->boost_expires = 0;
+		current->boost_period = 0;
+	}
+	return 0;
+}
 
 #ifdef CONFIG_SCHED_WALT
 /*

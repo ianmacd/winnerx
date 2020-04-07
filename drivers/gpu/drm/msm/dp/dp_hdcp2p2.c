@@ -336,6 +336,7 @@ static void dp_hdcp2p2_off(void *input)
 
 	cdata.context = ctrl->lib_ctx;
 	ctrl->lib->wakeup(&cdata);
+
 }
 
 static int dp_hdcp2p2_authenticate(void *input)

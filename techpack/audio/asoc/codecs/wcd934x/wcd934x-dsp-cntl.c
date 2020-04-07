@@ -992,10 +992,9 @@ static void wcd_cntl_debugfs_init(char *dir, struct wcd_dsp_cntl *cntl)
 			    cntl->entry, &cntl->ramdump_enable);
 	debugfs_create_bool("debug_dump_enable", 0644,
 			    cntl->entry, &cntl->dbg_dmp_enable);
-#ifdef CONFIG_SEC_SND_DEBUG
+
 	cntl->ramdump_enable = 1;
 	cntl->dbg_dmp_enable = 1;
-#endif /* CONFIG_SEC_SND_DEBUG */
 done:
 	return;
 }

@@ -126,7 +126,8 @@ struct cam_sensor_ctrl_t {
 	u32 mipi_clock_index_new;
 	u32 mipi_clock_index_cur;
 	const struct cam_mipi_sensor_mode *mipi_info;
-#endif	
+	uint8_t sensor_mode;
+#endif
 };
 
 #endif /* _CAM_SENSOR_DEV_H_ */

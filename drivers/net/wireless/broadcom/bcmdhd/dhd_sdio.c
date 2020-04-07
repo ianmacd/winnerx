@@ -24,7 +24,7 @@
  *
  * <<Broadcom-WL-IPTag/Open:>>
  *
- * $Id: dhd_sdio.c 800708 2019-01-23 05:30:37Z $
+ * $Id: dhd_sdio.c 815919 2019-04-22 09:06:50Z $
  */
 
 #include <typedefs.h>
@@ -180,9 +180,7 @@ static int dhdsdio_resume(void *context);
 DHD_SPINWAIT_SLEEP_INIT(sdioh_spinwait_sleep);
 
 #if defined(MULTIPLE_SUPPLICANT)
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 25))
 DEFINE_MUTEX(_dhd_sdio_mutex_lock_);
-#endif /* (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 25)) */
 #endif // endif
 
 #ifdef SUPPORT_MULTIPLE_BOARD_REV_FROM_HW
@@ -1360,12 +1358,10 @@ dhdsdio_htclk(dhd_bus_t *bus, bool on, bool pendok)
 				DHD_ERROR(("%s: HT Avail request error: %d\n", __FUNCTION__, err));
 			}
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 27)
 			else if (ht_avail_error == HT_AVAIL_ERROR_MAX) {
 				bus->dhd->hang_reason = HANG_REASON_HT_AVAIL_ERROR;
 				dhd_os_send_hang_message(bus->dhd);
 			}
-#endif /* LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 27) */
 			return BCME_ERROR;
 		} else {
 			ht_avail_error = 0;
@@ -7641,14 +7637,12 @@ dhdsdio_probe(uint16 venid, uint16 devid, uint16 bus_no, uint16 slot,
 	dhd_bus_t *bus;
 
 #if defined(MULTIPLE_SUPPLICANT)
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 25))
 	if (mutex_is_locked(&_dhd_sdio_mutex_lock_) == 0) {
 		DHD_ERROR(("%s : no mutex held. set lock\n", __FUNCTION__));
 	} else {
 		DHD_ERROR(("%s : mutex is locked!. wait for unlocking\n", __FUNCTION__));
 	}
 	mutex_lock(&_dhd_sdio_mutex_lock_);
-#endif /* (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 25)) */
 #endif // endif
 
 	/* Init global variables at run-time, not as part of the declaration.
@@ -7820,10 +7814,8 @@ dhdsdio_probe(uint16 venid, uint16 devid, uint16 bus_no, uint16 slot,
 #endif /* BCMHOST_XTAL_PU_TIME_MOD */
 
 #if defined(MULTIPLE_SUPPLICANT)
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 25))
 	mutex_unlock(&_dhd_sdio_mutex_lock_);
 	DHD_ERROR(("%s : the lock is released.\n", __FUNCTION__));
-#endif /* (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 27)) */
 #endif // endif
 
 	return bus;
@@ -7833,10 +7825,8 @@ fail:
 
 forcereturn:
 #if defined(MULTIPLE_SUPPLICANT)
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 25))
 	mutex_unlock(&_dhd_sdio_mutex_lock_);
 	DHD_ERROR(("%s : the lock is released.\n", __FUNCTION__));
-#endif /* (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 27)) */
 #endif // endif
 
 	return NULL;
@@ -8416,14 +8406,12 @@ dhdsdio_disconnect(void *ptr)
 	DHD_TRACE(("%s: Enter\n", __FUNCTION__));
 
 #if defined(MULTIPLE_SUPPLICANT)
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 25))
 	if (mutex_is_locked(&_dhd_sdio_mutex_lock_) == 0) {
 		DHD_ERROR(("%s : no mutex held. set lock\n", __FUNCTION__));
 	} else {
 		DHD_ERROR(("%s : mutex is locked!. wait for unlocking\n", __FUNCTION__));
 	}
 	mutex_lock(&_dhd_sdio_mutex_lock_);
-#endif /* (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 25)) */
 #endif // endif
 
 	if (bus) {
@@ -8434,10 +8422,8 @@ dhdsdio_disconnect(void *ptr)
 	}
 
 #if defined(MULTIPLE_SUPPLICANT)
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 25))
 	mutex_unlock(&_dhd_sdio_mutex_lock_);
 	DHD_ERROR(("%s : the lock is released.\n", __FUNCTION__));
-#endif /* (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 25)) */
 #endif /* LINUX */
 
 	DHD_TRACE(("%s: Disconnected\n", __FUNCTION__));
@@ -8481,10 +8467,14 @@ dhdsdio_suspend(void *context)
 	}
 
 	DHD_LINUX_GENERAL_LOCK(bus->dhd, flags);
+	/* stop all interface network queue. */
+	dhd_txflowcontrol(bus->dhd, ALL_INTERFACES, ON);
 	bus->dhd->busstate = DHD_BUS_SUSPEND;
 	if (DHD_BUS_BUSY_CHECK_IN_TX(bus->dhd)) {
 		DHD_ERROR(("Tx Request is not ended\n"));
 		bus->dhd->busstate = DHD_BUS_DATA;
+		/* resume all interface network queue. */
+		dhd_txflowcontrol(bus->dhd, ALL_INTERFACES, OFF);
 		DHD_LINUX_GENERAL_UNLOCK(bus->dhd, flags);
 		return -EBUSY;
 	}
@@ -8510,6 +8500,8 @@ dhdsdio_suspend(void *context)
 	DHD_LINUX_GENERAL_LOCK(bus->dhd, flags);
 	if (ret) {
 		bus->dhd->busstate = DHD_BUS_DATA;
+		/* resume all interface network queue. */
+		dhd_txflowcontrol(bus->dhd, ALL_INTERFACES, OFF);
 	}
 	DHD_BUS_BUSY_CLEAR_SUSPEND_IN_PROGRESS(bus->dhd);
 	dhd_os_busbusy_wake(bus->dhd);
@@ -8542,6 +8534,8 @@ dhdsdio_resume(void *context)
 	DHD_BUS_BUSY_CLEAR_RESUME_IN_PROGRESS(bus->dhd);
 	bus->dhd->busstate = DHD_BUS_DATA;
 	dhd_os_busbusy_wake(bus->dhd);
+	/* resume all interface network queue. */
+	dhd_txflowcontrol(bus->dhd, ALL_INTERFACES, OFF);
 	DHD_LINUX_GENERAL_UNLOCK(bus->dhd, flags);
 
 	return 0;

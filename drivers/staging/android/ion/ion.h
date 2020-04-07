@@ -495,4 +495,6 @@ long ion_ioctl(struct file *filp, unsigned int cmd, unsigned long arg);
 
 int ion_query_heaps(struct ion_heap_query *query);
 
+unsigned int get_ion_system_heap_id(void);
+
 #endif /* _ION_H */

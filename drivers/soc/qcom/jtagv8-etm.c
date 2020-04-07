@@ -185,10 +185,10 @@
 
 /* spread out etm register write */
 #define etm_writel(etm, val, off)	\
-do {							\
-	writel_relaxed_no_log(val, etm->base + off);	\
-	udelay(20);					\
-} while (0)
+		   do {	  \
+			   writel_relaxed_no_log(val, etm->base + off);	\
+			   udelay(20);   \
+		   } while(0);  \
 
 #define etm_writel_log(etm, val, off)	\
 		   __raw_writel(val, etm->base + off)
@@ -318,7 +318,7 @@ static inline void etm_mm_save_state(struct etm_ctx *etmdata)
 		etmdata->state[i++] = etm_readl(etmdata, TRCPRGCTLR);
 		if (!(etmdata->state[0] & BIT(0))) {
 			atomic_notifier_call_chain(&etm_save_notifier_list,
-							0, NULL);
+					0, NULL);
 			break;
 		}
 

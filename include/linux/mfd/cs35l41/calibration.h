@@ -49,7 +49,7 @@
 #define CS35L41_MPU_UNLOCK_CODE_1		0xaaaa
 
 #if defined(CONFIG_SEC_FACTORY) &&  (defined(CONFIG_SEC_WINNERLTE_PROJECT) || \
-	defined(CONFIG_SEC_WINNERX_PROJECT))
+	defined(CONFIG_SEC_WINNERX_PROJECT)||defined(CONFIG_SEC_ZODIAC_PROJECT))
 #define CIRRUS_CAL_NUM_ATTRS_BASE	5
 #else
 #define CIRRUS_CAL_NUM_ATTRS_BASE	4
@@ -81,7 +81,7 @@ static const unsigned int cs35l41_halo_mpu_access[18] = {
 int cirrus_cal_apply(const char *mfd_suffix);
 
 #if defined(CONFIG_SEC_FACTORY) &&  (defined(CONFIG_SEC_WINNERLTE_PROJECT) || \
-	defined(CONFIG_SEC_WINNERX_PROJECT))
+	defined(CONFIG_SEC_WINNERX_PROJECT)||defined(CONFIG_SEC_ZODIAC_PROJECT))
 int cirrus_cal_codec_add(struct snd_soc_codec *codec, const char *mfd_suffix);
 #endif
 

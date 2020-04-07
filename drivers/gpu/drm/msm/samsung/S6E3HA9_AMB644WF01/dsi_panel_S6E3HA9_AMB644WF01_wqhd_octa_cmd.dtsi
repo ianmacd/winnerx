@@ -2356,6 +2356,7 @@
 				qcom,mdss-dsi-v-back-porch = <124>;
 				qcom,mdss-dsi-v-front-porch = <124>;
 				qcom,mdss-dsi-panel-framerate = <60>;
+				qcom,mdss-dsi-panel-clockrate = <897600000>;
 				//qcom,mdss-dsi-panel-phy-timings = [00 21 09 09 24 23 08 08 08 03 04 00];
 				qcom,mdss-dsi-panel-phy-timings = [00 1E 08 08 24 22 08 08 05 03 04 00 19 18];
 				qcom,mdss-dsi-timing-switch-command = [
@@ -2525,6 +2526,7 @@
 				qcom,mdss-dsi-v-back-porch = <124>;
 				qcom,mdss-dsi-v-front-porch = <796>;
 				qcom,mdss-dsi-panel-framerate = <60>;
+				qcom,mdss-dsi-panel-clockrate = <897600000>;
 //				qcom,mdss-dsi-panel-phy-timings = [00 21 09 09 24 23 08 08 08 03 04 00];
 				qcom,mdss-dsi-panel-phy-timings = [00 1E 08 08 24 22 08 08 05 03 04 00 19 18];
 				qcom,mdss-dsi-timing-switch-command = [
@@ -2575,7 +2577,7 @@
 					29 00 00 00 00 00 03 ED 04 4C		/* ERR_FG */
 					29 00 00 00 00 00 03 F0 A5 A5
 
-					/* FFC Setting (898.5 Mbps) */
+					/* FFC Setting (897.6 Mbps) */
 					29 00 00 00 00 00 03 FC 5A 5A		/* TEST KEY3 Enable*/
 					29 00 00 00 00 00 06 C5 0D 10 B4 3E 01
 					29 00 00 00 00 00 03 FC A5 A5		/* TEST KEY3 Disable*/
@@ -2693,6 +2695,7 @@
 				qcom,mdss-dsi-v-back-porch = <124>;
 				qcom,mdss-dsi-v-front-porch = <1556>;
 				qcom,mdss-dsi-panel-framerate = <60>;
+				qcom,mdss-dsi-panel-clockrate = <897600000>;
 //				qcom,mdss-dsi-panel-phy-timings = [00 21 09 09 24 23 08 08 08 03 04 00];
 				qcom,mdss-dsi-panel-phy-timings = [00 1E 08 08 24 22 08 08 05 03 04 00 19 18];
 
@@ -2745,7 +2748,7 @@
 					29 00 00 00 00 00 03 ED 04 4C		/* ERR_FG */
 					29 00 00 00 00 00 03 F0 A5 A5
 
-					/* FFC Setting (898.5 Mbps) */
+					/* FFC Setting (897.6 Mbps) */
 					29 00 00 00 00 00 03 FC 5A 5A		/* TEST KEY3 Enable*/
 					29 00 00 00 00 00 06 C5 0D 10 B4 3E 01
 					29 00 00 00 00 00 03 FC A5 A5		/* TEST KEY3 Disable*/

@@ -53,10 +53,16 @@ Copyright (C) 2012, Samsung Electronics. All rights reserved.
 #include <linux/debugfs.h>
 #include <linux/wakelock.h>
 #include <linux/miscdevice.h>
+#include <linux/reboot.h>
 #include <video/mipi_display.h>
 #include <linux/dev_ril_bridge.h>
 #include <linux/regulator/consumer.h>
 #include <linux/self_display/self_display.h>
+#if 0
+#if defined(CONFIG_SEC_ABC)
+#include <linux/sti/abc_common.h>
+#endif
+#endif
 
 #include "dsi_display.h"
 #include "dsi_panel.h"
@@ -81,6 +87,10 @@ Copyright (C) 2012, Samsung Electronics. All rights reserved.
 
 #if defined(CONFIG_SEC_DEBUG)
 #include <linux/sec_debug.h>
+#endif
+
+#if defined(CONFIG_SEC_BSP)
+#include <linux/sec_param.h>
 #endif
 
 extern bool enable_pr_debug;
@@ -138,6 +148,7 @@ extern bool enable_pr_debug;
 //#define DYNAMIC_DSI_CLK
 
 extern int poweroff_charging;
+#define USE_CURRENT_BL_LEVEL 0xFFFFFF
 
 enum PANEL_LEVEL_KEY {
 	LEVEL_KEY_NONE = 0,
@@ -145,6 +156,12 @@ enum PANEL_LEVEL_KEY {
 	LEVEL1_KEY = BIT(1),
 	LEVEL2_KEY = BIT(2),
 	POC_KEY = BIT(3),
+};
+
+enum backlight_origin {
+	BACKLIGHT_NORMAL,
+	BACKLIGHT_FINGERMASK_ON,
+	BACKLIGHT_FINGERMASK_OFF,
 };
 
 enum mipi_samsung_cmd_map_list {
@@ -285,6 +302,7 @@ struct dyn_mipi_clk {
 	struct clk_timing_table clk_timing_table;
 	struct rf_info rf_info;
 	int is_support;
+	int force_idx;	/* force to set clk idx for test purpose */
 };
 
 struct cmd_map {
@@ -292,7 +310,9 @@ struct cmd_map {
 	int *cmd_idx;
 	int size;
 };
-
+/* To support model which is not using one to one (platform level - cd level) match such as BLOOM, 
+  made MULTI_TO_ONE_NORMAL table to make set_normal_br_values use this when calc cd_level & cd index
+ */
 enum CD_MAP_TABLE_LIST {
 	NORMAL,
 	PAC_NORMAL,
@@ -300,6 +320,8 @@ enum CD_MAP_TABLE_LIST {
 	PAC_HBM,
 	AOD,
 	HMT,
+	GAMMA_MODE2_NORMAL,
+	MULTI_TO_ONE_NORMAL,
 	CD_MAP_TABLE_MAX,
 };
 
@@ -321,6 +343,7 @@ struct candela_map_table {
 		This is real measured brightness on panel.
 	*/
 	int *interpolation_cd;
+	int *gamma_mode2_cd;
 
 	int min_lv;
 	int max_lv;
@@ -380,6 +403,7 @@ struct samsung_display_dtsi_data {
 
 	struct cmd_map hmt_reverse_aid_map_table[SUPPORT_PANEL_REVISION];
 
+	bool disp_en_gpio_use;
 	bool panel_lpm_enable;
 	bool hmt_enabled;
 
@@ -429,6 +453,7 @@ struct samsung_display_dtsi_data {
 	 *	Flash gamma feature
 	*/
 	bool flash_gamma_support;
+	char flash_read_intf[10];
 	int flash_gamma_data_read_addr_len;
 	int *flash_gamma_data_read_addr;
 
@@ -461,6 +486,8 @@ struct samsung_display_dtsi_data {
 	/*
 	 *	Flash gamma feature end
 	*/
+	/* Physical data lanes to be enabled */
+	int num_of_data_lanes;
 };
 
 struct display_status {
@@ -606,6 +633,7 @@ struct panel_func {
 	struct dsi_panel_cmd_set * (*samsung_brightness_aid_hmt)(struct samsung_display_driver_data *vdd, int *level_key);
 	struct dsi_panel_cmd_set * (*samsung_brightness_elvss_hmt)(struct samsung_display_driver_data *vdd, int *level_key);
 	struct dsi_panel_cmd_set * (*samsung_brightness_vint_hmt)(struct samsung_display_driver_data *vdd, int *level_key);
+	struct dsi_panel_cmd_set * (*samsung_brightness_hmt)(struct samsung_display_driver_data *vdd, int *level_key);
 
 	int (*samsung_smart_dimming_hmt_init)(struct samsung_display_driver_data *vdd);
 	struct smartdim_conf *(*samsung_smart_get_conf_hmt)(void);
@@ -614,6 +642,9 @@ struct panel_func {
 	void (*samsung_tft_blic_init)(struct samsung_display_driver_data *vdd);
 	void (*samsung_brightness_tft_pwm)(struct samsung_display_driver_data *vdd, int level);
 	struct dsi_panel_cmd_set * (*samsung_brightness_tft_pwm_ldi)(struct samsung_display_driver_data *vdd, int *level_key);
+
+	/* GAMMAMODE2 */
+	struct dsi_panel_cmd_set * (*samsung_brightness_gamma_mode2)(struct samsung_display_driver_data *vdd, int *level_key);
 
 	void (*samsung_bl_ic_pwm_en)(int enable);
 	void (*samsung_bl_ic_i2c_ctrl)(int scaled_level);
@@ -718,6 +749,10 @@ struct self_display {
 
 	struct self_display_debug debug;
 
+	u8 *mask_crc_pass_data; // implemented in dtsi
+	u8 *mask_crc_read_data;
+	int mask_crc_size;
+
 	/* Self display Function */
 	int (*init)(struct samsung_display_driver_data *vdd);
 	int (*data_init)(struct samsung_display_driver_data *vdd);
@@ -725,6 +760,7 @@ struct self_display {
 	int (*aod_exit)(struct samsung_display_driver_data *vdd);
 	void (*self_mask_img_write)(struct samsung_display_driver_data *vdd);
 	void (*self_mask_on)(struct samsung_display_driver_data *vdd, int enable);
+	int (*self_mask_check)(struct samsung_display_driver_data *vdd);
 	void (*self_blinking_on)(struct samsung_display_driver_data *vdd, int enable);
 	int (*self_display_debug)(struct samsung_display_driver_data *vdd);
 	void (*self_move_set)(struct samsung_display_driver_data *vdd, int ctrl);
@@ -850,6 +886,9 @@ struct POC {
 	int (*poc_read)(struct samsung_display_driver_data *vdd, u8 *buf, u32 pos, u32 size);
 	int (*poc_erase)(struct samsung_display_driver_data *vdd, u32 erase_pos, u32 erase_size, u32 target_pos);
 
+	int (*poc_open)(struct samsung_display_driver_data *vdd);
+	int (*poc_release)(struct samsung_display_driver_data *vdd);
+
 	void (*poc_comp)(struct samsung_display_driver_data *vdd);
 	int (*check_read_case)(struct samsung_display_driver_data *vdd);
 
@@ -927,6 +966,13 @@ struct brightness_info {
 
 	int cd_level;
 	int interpolation_cd;
+	int gamma_mode2_cd;
+	int gamma_mode2_support;
+	int multi_to_one_support;
+
+	/* SAMSUNG_FINGERPRINT */
+	int finger_mask_bl_level;
+	int finger_mask_hbm_on;
 
 	int cd_idx;			// original idx
 	int pac_cd_idx;		// scaled idx
@@ -968,10 +1014,19 @@ struct STM_REG_OSSET{
 	int offset;
 };
 
+/* STM : Scene Transition Measure */
 struct STM {
 	int stm_on;
 	struct STM_CMD orig_cmd;
 	struct STM_CMD cur_cmd;
+};
+
+struct ub_con_detect {
+	spinlock_t irq_lock;
+	int gpio;
+	unsigned long irqflag;
+	bool enabled;
+	int ub_con_cnt;
 };
 
 /*
@@ -999,6 +1054,15 @@ struct samsung_display_driver_data {
 	bool panel_attach_status; // 1: attached, 0: detached
 	int panel_revision;
 	char *panel_vendor;
+
+	/* SAMSUNG_FINGERPRINT */
+	bool support_optical_fingerprint;
+	bool finger_mask_updated;
+	int finger_mask;
+	int panel_hbm_entry_delay; //hbm entry delay/ unit = vsync
+	struct lcd_device *lcd_dev;
+
+	bool remove_self_move; //self move
 
 	struct display_status display_status_dsi;
 
@@ -1064,9 +1128,6 @@ struct samsung_display_driver_data {
 
 	int select_panel_gpio;
 	bool select_panel_use_expander_gpio;
-
-	/* UB_CON_DET */
-	int ub_con_det_gpio;
 
 	/* X-Talk */
 	int xtalk_mode;
@@ -1175,6 +1236,10 @@ struct samsung_display_driver_data {
 	struct spi_driver spi_driver;
 	struct notifier_block spi_notif;
 	int ddi_spi_status;
+
+	/* winbond spi cmd set */
+	struct ddi_spi_cmd_set *spi_cmd_set;
+
 	/*
 		unique ddi need to sustain spi-cs(chip select)port high-level for global parameter usecase..
 
@@ -1192,6 +1257,10 @@ struct samsung_display_driver_data {
 	 *  Dynamic MIPI Clock
 	 */
 	struct dyn_mipi_clk dyn_mipi_clk;
+
+	/* ffc_tx_cmds's level keys are different for each panel, so cmds line position is different.
+	    ex) FA9 used  F0 and FC level key, others used only F0 Level key. */
+	int ffc_cmds_line_position; /* Default Vaule : 1 */
 
 	/*
 	 *  GCT
@@ -1232,6 +1301,7 @@ struct samsung_display_driver_data {
 	struct ss_interpolation flash_itp;
 	struct ss_interpolation table_itp;
 	int table_interpolation_loaded;
+	bool spi_no_dev;
 
 	/*
 	 * Brightness
@@ -1245,7 +1315,7 @@ struct samsung_display_driver_data {
 	int mdnie_loaded_dsi;
 
 	/*
-	 * STN
+	 * STM
 	 */
 	struct STM stm;
 	int stm_load_init_cmd;
@@ -1262,6 +1332,26 @@ struct samsung_display_driver_data {
 	int ccd_fail_val;
 
 	int samsung_splash_enabled;
+
+	/* disable pll ssc */
+	int pll_ssc_disabled;
+
+	/* UB CON DETECT */
+	struct ub_con_detect ub_con_det;
+
+	/* partial disp support 
+	 * -1 means panel does not support partial disp fucntion.
+	 * so, partial_disp value sould not be updated when value is -1.
+	 */
+	bool support_partial_disp;
+	int partial_disp_val;
+
+	bool samsung_enable_splash_pba;
+
+	char window_color[2];
+
+	/* force white flush to support the model can not execute gallery. */
+	int force_white_flush;
 };
 
 extern struct list_head vdds_list;
@@ -1355,6 +1445,9 @@ void print_stm_cmd(struct STM_CMD cmd);
 int ss_get_stm_orig_cmd(struct samsung_display_driver_data *vdd);
 void ss_stm_set_cmd(struct samsung_display_driver_data *vdd, struct STM_CMD *cmd);
 
+/* uevent for UB con */
+void ss_send_ub_uevent(struct samsung_display_driver_data *vdd);
+
 /***************************************************************************************************
 *		BRIGHTNESS RELATED.
 ****************************************************************************************************/
@@ -1366,7 +1459,7 @@ void ss_stm_set_cmd(struct samsung_display_driver_data *vdd, struct STM_CMD *cmd
 #define HBM_MODE 6
 
 /* BRIGHTNESS RELATED FUNCTION */
-int ss_brightness_dcs(struct samsung_display_driver_data *vdd, int level);
+int ss_brightness_dcs(struct samsung_display_driver_data *vdd, int level, int backlight_origin);
 void ss_brightness_tft_pwm(struct samsung_display_driver_data *vdd, int level);
 void update_packet_level_key_enable(struct samsung_display_driver_data *vdd,
 		struct dsi_cmd_desc *packet, int *cmd_cnt, int level_key);
@@ -1376,6 +1469,9 @@ int ss_single_transmission_packet(struct dsi_panel_cmd_set *cmds);
 
 int ss_set_backlight(struct samsung_display_driver_data *vdd, u32 bl_lvl);
 bool is_hbm_level(struct samsung_display_driver_data *vdd);
+
+/* SAMSUNG_FINGERPRINT */
+void ss_send_hbm_fingermask_image_tx(struct samsung_display_driver_data *vdd, bool on);
 
 /* HMT BRIGHTNESS */
 int ss_brightness_dcs_hmt(struct samsung_display_driver_data *vdd, int level);
@@ -1790,7 +1886,7 @@ static inline bool ss_is_panel_lpm(
 static inline int ss_is_read_cmd(enum dsi_cmd_set_type type)
 {
 	if ((type > RX_CMD_START && type < RX_CMD_END) ||
-			type == RX_SELF_DISP_DEBUG) {
+			(type == RX_SELF_DISP_DEBUG || type == RX_SELF_MASK_CHECK)) {
 		return 1;
 	}
 

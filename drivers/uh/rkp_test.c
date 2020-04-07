@@ -24,6 +24,8 @@
 #define RKP_PA_READ	0
 #define RKP_PA_WRITE	1
 
+#define RKP_ROBUFFER_ARG_TEST 1
+
 /**********************************************************
  *			FIMC defines
  **********************************************************/
@@ -61,6 +63,7 @@ static DEFINE_RAW_SPINLOCK(par_lock);
 #define RKP_BUF_SIZE	4096
 char rkp_test_buf[RKP_BUF_SIZE];
 unsigned long rkp_test_len = 0;
+unsigned long prot_user_l2 = 1;
 
 u64 *ha1;
 u64 *ha2;
@@ -157,6 +160,8 @@ static int test_case_user_pgtable_ro(void)
 	}
 
 	//L1 and L2 pgtable should be RO
+	if ((!prot_user_l2) && (0 == test[0].write))
+		return 0;
 	if ((0 == test[0].write) && (0 == test[1].write))
 		return 0; //pass
 	else
@@ -330,6 +335,8 @@ static void walk_pud(pgd_t *pgd, int level, struct test_data_struct *test)
 	}
 }
 
+#define rkp_pgd_table		(_AT(pgdval_t, 1) << 1)
+#define rkp_pgd_bad(pgd)		(!(pgd_val(pgd) & rkp_pgd_table))
 static void walk_pgd(struct mm_struct *mm, int level, struct test_data_struct *test)
 {
 	pgd_t *pgd = pgd_offset(mm, 0UL);
@@ -337,10 +344,9 @@ static void walk_pgd(struct mm_struct *mm, int level, struct test_data_struct *t
 	unsigned long prot;
 
 	for (i = 0; i < PTRS_PER_PGD; i++, pgd++) {
-		if (pgd_none(*pgd)) {
+		if (rkp_pgd_bad(*pgd)) {
 			continue;
 		} else { //table
-			BUG_ON(pgd_bad(*pgd));
 			prot = pgd_val(*pgd) & L012_TABLE_PXN;
 			count_pxn(prot, level, test);
 
@@ -373,7 +379,16 @@ static int test_case_user_pxn(void)
 	}
 
 	//all 2nd level entries should be PXN
-	return (0 == test[1].no_pxn) ? 0 : 1;
+	if (0 == test[0].no_pxn) {
+		prot_user_l2 = 0;
+		return 0;
+	}
+	else if (0 == test[1].no_pxn) {
+		prot_user_l2 = 1;
+		return 0;
+	}
+	else
+		return 1;
 }
 
 struct mem_range_struct {
@@ -508,14 +523,16 @@ static const struct file_operations rkp_proc_fops = {
 
 static int __init rkp_test_init(void)
 {
+	phys_addr_t ret = 0;
+
 	if (proc_create("rkp_test", 0444, NULL, &rkp_proc_fops) == NULL) {
 		printk(KERN_ERR "RKP_TEST: Error creating proc entry");
 		return -1;
 	}
 
-	ha1 = (u64 *)(__va(RKP_ROBUF_START)+RKP_ROBUF_SIZE-16);
-	ha2 = (u64 *)(__va(RKP_ROBUF_START)+RKP_ROBUF_SIZE-8);
-
+	uh_call(UH_APP_RKP, RKP_RKP_ROBUFFER_ALLOC, (u64)&ret | (u64)RKP_ROBUFFER_ARG_TEST, 0, 0, 0);
+	ha1 = (u64 *)(__va(ret));
+	ha2 = (u64 *)(__va(ret) + 8);
 	return 0;
 }
 

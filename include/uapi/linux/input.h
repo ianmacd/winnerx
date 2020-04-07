@@ -27,6 +27,8 @@
 #define INPUT_FEATURE_ENABLE_PRESSURE		(1 << 1) /* homekey pressure */
 #define INPUT_FEATURE_ENABLE_SYNC_RR120		(1 << 2) /* sync reportrate 120hz */
 
+#define INPUT_FEATURE_SUPPORT_OPEN_SHORT_TEST		(1 << 8) /* open/short test support */
+#define INPUT_FEATURE_SUPPORT_MIS_CALIBRATION_TEST	(1 << 9) /* mis-calibration test support */
 
 /*
  * sec Log
@@ -361,6 +363,7 @@ struct input_mask {
  */
 #define SW_FLIP                 0x15  /* set = flip cover open, close*/
 #define SW_CERTIFYHALL          0x1b  /* set = certify_hall attach/detach */
+#define SW_HALL_LOGICAL			0x1f  /* set = logical hall ic attach/detach */
 
 /*
  * IDs.

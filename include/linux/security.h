@@ -85,7 +85,6 @@ enum lsm_event {
 #define rocred_uc_inc_not_zero(x) atomic_inc_not_zero(x->use_cnt)
 #define rocred_uc_set(x,v) atomic_set(x->use_cnt,v)
 
-#define RKP_RO_AREA __attribute__((section (".rkp.prot.page")))
 extern int rkp_cred_enable;
 extern char __rkp_ro_start[], __rkp_ro_end[];
 extern struct cred init_cred;
@@ -103,7 +102,6 @@ static inline u8 rkp_ro_page(unsigned long addr)
 }
 extern int security_integrity_current(void);
 #else
-#define RKP_RO_AREA   
 #define security_integrity_current()  0
 #endif /*CONFIG_RKP_KDP*/
 

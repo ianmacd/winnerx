@@ -8,7 +8,6 @@
 #include <net/addrconf.h>
 #include <net/ip.h>
 
-#include <linux/netlog.h>
 /* if ipv6 module registers this function is used by xfrm to force all
  * sockets to relookup their nodes - this is fairly expensive, be
  * careful
@@ -180,8 +179,8 @@ void in6_dev_finish_destroy(struct inet6_dev *idev)
 	WARN_ON(idev->mc_list);
 	WARN_ON(timer_pending(&idev->rs_timer));
 
-#if 1 //def NET_REFCNT_DEBUG
-	net_log("%s: %s\n", __func__, dev ? dev->name : "NIL");
+#ifdef NET_REFCNT_DEBUG
+	pr_debug("%s: %s\n", __func__, dev ? dev->name : "NIL");
 #endif
 	dev_put(dev);
 	if (!idev->dead) {

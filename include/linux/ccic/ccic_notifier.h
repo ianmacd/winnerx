@@ -49,6 +49,10 @@ typedef enum {
 	CCIC_NOTIFY_ID_POWER_STATUS,
 	CCIC_NOTIFY_ID_WATER,
 	CCIC_NOTIFY_ID_VCONN,
+#if defined(CONFIG_MUIC_S2MU107) || defined(CONFIG_MUIC_S2MU106) || defined(CONFIG_CCIC_S2MU106)
+	CCIC_NOTIFY_ID_OTG,
+	CCIC_NOTIFY_ID_TA,
+#endif
 	CCIC_NOTIFY_ID_DP_CONNECT,
 	CCIC_NOTIFY_ID_DP_HPD,
 	CCIC_NOTIFY_ID_DP_LINK_CONF,
@@ -109,15 +113,6 @@ typedef enum {
 	CCIC_NOTIFY_DP_PIN_E,
 	CCIC_NOTIFY_DP_PIN_F,
 } ccic_notifier_dp_pinconf_t;
-
-#if !defined(CONFIG_CCIC_S2MM005)
-/* Function Status from s2mm005 definition */
-typedef enum {
-//	State_PE_Initial_detach	= 0,
-	State_PE_SRC_Send_Capabilities = 3,
-	State_PE_SNK_Wait_for_Capabilities = 17,
-} ccic_notifier_pd_state_t;
-#endif
 
 /* ID = 2 : RID */
 typedef struct {
@@ -196,7 +191,7 @@ extern int ccic_notifier_unregister(struct notifier_block *nb);
 extern int ccic_notifier_init(void);
 
 #define CCIC_NOTI_DEST_NUM	(12)
-#define CCIC_NOTI_ID_NUM	(15)
+#define CCIC_NOTI_ID_NUM	(17)
 #define CCIC_NOTI_RID_NUM	(8)
 #define CCIC_NOTI_USB_STATUS_NUM (5)
 #define CCIC_NOTI_PIN_STATUS_NUM	(8)

@@ -80,6 +80,9 @@
 #define MUIC_REG_INT2	0x04
 #define MUIC_REG_INT3	0x05
 #define	REG_DEVT1	0x0a
+#ifdef CONFIG_MUIC_SM5705_SWITCH_CONTROL_GPIO
+#define MUIC_REG_TIMING_SET1	0x0D
+#endif
 
 #if defined(CONFIG_MUIC_SUPPORT_EARJACK)
 #define REG_BTN1		0x0c
@@ -238,9 +241,12 @@ static int muic_irq_handler_afc(muic_data_t *pmuic, int irq)
 #if defined(CONFIG_MUIC_SUPPORT_CCIC) && !defined(CONFIG_SEC_FACTORY)
 		/* To prevent damage by RP0 Cable, AFC should be progress after ccic_attach */
 		if (pmuic->is_ccic_attach) {
- 			if (pmuic->ccic_rp == Rp_56K)
+ 			if (pmuic->ccic_rp == Rp_56K) {
 				afcops->afc_ta_attach(pmuic->regmapdesc);
-			else {
+			} else if (pmuic->ccic_rp == Rp_Abnormal) {
+				pr_info("%s: Rp isn't 56K, but is (%d)K and Rp check is already done.\n", __func__, pmuic->ccic_rp);
+				return INT_REQ_DONE;
+			} else {
 				pmuic->retry_afc = true;
 				pr_info("%s: Rp isn't 56K, but is (%d)K\n", __func__, pmuic->ccic_rp);
 				pmuic->attached_dev = ATTACHED_DEV_AFC_CHARGER_5V_MUIC;
@@ -608,6 +614,9 @@ static int muic_probe(struct i2c_client *i2c,
 	pmuic->retry_afc = false;
 	pmuic->afc_retry_count = 0;
 #endif
+#if defined(CONFIG_MUIC_SUPPORT_KEYBOARDDOCK)
+	pmuic->adc_rescan_count = 0;
+#endif
 #if defined(CONFIG_SEC_DEBUG)
 	pmuic->usb_to_ta_state = false;
 #endif
@@ -646,14 +655,6 @@ static int muic_probe(struct i2c_client *i2c,
 
 	pr_info("%s: VPS_TYPE=%d\n", __func__, pmuic->vps_table);
 
-	if (get_afc_mode() & CH_MODE_AFC_DISABLE_VAL) {
-		pr_info("AFC mode disabled\n");
-		pmuic->pdata->afc_disable = true;
-	} else {
-		pr_info("AFC mode enabled\n");
-		pmuic->pdata->afc_disable = false;
-	}
-
 	if (!pdata->set_gpio_uart_sel) {
 		if (pmuic->gpio_uart_sel) {
 			pr_info("%s: gpio_uart_sel registered.\n", __func__);
@@ -691,6 +692,14 @@ static int muic_probe(struct i2c_client *i2c,
 	pr_info("  Not suuport rustproof mode\n");
 	pmuic->is_rustproof = false;
 #endif
+
+	if (get_afc_mode() == CH_MODE_AFC_DISABLE_VAL) {
+		pr_info("AFC mode disabled\n");
+		pmuic->pdata->afc_disable = true;
+	} else {
+		pr_info("AFC mode enabled\n");
+		pmuic->pdata->afc_disable = false;
+	}
 
 	/* Register chipset register map. */
 	muic_register_regmap(&pdesc, pmuic);
@@ -738,6 +747,9 @@ static int muic_probe(struct i2c_client *i2c,
 		pr_err("%s: failed to init muic register(%d)\n", __func__, ret);
 		goto fail;
 	}
+
+	ret = muic_i2c_read_byte(pmuic->i2c, MUIC_REG_TIMING_SET1);
+	pr_info("%s: timing_set1(0x%02x)\n", __func__, ret);
 
 	pops->update(pdesc);
 	pops->show(pdesc);

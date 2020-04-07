@@ -21,16 +21,21 @@
 
 /* max size of each sensor's msg_buf */
 #define MSG_TYPE_SIZE_ZERO	0
-#define MSG_ACCEL_MAX	16
+#define MSG_ACCEL_MAX	128
 #define MSG_GYRO_MAX	16
-#define MSG_MAG_MAX	10
+#define MSG_MAG_MAX	15
 #define MSG_LIGHT_MAX	13
 #define MSG_PROX_MAX	12
 #define MSG_MOBEAM_MAX	1
 #define MSG_GYRO_TEMP_MAX	3
 #define MSG_PRESSURE_TEMP_MAX	1
-#define MSG_PRESSURE_MAX	3
-#define MSG_VOPTIC_MAX	1
+#define MSG_PRESSURE_MAX	120
+#define MSG_VOPTIC_MAX	2
+#define MSG_REG_SNS_MAX	18 /* 6 * 3 */
+#ifdef CONFIG_SUPPORT_AK0997X
+#define MSG_DIGITAL_HALL_MAX 11
+#define MSG_DIGITAL_HALL_ANGLE_MAX 58
+#endif
 
 enum {
 	MSG_ACCEL,
@@ -62,6 +67,14 @@ enum {
 #ifdef CONFIG_SUPPORT_VIRTUAL_OPTIC
 	MSG_VIR_OPTIC,//MSG_TYPE_SIZE_ZERO
 #endif
+	MSG_REG_SNS,//MSG_TYPE_SIZE_ZERO
+#ifdef CONFIG_SUPPORT_AK0997X
+	MSG_DIGITAL_HALL,
+	MSG_DIGITAL_HALL_ANGLE,
+	MSG_LF_STREAM,
+#endif
+/* If you need to add sensor_info to factory_ssc.h, */ 
+/* add new MSG type above this line.                */
 #ifdef CONFIG_SUPPORT_HIDDEN_HOLE_SUB
 	MSG_HH_HOLE_SUB,
 #endif
@@ -98,6 +111,13 @@ enum {
 	FSTATE_ACTIVE,
 	FSTATE_FAC_INACTIVE,
 	FSTATE_FAC_ACTIVE
+};
+
+enum {
+	VOPTIC_OP_CMD_FAC_FLIP,
+	VOPTIC_OP_CMD_SSC_FLIP,
+	VOPTIC_OP_CMD_SSC_FLIP_UPDATE,
+	VOPTIC_OP_CMD_MAX
 };
 #endif
 

@@ -25,7 +25,7 @@
  *
  * <<Broadcom-WL-IPTag/Open:>>
  *
- * $Id: dhd_linux_wq.c 675839 2016-12-19 03:07:26Z $
+ * $Id: dhd_linux_wq.c 815919 2019-04-22 09:06:50Z $
  */
 
 #include <linux/init.h>
@@ -85,15 +85,11 @@ dhd_kfifo_init(u8 *buf, int size, spinlock_t *lock)
 	struct kfifo *fifo;
 	gfp_t flags = CAN_SLEEP()? GFP_KERNEL : GFP_ATOMIC;
 
-#if (LINUX_VERSION_CODE < KERNEL_VERSION(2, 6, 33))
-	fifo = kfifo_init(buf, size, flags, lock);
-#else
 	fifo = (struct kfifo *)kzalloc(sizeof(struct kfifo), flags);
 	if (!fifo) {
 		return NULL;
 	}
 	kfifo_init(fifo, buf, size);
-#endif /* (LINUX_VERSION_CODE < KERNEL_VERSION(2, 6, 33)) */
 	return fifo;
 }
 
@@ -101,10 +97,6 @@ static inline void
 dhd_kfifo_free(struct kfifo *fifo)
 {
 	kfifo_free(fifo);
-#if (LINUX_VERSION_CODE > KERNEL_VERSION(2, 6, 31))
-	/* FC11 releases the fifo memory */
-	kfree(fifo);
-#endif // endif
 }
 
 /* deferred work functions */

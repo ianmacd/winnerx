@@ -3,6 +3,15 @@
 
 #include <linux/notifier.h>
 #include <linux/ccic/ccic_notifier.h>
+#if defined(CONFIG_CCIC_S2MU106) || defined(CONFIG_CCIC_S2MU107)
+#include <linux/of.h>
+#if defined(CONFIG_SEC_SYSFS)
+#include <linux/sec_sysfs.h>
+#elif defined(CONFIG_DRV_SAMSUNG)
+#include <linux/sec_class.h>
+#endif
+#include <linux/ccic/s2mu107_sysfs.h>
+#endif
 #include <linux/ccic/ccic_sysfs.h>
 #ifdef CONFIG_USB_TYPEC_MANAGER_NOTIFIER
 #include <linux/battery/battery_notifier.h>
@@ -50,6 +59,8 @@ char CCIC_NOTI_ID_Print[CCIC_NOTI_ID_NUM][20] =
 	{"ID_POWER_STATUS"},
 	{"ID_WATER"},
 	{"ID_VCONN"},
+	{"ID_OTG"},
+	{"ID_TA"},
 	{"ID_DP_CONNECT"},
 	{"ID_DP_HPD"},
 	{"ID_DP_LINK_CONF"},
@@ -310,7 +321,10 @@ int ccic_notifier_notify(CC_NOTI_TYPEDEF *p_noti, void *pd, int pdic_attach)
 int ccic_notifier_init(void)
 {
 	int ret = 0;
-
+#if defined(CONFIG_CCIC_S2MU106) || defined(CONFIG_CCIC_S2MU107)
+	struct device_node *np = NULL;
+	np = of_find_compatible_node(NULL, NULL, "maxim,max77705");
+#endif
 	pr_info("%s\n", __func__);
 	if(ccic_notifier_init_done)
 	{
@@ -318,9 +332,36 @@ int ccic_notifier_init(void)
 		goto out;
 	}
 	ccic_notifier_init_done = 1;
+#if defined(CONFIG_CCIC_S2MU106) || defined(CONFIG_CCIC_S2MU107)
+	if (np) {
+		pr_err("%s max77705!!!\n", __func__);
+		ccic_core_init();
+	}
+	else {
+		pr_err("%s no max77705!!!\n", __func__);
+#if defined(CONFIG_SEC_SYSFS)
+		ccic_device = sec_device_create(NULL, "ccic");
+#elif defined(CONFIG_DRV_SAMSUNG)
+		ccic_device = sec_device_create(0, NULL, "ccic");
+#endif
+		if (IS_ERR(ccic_device)) {
+			pr_err("%s Failed to create device(switch)!\n", __func__);
+			ret = -ENODEV;
+			goto out;
+		}
+
+		/* create sysfs group */
+		ret = sysfs_create_group(&ccic_device->kobj, &s2mu107_ccic_sysfs_group);
+		if (ret) {
+			pr_err("%s: ccic sysfs fail, ret %d", __func__, ret);
+			goto out;
+		}
+	}
+	BLOCKING_INIT_NOTIFIER_HEAD(&(ccic_notifier.notifier_call_chain));
+#else
 	ccic_core_init();
 	BLOCKING_INIT_NOTIFIER_HEAD(&(ccic_notifier.notifier_call_chain));
-
+#endif
 out:
 	return ret;
 }

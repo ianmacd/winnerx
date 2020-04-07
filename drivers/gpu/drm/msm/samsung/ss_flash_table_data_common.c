@@ -575,6 +575,193 @@ void flash_data_read(struct samsung_display_driver_data *vdd, int bank_index)
 	vdd->panel_br_info.flash_data.check_sum_cal_data &= ERASED_MMC_16BIT;
 }
 
+static int flash_gamma_read_spi(struct samsung_display_driver_data *vdd, int bank_index)
+{
+	int i;
+	int loop_cnt, bank_addr, start_addr, end_addr, total_size;
+	struct spi_device *spi_dev;	
+	struct ddi_spi_cmd_set *cmd_set = NULL;
+	char *rbuf = NULL;
+	int ret = 0;
+
+	spi_dev = vdd->spi_dev;
+	
+	if (IS_ERR_OR_NULL(spi_dev)) {
+		LCD_ERR("no spi_dev\n");
+		return -EINVAL;
+	}
+
+	cmd_set = ss_get_spi_cmds(vdd, RX_DATA);
+	if (cmd_set == NULL) {
+		LCD_ERR("cmd_set is null..\n");
+		return -EINVAL;
+	}
+	
+	/* Flash Write Check read*/
+	
+	start_addr = vdd->dtsi_data.flash_gamma_write_check_address;
+	end_addr = vdd->dtsi_data.flash_gamma_write_check_address;
+	total_size = end_addr - start_addr + 1;
+
+	LCD_ERR("[Write Check] size = %d addr = %06x ~ %06x\n", total_size, start_addr, end_addr);
+	
+	rbuf = kmalloc(total_size, GFP_KERNEL | GFP_DMA);
+	if (!rbuf) {
+		LCD_ERR("fail to kmalloc for rbuf..\n");
+		goto err;
+	}
+
+	cmd_set->rx_size = total_size;
+	cmd_set->rx_addr = start_addr;
+
+	ret = ss_spi_sync(spi_dev, rbuf, RX_DATA);
+	
+	for (i = 0; i < total_size; i++) {
+		vdd->panel_br_info.flash_data.write_check =
+			vdd->panel_br_info.flash_data.write_check << (i * 8) | rbuf[i];
+	}
+
+	/* Checksum read */
+
+	if (rbuf)
+		kfree(rbuf);
+
+	/* init check sum data */
+	vdd->panel_br_info.flash_data.check_sum_flash_data = MMC_CHECK_SUM_INIT;
+
+	bank_addr = vdd->dtsi_data.flash_gamma_bank_start[bank_index];
+	start_addr =  bank_addr + vdd->dtsi_data.flash_gamma_check_sum_start_offset;
+	end_addr = bank_addr + vdd->dtsi_data.flash_gamma_check_sum_end_offset;
+	total_size = end_addr - start_addr + 1;
+
+	LCD_ERR("[Checksum] size = %d addr = %06x ~ %06x\n", total_size, start_addr, end_addr);
+	
+	rbuf = kmalloc(total_size, GFP_KERNEL | GFP_DMA);
+	if (!rbuf) {
+		LCD_ERR("fail to kmalloc for rbuf..\n");
+		goto err;
+	}
+
+	cmd_set->rx_size = total_size;
+	cmd_set->rx_addr = start_addr;
+
+	ret = ss_spi_sync(spi_dev, rbuf, RX_DATA);
+
+	for (i = 0; i < total_size; i++) {
+		vdd->panel_br_info.flash_data.check_sum_flash_data =
+			vdd->panel_br_info.flash_data.check_sum_flash_data << (i * 8) | rbuf[i];
+	}
+	
+	/* GAMMA read */
+	
+	if (rbuf)
+		kfree(rbuf);
+	
+	/* init check sum cal data */
+	vdd->panel_br_info.flash_data.check_sum_cal_data = MMC_CHECK_SUM_INIT;
+	
+	start_addr = vdd->dtsi_data.flash_gamma_bank_start[bank_index];
+	end_addr = vdd->dtsi_data.flash_gamma_bank_end[bank_index];
+	total_size = end_addr - start_addr + 1;
+
+	LCD_ERR("[Gamma] size = %d addr = %06x ~ %06x\n", total_size, start_addr, end_addr);
+	
+	rbuf = kmalloc(total_size, GFP_KERNEL | GFP_DMA);
+	if (!rbuf) {
+		LCD_ERR("fail to kmalloc for rbuf..\n");
+		goto err;
+	}
+
+	cmd_set->rx_size = total_size;
+	cmd_set->rx_addr = start_addr;
+
+	ret = ss_spi_sync(spi_dev, rbuf, RX_DATA);
+	
+	memcpy(vdd->panel_br_info.br_data_raw, rbuf, total_size);
+
+	for (loop_cnt = 0; loop_cnt < total_size; loop_cnt++)
+		vdd->panel_br_info.flash_data.check_sum_cal_data += vdd->panel_br_info.br_data_raw[loop_cnt];
+
+	/* 16bit sum check */
+	vdd->panel_br_info.flash_data.check_sum_cal_data &= ERASED_MMC_16BIT;
+
+	/* 0xC8 read */
+
+	if (rbuf)
+		kfree(rbuf);
+
+	/* init check sum data */
+	vdd->panel_br_info.flash_data.c8_register.check_sum_mtp_data = MMC_CHECK_SUM_INIT;
+	vdd->panel_br_info.flash_data.c8_register.check_sum_flash_data = MMC_CHECK_SUM_INIT;
+	vdd->panel_br_info.flash_data.c8_register.check_sum_cal_data = MMC_CHECK_SUM_INIT;
+
+	bank_addr = vdd->dtsi_data.flash_gamma_bank_start[bank_index];
+	start_addr = bank_addr + vdd->dtsi_data.flash_gamma_0xc8_check_sum_start_offset;
+	end_addr = bank_addr + vdd->dtsi_data.flash_gamma_0xc8_check_sum_end_offset;
+	total_size = end_addr - start_addr + 1;
+
+	LCD_ERR("[0xC8 1] size = %d addr = %06x ~ %06x\n", total_size, start_addr, end_addr);
+
+	rbuf = kmalloc(total_size, GFP_KERNEL | GFP_DMA);
+	if (!rbuf) {
+		LCD_ERR("fail to kmalloc for rbuf..\n");
+		goto err;
+	}
+
+	cmd_set->rx_size = total_size;
+	cmd_set->rx_addr = start_addr;
+
+	ret = ss_spi_sync(spi_dev, rbuf, RX_DATA);
+
+	for (i = 0; i < total_size; i++) {
+		vdd->panel_br_info.flash_data.c8_register.check_sum_flash_data =
+			vdd->panel_br_info.flash_data.c8_register.check_sum_flash_data << (i * 8) | rbuf[i];
+	}
+
+	if (rbuf)
+		kfree(rbuf);
+
+	start_addr = vdd->dtsi_data.flash_gamma_0xc8_start_offset + bank_addr;
+	end_addr = vdd->dtsi_data.flash_gamma_0xc8_end_offset + bank_addr;
+	total_size = end_addr - start_addr + 1;
+
+	LCD_ERR("[0xC8 2] size = %d addr = %06x ~ %06x\n", total_size, start_addr, end_addr);
+
+	rbuf = kmalloc(total_size, GFP_KERNEL | GFP_DMA);
+	if (!rbuf) {
+		LCD_ERR("fail to kmalloc for rbuf..\n");
+		goto err;
+	}
+
+	cmd_set->rx_size = total_size;
+	cmd_set->rx_addr = start_addr;
+
+	ret = ss_spi_sync(spi_dev, rbuf, RX_DATA);
+
+	for (i = 0; i < total_size; i++) {
+		vdd->panel_br_info.flash_data.c8_register.flash_data[i] = rbuf[i];
+		vdd->panel_br_info.flash_data.c8_register.check_sum_cal_data += rbuf[i];
+	}
+	
+	/* check ddi 0xc8 register value */
+	for (i = 0; i <= vdd->dtsi_data.flash_gamma_0xc8_size; i++)
+		vdd->panel_br_info.flash_data.c8_register.check_sum_mtp_data += vdd->panel_br_info.flash_data.c8_register.mtp_data[i];
+	
+	/* 16bit sum check */
+	vdd->panel_br_info.flash_data.c8_register.check_sum_mtp_data &= ERASED_MMC_16BIT;
+	vdd->panel_br_info.flash_data.c8_register.check_sum_cal_data &= ERASED_MMC_16BIT;
+	
+	LCD_INFO("read 0xC8 mtp_check_sum : 0x%x flash_check_sum : 0x%x cal_check_sum : 0x%x\n",
+			vdd->panel_br_info.flash_data.c8_register.check_sum_mtp_data,
+			vdd->panel_br_info.flash_data.c8_register.check_sum_flash_data,
+			vdd->panel_br_info.flash_data.c8_register.check_sum_cal_data);
+err:	
+	if (rbuf)
+		kfree(rbuf);
+
+	return ret;
+}
+
 void flash_checksum_read(struct samsung_display_driver_data *vdd, int bank_index)
 {
 	int addr, loop_cnt, bank_addr, start_addr, end_addr;
@@ -631,7 +818,6 @@ void flash_0xc8_read(struct samsung_display_driver_data *vdd, int bank_index)
 	/* check ddi 0xc8 register value */
 	for (loop_cnt = 0; loop_cnt <= vdd->dtsi_data.flash_gamma_0xc8_size; loop_cnt++)
 		vdd->panel_br_info.flash_data.c8_register.check_sum_mtp_data += vdd->panel_br_info.flash_data.c8_register.mtp_data[loop_cnt];
-
 
 	/* 16bit sum check */
 	vdd->panel_br_info.flash_data.c8_register.check_sum_mtp_data &= ERASED_MMC_16BIT;
@@ -773,7 +959,7 @@ void flash_br_work_func(struct work_struct *work)
 	if (vdd->poc_driver.check_read_case)
 		vdd->poc_driver.read_case = vdd->poc_driver.check_read_case(vdd);
 
-	br_basic_register_read(vdd); /* hbm & smart-dimming register read */
+	table_br_func(vdd);
 
 	mutex_lock(&vdd->exclusive_tx.ex_tx_lock);
 	vdd->exclusive_tx.permit_frame_update = 1;
@@ -822,38 +1008,48 @@ void flash_br_work_func(struct work_struct *work)
 			gpio_get_value(vdd->ddi_spi_cs_high_gpio_for_gpara));
 	}
 
-	if (vdd->poc_driver.check_read_case) {
-		if (vdd->poc_driver.read_case == READ_CASE1) {
-			ss_send_cmd(vdd, TX_FLASH_GAMMA_PRE1);
-			LCD_ERR("READ_CASE1 \n");
-		}
-		else if (vdd->poc_driver.read_case == READ_CASE2) {
-			ss_send_cmd(vdd, TX_FLASH_GAMMA_PRE2);
-			vdd->poc_driver.need_sleep_in = true;
-			LCD_ERR("READ_CASE2 \n");
+	if (!strcmp(vdd->dtsi_data.flash_read_intf, "spi")) {
+		rc = flash_gamma_read_spi(vdd, 0);
+		if (rc && IS_ERR_OR_NULL(vdd->spi_dev)) {
+			vdd->spi_no_dev = true;
+			LCD_ERR("vdd->spi_no_dev:%d\n", vdd->spi_no_dev);
+		} else if (vdd->spi_no_dev) {
+			vdd->spi_no_dev = false;
 		}
 	} else {
-		ss_send_cmd(vdd, TX_FLASH_GAMMA_PRE1);
-		LCD_ERR("READ_CASE1 \n");
-	}
+		if (vdd->poc_driver.check_read_case) {
+			if (vdd->poc_driver.read_case == READ_CASE1) {
+				ss_send_cmd(vdd, TX_FLASH_GAMMA_PRE1);
+				LCD_ERR("READ_CASE1 \n");
+			}
+			else if (vdd->poc_driver.read_case == READ_CASE2) {
+				ss_send_cmd(vdd, TX_FLASH_GAMMA_PRE2);
+				vdd->poc_driver.need_sleep_in = true;
+				LCD_ERR("READ_CASE2 \n");
+			}
+		} else {
+			ss_send_cmd(vdd, TX_FLASH_GAMMA_PRE1);
+			LCD_ERR("No check read_case.. READ_CASE1 \n");
+		}
+	
+		/* 1st */
+		flash_write_check_read(vdd);
 
-	/* 1st */
-	flash_write_check_read(vdd);
+		/* 2st */
+		flash_checksum_read(vdd, 0);
 
-	/* 2st */
-	flash_checksum_read(vdd, 0);
+		/* 3 st */
+		//init_br_info(vdd);
 
-	/* 3 st */
-	init_br_info(vdd);
+		/*4 st */
+		flash_data_read(vdd, 0);
 
-	/*4 st */
-	flash_data_read(vdd, 0);
+		/* 5 st extra 0xC8 bank */
+		flash_0xc8_read(vdd, 0);
 
-	/* 5 st extra 0xC8 bank */
-	flash_0xc8_read(vdd, 0);
-
-	/* 6 st flash_data.mcd flash value */
-	//flash_flash_data.mcd_read(vdd);
+		/* 6 st flash_data.mcd flash value */
+		//flash_flash_data.mcd_read(vdd);
+	} 
 
 	LCD_INFO("read write_check : 0x%x flash_check_sum : 0x%x cal_check_sum : 0x%x\n",
 		vdd->panel_br_info.flash_data.write_check,
@@ -872,7 +1068,9 @@ void flash_br_work_func(struct work_struct *work)
 	} else
 		LCD_ERR("flash checksum fail..\n");
 
-	ss_send_cmd(vdd, TX_FLASH_GAMMA_POST);
+	if (strcmp(vdd->dtsi_data.flash_read_intf, "spi")) {
+		ss_send_cmd(vdd, TX_FLASH_GAMMA_POST);
+	}
 
 	if (vdd->ddi_spi_cs_high_gpio_for_gpara > 0) {
 		gpio_direction_input(vdd->ddi_spi_cs_high_gpio_for_gpara);
@@ -920,13 +1118,13 @@ error:
 		vdd->panel_br_info.flash_data.init_done = true;
 
 	/* If this work is from sysfs, set init_done as true again even checksum is fail. */
- 	if (vdd->panel_br_info.flash_data.sysfs && 
+ 	if (vdd->panel_br_info.flash_data.sysfs &&
 		!vdd->panel_br_info.flash_data.checksum) {
 		vdd->panel_br_info.flash_data.init_done = true;
  	}
-	
+
 	/* update brighntess */
-	ss_brightness_dcs(vdd, vdd->br.bl_level);
+	ss_brightness_dcs(vdd, USE_CURRENT_BL_LEVEL, BACKLIGHT_NORMAL);
 end:
 	LCD_INFO("--\n");
 

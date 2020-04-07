@@ -1273,6 +1273,9 @@ static int proc_resetep(struct usb_dev_state *ps, void __user *arg)
 	ret = checkintf(ps, ret);
 	if (ret)
 		return ret;
+#ifdef CONFIG_USB_DEBUG_DETAILED_LOG
+	dev_info(&ps->dev->dev,"%s epnum %d\n", __func__, ep);
+#endif
 	check_reset_of_active_ep(ps->dev, ep, "RESETEP");
 	usb_reset_endpoint(ps->dev, ep);
 	return 0;
@@ -1343,6 +1346,9 @@ static int proc_resetdevice(struct usb_dev_state *ps)
 	 * privilege to do such things and any of the interfaces are
 	 * currently claimed.
 	 */
+#ifdef CONFIG_USB_DEBUG_DETAILED_LOG
+	dev_info(&ps->dev->dev,"%s\n", __func__);
+#endif
 	if (ps->privileges_dropped && actconfig) {
 		for (i = 0; i < actconfig->desc.bNumInterfaces; ++i) {
 			interface = actconfig->interface[i];
@@ -2132,6 +2138,9 @@ static int proc_claiminterface(struct usb_dev_state *ps, void __user *arg)
 
 	if (get_user(ifnum, (unsigned int __user *)arg))
 		return -EFAULT;
+#ifdef CONFIG_USB_DEBUG_DETAILED_LOG
+	dev_info(&ps->dev->dev,"%s: ifnum %d\n", __func__, ifnum);
+#endif
 	return claimintf(ps, ifnum);
 }
 
@@ -2142,6 +2151,9 @@ static int proc_releaseinterface(struct usb_dev_state *ps, void __user *arg)
 
 	if (get_user(ifnum, (unsigned int __user *)arg))
 		return -EFAULT;
+#ifdef CONFIG_USB_DEBUG_DETAILED_LOG
+	dev_info(&ps->dev->dev,"%s: ifnum %d\n", __func__, ifnum);
+#endif
 	ret = releaseintf(ps, ifnum);
 	if (ret < 0)
 		return ret;
@@ -2187,6 +2199,9 @@ static int proc_ioctl(struct usb_dev_state *ps, struct usbdevfs_ioctl *ctl)
 		retval = -EINVAL;
 	else switch (ctl->ioctl_code) {
 
+#ifdef CONFIG_USB_DEBUG_DETAILED_LOG
+	dev_info(&ps->dev->dev,"%s ioctl_code %d\n", __func__, ctl->ioctl_code);
+#endif
 	/* disconnect kernel driver from interface */
 	case USBDEVFS_DISCONNECT:
 		if (intf->dev.driver) {
@@ -2322,7 +2337,12 @@ static int proc_disconnect_claim(struct usb_dev_state *ps, void __user *arg)
 					sizeof(dc.driver)) == 0)
 			return -EBUSY;
 
+#ifdef CONFIG_USB_DEBUG_DETAILED_LOG
+		dev_info(&intf->dev, "%s,intfnum %d disconnect by usbfs\n",
+				__func__, dc.interface);
+#else
 		dev_dbg(&intf->dev, "disconnect by usbfs\n");
+#endif
 		usb_driver_release_interface(driver, intf);
 	}
 

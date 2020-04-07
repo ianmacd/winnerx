@@ -31,8 +31,11 @@ Copyright (C) 2017, Samsung Electronics. All rights reserved.
 */
 #include "ss_dsi_panel_ANA38401_AMSA05RB06.h"
 #include "ss_dsi_mdnie_ANA38401_AMSA05RB06.h"
+#include "ss_dsi_interpolation_ANA38401_AMSA05RB06.h"
 
 static char hbm_buffer1[33] = {0,};
+char D8h_129th = 0;
+char D2h_112th = 0;
 
 static int samsung_panel_on_pre(struct samsung_display_driver_data *vdd)
 {
@@ -175,89 +178,9 @@ static int ss_cell_id_read(struct samsung_display_driver_data *vdd)
 	return true;
 }
 
-#if 0  // From : ss_dsi_panel_S6E3FA7_AMS628RF01.c
-static int ss_octa_id_read(struct samsung_display_driver_data *vdd)
-{
-	if (IS_ERR_OR_NULL(vdd)) {
-		LCD_ERR("Invalid data vdd : 0x%zx", (size_t)vdd);
-		return false;
-	}
-
-	/* Read Panel Unique OCTA ID (C9h 2nd~21th) */
-	if (ss_get_cmds(vdd, RX_OCTA_ID)->count) {
-		memset(vdd->octa_id_dsi, 0x00, MAX_OCTA_ID);
-
-		ss_panel_data_read(vdd, RX_OCTA_ID,
-				vdd->octa_id_dsi, LEVEL1_KEY);
-
-		LCD_INFO("octa id: %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x\n",
-			vdd->octa_id_dsi[0], vdd->octa_id_dsi[1],
-			vdd->octa_id_dsi[2], vdd->octa_id_dsi[3],
-			vdd->octa_id_dsi[4], vdd->octa_id_dsi[5],
-			vdd->octa_id_dsi[6], vdd->octa_id_dsi[7],
-			vdd->octa_id_dsi[8], vdd->octa_id_dsi[9],
-			vdd->octa_id_dsi[10], vdd->octa_id_dsi[11],
-			vdd->octa_id_dsi[12], vdd->octa_id_dsi[13],
-			vdd->octa_id_dsi[14], vdd->octa_id_dsi[15],
-			vdd->octa_id_dsi[16], vdd->octa_id_dsi[17],
-			vdd->octa_id_dsi[18], vdd->octa_id_dsi[19]);
-
-	} else {
-		LCD_ERR("DSI%d no octa_id_rx_cmds cmd\n", vdd->ndx);
-		return false;
-	}
-
-	return true;
-}
-
-static int ss_elvss_read(struct samsung_display_driver_data *vdd)
-{
-	char elvss_b5[2];
-
-	if (IS_ERR_OR_NULL(vdd)) {
-		LCD_ERR("Invalid data vdd : 0x%zx", (size_t)vdd);
-		return false;
-	}
-
-	/* Read mtp (B5h 23th,24th) for elvss*/
-	ss_panel_data_read(vdd, RX_ELVSS, elvss_b5, LEVEL1_KEY);
-
-	vdd->display_status_dsi.elvss_value1 = elvss_b5[0]; /*0xB5 23th OTP value*/
-	vdd->display_status_dsi.elvss_value2 = elvss_b5[1]; /*0xB5 24th */
-
-	return true;
-}
-
-static struct dsi_panel_cmd_set *ss_vint(struct samsung_display_driver_data *vdd, int *level_key)
-{
-	struct dsi_panel_cmd_set *vint_cmds = ss_get_cmds(vdd, TX_VINT);
-
-	if (IS_ERR_OR_NULL(vdd) || IS_ERR_OR_NULL(vint_cmds)) {
-		LCD_ERR("Invalid data vdd : 0x%zx cmds : 0x%zx", (size_t)vdd, (size_t)vint_cmds);
-		return NULL;
-	}
-
-	/* TODO: implement xtalk_mode
-	if (vdd->xtalk_mode)
-		cmd_index = 1;	// VGH 6.2 V
-	else
-		cmd_index = 0;	// VGH 7.0 V
-	 */
-
-	*level_key = LEVEL1_KEY;
-
-	return vint_cmds;
-}
-#endif
-
 static int ss_hbm_read(struct samsung_display_driver_data *vdd)
 {
 	struct dsi_panel_cmd_set *hbm_rx_cmds = ss_get_cmds(vdd, RX_HBM);
-	struct dsi_panel_cmd_set *hbm_etc_cmds = ss_get_cmds(vdd, TX_HBM_ETC);
-	struct dsi_panel_cmd_set *hbm_off_cmds = ss_get_cmds(vdd, TX_HBM_OFF);
-
-	char hbm_buffer2[1]    = {0,};
-	char hbm_off_buffer[1] = {0,};
 
 	if (IS_ERR_OR_NULL(vdd) || IS_ERR_OR_NULL(hbm_rx_cmds)) {
 		LCD_ERR("Invalid data vdd : 0x%zx cmds : 0x%zx", (size_t)vdd, (size_t)hbm_rx_cmds);
@@ -267,13 +190,11 @@ static int ss_hbm_read(struct samsung_display_driver_data *vdd)
 	/* Read mtp (D4h 91~123th) for hbm gamma */
 	ss_panel_data_read(vdd, RX_HBM, hbm_buffer1, LEVEL_KEY_NONE);
 
-	/* Read mtp (D8h 129th) for HBM On elvss*/
-	ss_panel_data_read(vdd, RX_HBM2, hbm_buffer2, LEVEL_KEY_NONE);
-	memcpy(&hbm_etc_cmds->cmds[2].msg.tx_buf[1], hbm_buffer2, 1);
+	/* Read mtp (D8h 129th) for HBM OFF -> On elvss*/
+	ss_panel_data_read(vdd, RX_HBM2, &D8h_129th, LEVEL_KEY_NONE);
 
-	/* Read mtp (D2h 112th) for HBM Off elvss*/
-	ss_panel_data_read(vdd, RX_ELVSS, hbm_off_buffer, LEVEL_KEY_NONE);
-	memcpy(&hbm_off_cmds->cmds[1].msg.tx_buf[1], hbm_off_buffer, 1);
+	/* Read mtp (D2h 112th) for HBM ON -> Off elvss*/
+	ss_panel_data_read(vdd, RX_ELVSS, &D2h_112th, LEVEL_KEY_NONE);
 
 	return true;
 }
@@ -304,7 +225,7 @@ static struct dsi_panel_cmd_set *ss_hbm_gamma(struct samsung_display_driver_data
 static struct dsi_panel_cmd_set *ss_hbm_etc(struct samsung_display_driver_data *vdd, int *level_key)
 {
 	struct dsi_panel_cmd_set *hbm_etc_cmds = ss_get_cmds(vdd, TX_HBM_ETC);
-	int elvss_dim_off;
+	u8 aor_data[AOR_SIZE];
 	int acl_opr;
 	int acl_start;
 	int acl_percent;
@@ -314,67 +235,6 @@ static struct dsi_panel_cmd_set *ss_hbm_etc(struct samsung_display_driver_data *
 		return NULL;
 	}
 
-	*level_key = LEVEL_KEY_NONE;
-
-	/* HBM ELVSS */
-	/*
-	 * To Do : In the Rev A OP manual there are no elvss dim offset
-	 * settings for -20 < T <= 0 and T <= -20 . In the future when new OP manual
-	 * is released with these settings then ,
-	 * this code needs to be updated for -20 < T <= 0  and T <= -20  cases
-	 */
-
-	switch(vdd->br.auto_level) {
-	case 6: /*378*/
-		if (vdd->temperature > 0)		elvss_dim_off = 0x1A;
-		else if (vdd->temperature > -20)	elvss_dim_off = 0x0E;
-		else					elvss_dim_off = 0x0C;
-		break;
-	case 7:	/*395*/
-		if (vdd->temperature > 0)		elvss_dim_off = 0x18;
-		else if (vdd->temperature > -20)	elvss_dim_off = 0x0D;
-		else					elvss_dim_off = 0x0C;
-		break;
-	case 8:	/*413*/
-		if (vdd->temperature > 0)		elvss_dim_off = 0x16;
-		else if (vdd->temperature > -20)	elvss_dim_off = 0x0C;
-		else					elvss_dim_off = 0x0C;
-		break;
-	case 9:	/*430*/
-		if (vdd->temperature > 0)		elvss_dim_off = 0x15;
-		else if (vdd->temperature > -20)	elvss_dim_off = 0x0C;
-		else					elvss_dim_off = 0x0C;
-		break;
-	case 10: /*448*/
-		if (vdd->temperature > 0)		elvss_dim_off = 0x13;
-		else if (vdd->temperature > -20)	elvss_dim_off = 0x0C;
-		else					elvss_dim_off = 0x0C;
-		break;
-	case 11: /*465*/
-		if (vdd->temperature > 0)		elvss_dim_off = 0x12;
-		else if (vdd->temperature > -20)	elvss_dim_off = 0x0C;
-		else					elvss_dim_off = 0x0C;
-		break;
-	case 12: /*483*/
-		if (vdd->temperature > 0)		elvss_dim_off = 0x10;
-		else if (vdd->temperature > -20)	elvss_dim_off = 0x0C;
-		else					elvss_dim_off = 0x0C;
-		break;
-	case 13: /*500, HBM*/
-		if (vdd->temperature > 0)		elvss_dim_off = 0x0F;
-		else if (vdd->temperature > -20)	elvss_dim_off = 0x0C;
-		else					elvss_dim_off = 0x0C;
-		break;
-
-	default:
-		LCD_INFO("err: auto_brightness=%d\n", vdd->br.auto_level);
-		elvss_dim_off = 0x0F;
-		break;
-	}
-
-	hbm_etc_cmds->cmds[4].msg.tx_buf[1] = elvss_dim_off;
-
-	/* ACL */
 	if (!vdd->gradual_acl_val) {	/* gallery app */
 		acl_opr = 0x4;		/* 16 Frame Avg at ACL off */
 		acl_start = 0x99;	/* Start setting: 60% start */
@@ -386,28 +246,53 @@ static struct dsi_panel_cmd_set *ss_hbm_etc(struct samsung_display_driver_data *
 		acl_percent = 0x11;	/* ACL 8% on */
 	}
 
+	/* aor */
+	br_interpolation_generate_event(vdd, GEN_HBM_INTERPOLATION_AOR, aor_data);
+	hbm_etc_cmds->cmds[0].msg.tx_buf[1] = aor_data[0];
+	hbm_etc_cmds->cmds[0].msg.tx_buf[2] = 0x00;
+	hbm_etc_cmds->cmds[0].msg.tx_buf[3] = aor_data[1];
+
+	/* elvss setting */
+	hbm_etc_cmds->cmds[2].msg.tx_buf[1] = D8h_129th;
+
+	/* elvss_dim offset */
+	br_interpolation_generate_event(vdd, GEN_HBM_INTERPOLATION_ELVSS, &hbm_etc_cmds->cmds[4].msg.tx_buf[1]);
+
+	/* opr average calculation */
 	hbm_etc_cmds->cmds[6].msg.tx_buf[1] = acl_opr;
+
+	/* Start setting */
 	hbm_etc_cmds->cmds[8].msg.tx_buf[1] = acl_start;
+
+	/* acl */
 	hbm_etc_cmds->cmds[10].msg.tx_buf[1] = acl_percent;
 
-	LCD_INFO("bl:%d can:%d elv:%x temp:%d opr:%x start:%x acl:%x\n",
-			vdd->br.bl_level, vdd->br.cd_level,
-			elvss_dim_off, vdd->temperature, acl_opr, acl_start,
-			acl_percent);
+	LCD_DEBUG("candela:%dCD temp:%d elvss_setting : 0x%x elvss_offset:0x%x opr:0x%x start:0x%x acl:0x%x\n",
+			vdd->br.cd_level,
+			vdd->temperature,
+			hbm_etc_cmds->cmds[2].msg.tx_buf[1],
+			hbm_etc_cmds->cmds[4].msg.tx_buf[1],
+			acl_opr, acl_start, acl_percent);
+
+	*level_key = LEVEL_KEY_NONE;
 
 	return hbm_etc_cmds;
 }
 
 static struct dsi_panel_cmd_set *ss_hbm_off(struct samsung_display_driver_data *vdd, int *level_key)
 {
-	if (IS_ERR_OR_NULL(vdd)) {
+	struct dsi_panel_cmd_set *hbm_off_cmds = ss_get_cmds(vdd, TX_HBM_OFF);
+
+	if (IS_ERR_OR_NULL(vdd) || IS_ERR_OR_NULL(hbm_off_cmds)) {
 		LCD_ERR("Invalid data vdd : 0x%zx", (size_t)vdd);
 		return NULL;
 	}
 
+	hbm_off_cmds->cmds[1].msg.tx_buf[1] = D2h_112th;
+
 	*level_key = LEVEL_KEY_NONE;
 
-	return ss_get_cmds(vdd, TX_HBM_OFF);
+	return hbm_off_cmds;
 }
 
 
@@ -579,30 +464,39 @@ static int ss_smart_dimming_init(struct samsung_display_driver_data *vdd)
 	return true;
 }
 
-static struct dsi_panel_cmd_set aid_cmd;
 static struct dsi_panel_cmd_set *ss_aid(struct samsung_display_driver_data *vdd, int *level_key)
 {
-	struct dsi_panel_cmd_set *pcmds = ss_get_cmds(vdd, TX_AID_SUBDIVISION);
-	int cd_index = 0;
+	struct dsi_panel_cmd_set *aid_cmds = ss_get_cmds(vdd, TX_PAC_AID_SUBDIVISION);
+	u8 aor_data[AOR_SIZE];
 
 	if (IS_ERR_OR_NULL(vdd)) {
 		LCD_ERR("Invalid data vdd : 0x%zx", (size_t)vdd);
 		return NULL;
 	}
 
-	cd_index = vdd->br.pac_cd_idx;
+	if (SS_IS_CMDS_NULL(aid_cmds)) {
+		LCD_ERR("No aid_tx_cmds\n");
+		return NULL;
+	}
 
-	aid_cmd.count = 1;
-	aid_cmd.cmds = &pcmds->cmds[cd_index];
+	br_interpolation_generate_event(vdd, GEN_NORMAL_INTERPOLATION_AOR, aor_data);
 
-	LCD_INFO("inedx : %d level : %d aid(%x %x)\n",
-			cd_index, vdd->br.bl_level,
-			aid_cmd.cmds->msg.tx_buf[1],
-			aid_cmd.cmds->msg.tx_buf[3]);
+	aid_cmds->cmds->msg.tx_buf[1] = aor_data[0];
+	aid_cmds->cmds->msg.tx_buf[2] = 0x00;
+	aid_cmds->cmds->msg.tx_buf[3] = aor_data[1];
+
+	vdd->br.aor_data = (aid_cmds->cmds->msg.tx_buf[1] << 8)
+							| aid_cmds->cmds->msg.tx_buf[3];
+
+	LCD_DEBUG("bl_level : %d candela : %dCD aid(0x%x 0x%x 0x%x)\n",
+			vdd->br.bl_level,vdd->br.cd_level,
+			aid_cmds->cmds->msg.tx_buf[1],
+			aid_cmds->cmds->msg.tx_buf[2],
+			aid_cmds->cmds->msg.tx_buf[3]);
 
 	*level_key = LEVEL_KEY_NONE;
 
-	return &aid_cmd;
+	return aid_cmds;
 }
 
 static struct dsi_panel_cmd_set *ss_acl_on(struct samsung_display_driver_data *vdd, int *level_key)
@@ -641,17 +535,6 @@ static struct dsi_panel_cmd_set *ss_acl_off(struct samsung_display_driver_data *
 	return ss_get_cmds(vdd, TX_ACL_OFF);
 }
 
-static struct dsi_panel_cmd_set *ss_pre_elvss(struct samsung_display_driver_data *vdd, int *level_key)
-{
-	if (IS_ERR_OR_NULL(vdd)) {
-		LCD_ERR("Invalid data vdd : 0x%zx", (size_t)vdd);
-		return NULL;
-	}
-
-	*level_key = LEVEL_KEY_NONE;
-	return ss_get_cmds(vdd, TX_ELVSS_PRE);
-}
-
 static struct dsi_panel_cmd_set *ss_elvss(struct samsung_display_driver_data *vdd, int *level_key)
 {
 	struct dsi_panel_cmd_set *elvss_cmds = ss_get_cmds(vdd, TX_ELVSS);
@@ -661,8 +544,19 @@ static struct dsi_panel_cmd_set *ss_elvss(struct samsung_display_driver_data *vd
 		return NULL;
 	}
 
+	if (SS_IS_CMDS_NULL(elvss_cmds)) {
+		LCD_ERR("No elvss_tx_cmds\n");
+		return NULL;
+	}
+
+	/* elvss_dim_offset */
+	br_interpolation_generate_event(vdd, GEN_NORMAL_INTERPOLATION_ELVSS, &elvss_cmds->cmds[1].msg.tx_buf[1]);
 
 	*level_key = LEVEL_KEY_NONE;
+
+	LCD_DEBUG("bl_level : %d candela : %dCD elvss_dim_offset : 0x%x\n",
+			vdd->br.bl_level, vdd->br.cd_level,
+			elvss_cmds->cmds[1].msg.tx_buf[1]);
 
 	return elvss_cmds;
 }
@@ -671,28 +565,18 @@ static struct dsi_panel_cmd_set *ss_gamma(struct samsung_display_driver_data *vd
 {
 	struct dsi_panel_cmd_set  *gamma_cmds = ss_get_cmds(vdd, TX_GAMMA);
 
-	if (IS_ERR_OR_NULL(vdd) || IS_ERR_OR_NULL(gamma_cmds)) {
+	if (IS_ERR_OR_NULL(vdd) || SS_IS_CMDS_NULL(gamma_cmds)) {
 		LCD_ERR("Invalid data vdd : 0x%zx cmds : 0x%zx", (size_t)vdd, (size_t)gamma_cmds);
 		return NULL;
 	}
 
+	LCD_DEBUG("bl_level : %d candela : %dCD\n", vdd->br.bl_level, vdd->br.cd_level);
+
 	*level_key = LEVEL_KEY_NONE;
 
-	LCD_INFO("bl_level : %d candela : %dCD\n", vdd->br.bl_level, vdd->br.cd_level);
+	br_interpolation_generate_event(vdd, GEN_NORMAL_GAMMA, &gamma_cmds->cmds[0].msg.tx_buf[1]);
 
-	if (IS_ERR_OR_NULL(vdd->smart_dimming_dsi->generate_gamma)) {
-		LCD_ERR("generate_gamma is NULL error");
-		return NULL;
-	} else {
-		vdd->smart_dimming_dsi->generate_gamma(
-			vdd->smart_dimming_dsi,
-			vdd->br.cd_level,
-			&gamma_cmds->cmds[0].msg.tx_buf[1]);
-
-		*level_key = LEVEL_KEY_NONE;
-
-		return gamma_cmds;
-	}
+	return gamma_cmds;
 }
 
 static int dsi_update_mdnie_data(struct samsung_display_driver_data *vdd)
@@ -865,6 +749,13 @@ static void samsung_panel_init(struct samsung_display_driver_data *vdd)
 
 	vdd->panel_func.samsung_smart_get_conf = smart_get_conf_ANA38401_AMSA05RB06;
 
+	/* GAMMA FLASH */
+	vdd->panel_func.gen_hbm_interpolation_gamma = NULL;
+	vdd->panel_func.gen_hbm_interpolation_irc = NULL;
+	vdd->panel_func.gen_normal_interpolation_irc = NULL;
+	vdd->panel_func.samsung_flash_gamma_support = flash_gamma_support_ANA38401_AMSA05RB06;
+	vdd->panel_func.samsung_interpolation_init = init_interpolation_ANA38401_AMSA05RB06;
+
 	/* Brightness */
 	vdd->panel_func.samsung_brightness_hbm_off = ss_hbm_off;
 	vdd->panel_func.samsung_brightness_aid = ss_aid;
@@ -872,7 +763,7 @@ static void samsung_panel_init(struct samsung_display_driver_data *vdd)
 	vdd->panel_func.samsung_brightness_pre_acl_percent = NULL;
 	vdd->panel_func.samsung_brightness_acl_percent = NULL;
 	vdd->panel_func.samsung_brightness_acl_off = ss_acl_off;
-	vdd->panel_func.samsung_brightness_pre_elvss = ss_pre_elvss;
+	vdd->panel_func.samsung_brightness_pre_elvss = NULL;
 	vdd->panel_func.samsung_brightness_elvss = ss_elvss;
 	vdd->panel_func.samsung_brightness_elvss_temperature1 = NULL;
 	vdd->panel_func.samsung_brightness_elvss_temperature2 = NULL;
@@ -919,6 +810,9 @@ static void samsung_panel_init(struct samsung_display_driver_data *vdd)
 
 	/* ACL default ON */
 	vdd->acl_status = 1;
+
+	/* SAMSUNG_FINGERPRINT */
+	vdd->panel_hbm_entry_delay = 0; //hbm need some TE to be updated.
 
 	LCD_INFO("--\n");
 }

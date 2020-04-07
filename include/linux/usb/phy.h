@@ -26,6 +26,7 @@
 #define PHY_HSFS_MODE		BIT(8)
 #define PHY_LS_MODE		BIT(9)
 #define PHY_USB_DP_CONCURRENT_MODE	BIT(10)
+#define PHY_WAKEUP_WA_EN	BIT(11)
 
 enum usb_phy_interface {
 	USBPHY_INTERFACE_MODE_UNKNOWN,
@@ -165,6 +166,7 @@ struct usb_phy {
 	int	(*notify_disconnect)(struct usb_phy *x,
 			enum usb_device_speed speed);
 	int	(*link_training)(struct usb_phy *x, bool start);
+	int	(*powerup)(struct usb_phy *x, bool start);
 
 	/*
 	 * Charger detection method can be implemented if you need to
@@ -403,6 +405,24 @@ usb_phy_stop_link_training(struct usb_phy *x)
 {
 	if (x && x->link_training)
 		return x->link_training(x, false);
+	else
+		return 0;
+}
+
+static inline int
+usb_phy_powerup(struct usb_phy *x)
+{
+	if (x && x->powerup)
+		return x->powerup(x, true);
+	else
+		return 0;
+}
+
+static inline int
+usb_phy_powerdown(struct usb_phy *x)
+{
+	if (x && x->powerup)
+		return x->powerup(x, false);
 	else
 		return 0;
 }

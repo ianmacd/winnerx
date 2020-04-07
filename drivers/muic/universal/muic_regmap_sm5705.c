@@ -55,6 +55,7 @@ extern void muic_afc_delay_check_state(int state);
 #endif
 
 extern unsigned int system_rev;
+extern muic_is_charger_ready(void);
 
 #define ADC_DETECT_TIME_200MS (0x03)
 #define KEY_PRESS_TIME_100MS  (0x00)
@@ -547,6 +548,8 @@ static int chgtype_sm_to_maxim(int chgtyp)
 	switch (chgtyp) {
 	case 0x01: // DCP
 	case 0x10: // U200
+	case 0x11: // AFC
+	case 0x13: // QC2.0
 		ret = CHGTYP_DEDICATED_CHARGER;
 		break;
 	case 0x02: // CDP
@@ -1008,11 +1011,15 @@ static int sm5705_afc_ta_attach(struct regmap_desc *pdesc)
 
 	if(!val.intval) {
 		pr_info("%s:%s Working Tusb W/A\n", MUIC_DEV_NAME, __func__);
-		
-		pmuic->pdata->afc_limit_voltage = true;
+		if (muic_is_charger_ready()) {
+			pmuic->pdata->afc_limit_voltage = true;
+		} else {
+			pr_info("%s:%s battery driver has not been initialized yet.\n", MUIC_DEV_NAME, __func__);
+		}
+
+		muic_dpreset_afc();
 		pmuic->attached_dev = ATTACHED_DEV_NONE_MUIC;
 		muic_notifier_detach_attached_dev(pmuic->attached_dev);
-		muic_dpreset_afc();
 		msleep(500);
 		pmuic->attached_dev = ATTACHED_DEV_TA_MUIC;
 		muic_notifier_attach_attached_dev(pmuic->attached_dev);
@@ -1448,8 +1455,8 @@ static int sm5705_afc_error(struct regmap_desc *pdesc)
 		pr_info("%s:%s	ENAFC end = %d \n",MUIC_DEV_NAME, __func__, pmuic->afc_retry_count);
 		// ENAFC set '0'
 		sm5705_set_afc_ctrl_reg(pdesc, AFCCTRL_ENAFC, 0);
-		pmuic->legacy_dev = pmuic->attached_dev = ATTACHED_DEV_AFC_CHARGER_5V_MUIC;
-		muic_notifier_attach_attached_dev(ATTACHED_DEV_AFC_CHARGER_5V_MUIC);
+		pmuic->legacy_dev = pmuic->attached_dev = ATTACHED_DEV_AFC_CHARGER_ERR_V_MUIC;
+		muic_notifier_attach_attached_dev(pmuic->attached_dev);
 	}
 	return 0;
 }
@@ -1462,7 +1469,7 @@ static int sm5705_afc_init_check(struct regmap_desc *pdesc)
 
 	pr_info("%s:%s AFC_INIT_CHECK\n",MUIC_DEV_NAME, __func__);
 
-	pr_info("%s:%s pmuic->vps.s.val1 [0x%02x]\n",MUIC_DEV_NAME, __func__, pmuic->vps.s.val1);
+	pr_info("%s:%s pmuic->vps.s.val1 [0x%02x], pmuic->vps.s.chgtyp [0x%02x]\n",MUIC_DEV_NAME, __func__, pmuic->vps.s.val1, pmuic->vps.s.chgtyp);
 
 	/* check afc interrupt state */
 	ret = muic_i2c_read_byte(pmuic->i2c, 0x0F);
@@ -1479,15 +1486,17 @@ static int sm5705_afc_init_check(struct regmap_desc *pdesc)
 	}
 
 
-	if (pmuic->vps.s.val1 != SM5705_DT1_DCP) {
+	if ( !((pmuic->vps.s.val1 == SM5705_DT1_DCP) || (pmuic->vps.s.chgtyp == CHGTYP_DEDICATED_CHARGER)) ) {
 		pr_info("%s:%s pmuic->vps.s.val1 != DCP charger return \n",
 						MUIC_DEV_NAME, __func__);
 		return 0;
 	}
 
-	pr_info("%s:%s pmuic->intr.intr3[0x%02x]\n",MUIC_DEV_NAME, __func__, pmuic->intr.intr3);
+	pr_info("%s:%s pmuic->intr.intr3[0x%02x], is_ccic_attach(%d), ccic_rp(%d)\n",MUIC_DEV_NAME, __func__,
+		pmuic->intr.intr3, pmuic->is_ccic_attach, pmuic->ccic_rp);
 	if ((pmuic->intr.intr3 & SM5705_AFC_TA_ATTACHED) ||
-				(pmuic->vps.s.val1 == SM5705_DT1_DCP)) {
+				(pmuic->vps.s.val1 == SM5705_DT1_DCP) ||
+				(pmuic->vps.s.chgtyp == CHGTYP_DEDICATED_CHARGER)) {
 #if defined(CONFIG_MUIC_SUPPORT_CCIC) && !defined(CONFIG_SEC_FACTORY)
 		if (pmuic->is_ccic_attach) {
 			if (pmuic->ccic_rp == Rp_56K)

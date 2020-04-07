@@ -26,6 +26,9 @@ Copyright (C) 2012, Samsung Electronics. All rights reserved.
 #include "ss_dsi_panel_common.h"
 #include "ss_interpolation_common.h"
 
+#define CONTROL_AUTO_BRIGHTNESS_V3 (256)
+#define CONTROL_AUTO_BRIGHTNESS_V4 (512)
+
 static long long TOTAL_RESOLUTION;
 
 char ss_dimming_mode_debug[][DIMMING_MODE_DEBUG_STRING] = {
@@ -174,12 +177,20 @@ static void update_hbm_candela_map_table(struct samsung_display_driver_data *vdd
 	int interpolation_step;
 	struct ss_hbm_interpolation_br_table *br_table;
 
+	struct ss_normal_interpolation *norma_itp;
+	int normal_interpolation_step;
+
 	int column;
 
-	if (vdd->panel_br_info.itp_mode == FLASH_INTERPOLATION)
+	if (vdd->panel_br_info.itp_mode == FLASH_INTERPOLATION) {
 		hbm_itp = &vdd->flash_itp.hbm;
-	else
+		norma_itp = &vdd->flash_itp.normal;
+	} else {
 		hbm_itp = &vdd->table_itp.hbm;
+		norma_itp = &vdd->table_itp.normal;
+	}
+
+	normal_interpolation_step = norma_itp->brightness_step;
 
 	interpolation_step = hbm_itp->brightness_step - BR_TABLE_NORMAL_MAX_SUB;
 	br_table = hbm_itp->br_table;
@@ -230,12 +241,18 @@ static void update_hbm_candela_map_table(struct samsung_display_driver_data *vdd
 		table->idx[column] = column;
 
 		/* from */
-		table->from[column] = br_table[column + BR_TABLE_NORMAL_MAX_SUB].platform_level_x10000 / MULTIPLY_x100;
+		if (normal_interpolation_step < CONTROL_AUTO_BRIGHTNESS_V4)
+			table->from[column] = br_table[column + BR_TABLE_NORMAL_MAX_SUB].platform_level_x10000 / MULTIPLY_x10000;
+		else
+			table->from[column] = br_table[column + BR_TABLE_NORMAL_MAX_SUB].platform_level_x10000 / MULTIPLY_x100;
 
 		/* end */
-		if (column != table->tab_size - 1)
-			table->end[column] = (br_table[column + BR_TABLE_NORMAL_MAX_SUB + 1].platform_level_x10000 / MULTIPLY_x100) - 1;
-		else
+		if (column != table->tab_size - 1) {
+			if (normal_interpolation_step < CONTROL_AUTO_BRIGHTNESS_V4)
+				table->end[column] = (br_table[column + BR_TABLE_NORMAL_MAX_SUB + 1].platform_level_x10000 / MULTIPLY_x10000) - 1;
+			else
+				table->end[column] = (br_table[column + BR_TABLE_NORMAL_MAX_SUB + 1].platform_level_x10000 / MULTIPLY_x100) - 1;
+		} else
 			table->end[column] = table->from[column] + MULTIPLY_x10000; /* MULTIPLY_x10000 is hard coding */
 
 		/* auto_level */
@@ -350,7 +367,7 @@ static unsigned int S_DIMMING_AOR_CAL
 	virtual_base_lux = ROUNDING(virtual_base_lux);
 
 	result1 = (1 * MULTIPLY_x100 * MULTIPLY_x100000);
-	result2 = (interpolation_br_x10000 * MULTIPLY_x100000) / (virtual_base_lux / MULTIPLY_x100);
+	result2 = (interpolation_br_x10000 * MULTIPLY_x100 * MULTIPLY_x100000) / virtual_base_lux;
 
 	aor_cal = ROUNDING((result1 - result2)/MULTIPLY_x10);
 
@@ -500,11 +517,8 @@ static void gen_normal_interpolation_aor(struct samsung_display_driver_data *vdd
 			aor_hex_up <<= (0x08 * aor_hex_cnt);
 			aor_hex_up |= vdd->panel_br_info.normal.aor[reverse_loop][aor_hex_cnt];
 		}
-		pr_err("index [%d] reverse_loop [%d] \n", index, reverse_loop);
 
 		aor_dec_up_x10000 = AOR_HEX_TO_PERCENT_X10000(aor_hex_up);
-
-		pr_err("aor_hex_up (%llu) aor_dec_up_x10000 (%llu)\n", aor_hex_up, aor_dec_up_x10000);
 
 		if (loop == 0) {
 			platform_down = normal_table[0].platform;
@@ -515,9 +529,6 @@ static void gen_normal_interpolation_aor(struct samsung_display_driver_data *vdd
 		}
 		aor_dec_down_x10000 = AOR_HEX_TO_PERCENT_X10000(aor_hex_down);
 
-		pr_err("platform_down (llu) aor_hex_down (%llu)\n", platform_down, aor_hex_down);
-		pr_err("aor_dec_down_x10000 (llu) \n", aor_dec_down_x10000);
-
 		/* use reverse_loop by flash aor data ordering */
 		if (reverse_loop < 1)
 			aor_hex_next_up = aor_hex_up;
@@ -527,8 +538,6 @@ static void gen_normal_interpolation_aor(struct samsung_display_driver_data *vdd
 				aor_hex_next_up |= vdd->panel_br_info.normal.aor[reverse_loop - 1][aor_hex_cnt];
 			}
 		}
-
-		pr_err("aor_hex_next_up (llu) \n", aor_dec_down_x10000);
 
 		platform_up *= MULTIPLY_x10000;
 		platform_down *= MULTIPLY_x10000;
@@ -682,7 +691,10 @@ static void update_candela_map_table(struct samsung_display_driver_data *vdd)
 			table->from[column] = table->end[column - 1] + 1;
 
 		/* end */
-		table->end[column] = br_aor_table[column].platform_level_x10000 / MULTIPLY_x100;
+		if (interpolation_step < CONTROL_AUTO_BRIGHTNESS_V4)
+			table->end[column] = br_aor_table[column].platform_level_x10000 / MULTIPLY_x10000;
+		else
+			table->end[column] = br_aor_table[column].platform_level_x10000 / MULTIPLY_x100;
 
 		/* cd */
 		table->cd[column] = br_aor_table[column].lux_mode;
@@ -1033,13 +1045,15 @@ static void debug_normal_interpolation(struct samsung_display_driver_data *vdd)
 	memset(buf, '\n', sizeof(buf));
 
 	/* IRC */
-	for (column = brightness_step - 1; column >= 0; column--) {
-		if (!IS_ERR_OR_NULL(irc)) {
-			snprintf(buf, FLASH_GAMMA_DBG_BUF_SIZE, "irc [%4d][%7d]: ", column + 1, normal_itp->br_aor_table[column].interpolation_br_x10000);
-			for (data_cnt = 0; data_cnt < irc_size; data_cnt++)
-				snprintf(buf + strlen(buf), FLASH_GAMMA_DBG_BUF_SIZE - strlen(buf), "%02X ", irc[column][data_cnt]);
-			LCD_INFO("%s\n", buf);
-			memset(buf, '\n', strlen(buf));
+	if (test_bit(BR_NORMAL_IRC, vdd->panel_br_info.br_info_select)) {
+		for (column = brightness_step - 1; column >= 0; column--) {
+			if (!IS_ERR_OR_NULL(irc)) {
+				snprintf(buf, FLASH_GAMMA_DBG_BUF_SIZE, "irc [%4d][%7d]: ", column + 1, normal_itp->br_aor_table[column].interpolation_br_x10000);
+				for (data_cnt = 0; data_cnt < irc_size; data_cnt++)
+					snprintf(buf + strlen(buf), FLASH_GAMMA_DBG_BUF_SIZE - strlen(buf), "%02X ", irc[column][data_cnt]);
+				LCD_INFO("%s\n", buf);
+				memset(buf, '\n', strlen(buf));
+			}
 		}
 	}
 
@@ -1109,14 +1123,16 @@ static void debug_hbm_interpolation(struct samsung_display_driver_data *vdd)
 	}
 
 	/* IRC */
-	for (column = brightness_step - 1; column >= 0; column--) {
-		/* IRC */
-		if (!IS_ERR_OR_NULL(irc)) {
-			snprintf(buf, FLASH_GAMMA_DBG_BUF_SIZE, "irc [%2d][%d] : ", column, hbm_itp->br_table[column].lux_mode);
-			for (data_cnt = 0; data_cnt < irc_size; data_cnt++)
-				snprintf(buf + strlen(buf), FLASH_GAMMA_DBG_BUF_SIZE - strlen(buf), "%02X ", irc[column][data_cnt]);
-			LCD_INFO("%s\n", buf);
-			memset(buf, '\n', strlen(buf));
+	if (test_bit(BR_HBM_IRC, vdd->panel_br_info.br_info_select)) {
+		for (column = brightness_step - 1; column >= 0; column--) {
+			/* IRC */
+			if (!IS_ERR_OR_NULL(irc)) {
+				snprintf(buf, FLASH_GAMMA_DBG_BUF_SIZE, "irc [%2d][%d] : ", column, hbm_itp->br_table[column].lux_mode);
+				for (data_cnt = 0; data_cnt < irc_size; data_cnt++)
+					snprintf(buf + strlen(buf), FLASH_GAMMA_DBG_BUF_SIZE - strlen(buf), "%02X ", irc[column][data_cnt]);
+				LCD_INFO("%s\n", buf);
+				memset(buf, '\n', strlen(buf));
+			}
 		}
 	}
 
@@ -1144,3 +1160,19 @@ void debug_interpolation_log(struct samsung_display_driver_data *vdd)
 	debug_hbm_interpolation(vdd);
 }
 
+/*
+ * gamma_interpolation() - interpolate gamma.
+ * Taget Gamma reg = upper Gamma - ((upper cd - Target cd) / (upper cd - lower cd)) * (upper Gamma - lower Gamma)
+ * Target_cd has up to two decimal places. (ex. 7238600 (723.86))
+ */
+uint gamma_interpolation(int upper_g, int lower_g, int upper_cd, int lower_cd, int target_cd)
+{
+	uint ret = 0;
+
+	ret = (upper_g * 10000) - 
+		((upper_cd * 10000 - target_cd) * (upper_g - lower_g)) /
+		(upper_cd - lower_cd);
+	ret /= 10000;
+
+ 	return ret;
+}

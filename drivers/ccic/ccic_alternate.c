@@ -329,7 +329,7 @@ int get_diplayport_status(void)
 	return usbpd_data->dp_is_connect;
 }
 
-static int process_check_accessory(void * data)
+int process_check_accessory(void * data)
 {
 	struct s2mm005_data *usbpd_data = data;
 #if defined(CONFIG_USB_HOST_NOTIFY) && defined(CONFIG_USB_HW_PARAM)
@@ -1576,7 +1576,7 @@ void samsung_uvdm_close(void)
 	pr_info("%s - samsung_uvdm_close success\n", __func__);
 }
 
-ssize_t samsung_uvdm_out_request_message(void *data, size_t size)
+int samsung_uvdm_out_request_message(void *data, int size)
 {
 	struct s2mm005_data *usbpd_data;
 	struct i2c_client *i2c;

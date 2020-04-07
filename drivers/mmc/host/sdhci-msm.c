@@ -2015,6 +2015,9 @@ struct sdhci_msm_pltfm_data *sdhci_msm_populate_pdata(struct device *dev,
 	if (!pdata)
 		goto out;
 
+	device_property_read_u32(dev, "post-power-on-delay-ms",
+                                &msm_host->mmc->ios.power_delay_ms);
+
 	pdata->status_gpio = of_get_named_gpio_flags(np, "cd-gpios", 0, &flags);
 	if (gpio_is_valid(pdata->status_gpio) && !(flags & OF_GPIO_ACTIVE_LOW))
 		pdata->caps2 |= MMC_CAP2_CD_ACTIVE_HIGH;
@@ -3146,7 +3149,7 @@ static void sdhci_msm_registers_save(struct sdhci_host *host)
 	msm_host->regs_restore.hc_2c_2e =
 		sdhci_readl(host, SDHCI_CLOCK_CONTROL);
 	msm_host->regs_restore.hc_3c_3e =
-		sdhci_readl(host, SDHCI_ACMD12_ERR);
+		sdhci_readl(host, SDHCI_AUTO_CMD_STATUS);
 	msm_host->regs_restore.vendor_pwrctl_ctl =
 		readl_relaxed(host->ioaddr +
 		msm_host_offset->CORE_PWRCTL_CTL);
@@ -3211,7 +3214,7 @@ static void sdhci_msm_registers_restore(struct sdhci_host *host)
 	sdhci_writel(host, msm_host->regs_restore.hc_2c_2e,
 			SDHCI_CLOCK_CONTROL);
 	sdhci_writel(host, msm_host->regs_restore.hc_3c_3e,
-			SDHCI_ACMD12_ERR);
+			SDHCI_AUTO_CMD_STATUS);
 	sdhci_writel(host, msm_host->regs_restore.hc_38_3a,
 			SDHCI_SIGNAL_ENABLE);
 	sdhci_writel(host, msm_host->regs_restore.hc_34_36,
@@ -5009,6 +5012,42 @@ out:
 	return len;
 }
 
+static ssize_t sd_health_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct mmc_host *host = dev_get_drvdata(dev);
+	struct mmc_card *card = host->card;
+	struct mmc_card_error_log *err_log;
+	u64 total_c_cnt = 0;
+	u64 total_t_cnt = 0;
+	int len = 0;
+	int i = 0;
+
+	if (!card) {
+		//There should be no spaces in 'No Card'(Vold Team).
+		len = snprintf(buf, PAGE_SIZE, "NOCARD\n");
+		goto out;
+	}
+
+	err_log = card->err_log;
+
+	for (i = 0; i < 6; i++) {
+		if (err_log[i].err_type == -EILSEQ && total_c_cnt < MAX_CNT_U64)
+			total_c_cnt += err_log[i].count;
+		if (err_log[i].err_type == -ETIMEDOUT && total_t_cnt < MAX_CNT_U64)
+			total_t_cnt += err_log[i].count;
+	}
+
+	if(err_log[0].ge_cnt > 100 || err_log[0].ecc_cnt > 0 || err_log[0].wp_cnt > 0 ||
+			err_log[0].oor_cnt > 10 || total_t_cnt > 100 || total_c_cnt > 100)
+		len = snprintf(buf, PAGE_SIZE, "BAD\n");
+	else
+		len = snprintf(buf, PAGE_SIZE, "GOOD\n");
+
+out:
+	return len;
+}
+
 static DEVICE_ATTR(status, 0444, t_flash_detect_show, NULL);
 static DEVICE_ATTR(cd_cnt, 0444, sd_detect_cnt_show, NULL);
 static DEVICE_ATTR(max_mode, 0444, sd_detect_maxmode_show, NULL);
@@ -5018,6 +5057,7 @@ static DEVICE_ATTR(sd_count, 0444, sd_count_show, NULL);
 static DEVICE_ATTR(sd_data, 0444, sd_data_show, NULL);
 static DEVICE_ATTR(sdcard_summary, 0444, sdcard_summary_show, NULL);
 static DEVICE_ATTR(data, 0444, sd_cid_show, NULL);
+static DEVICE_ATTR(fc, 0444, sd_health_show, NULL);
 
 /* Callback function for SD Card IO Error */
 static int sdcard_uevent(struct mmc_card *card)
@@ -5041,6 +5081,7 @@ static int sdhci_sec_sdcard_uevent(struct device *dev, struct kobj_uevent_env *e
 	} else
 		card_exist = false;
 
+#if !defined(CONFIG_SEC_R3Q_PROJECT) && !defined(CONFIG_SEC_R5Q_PROJECT) && !defined(CONFIG_SEC_R5QSWA_PROJECT)
 	retval = add_uevent_var(env, "IOERROR=%s", card_exist ? (
 				((card->err_log[0].ge_cnt && !(card->err_log[0].ge_cnt % 1000)) ||
 				 (card->err_log[0].ecc_cnt && !(card->err_log[0].ecc_cnt % 1000)) ||
@@ -5048,6 +5089,7 @@ static int sdhci_sec_sdcard_uevent(struct device *dev, struct kobj_uevent_env *e
 				 (card->err_log[0].oor_cnt && !(card->err_log[0].oor_cnt % 100)))
 				? "YES" : "NO")
 			: "NoCard");
+#endif
 
 	return retval;
 }
@@ -5578,6 +5620,11 @@ failed_sdcard:
 					&dev_attr_data) < 0)
 			pr_err("%s : Failed to create device file(%s)!\n",
 					__func__, dev_attr_data.attr.name);
+
+		if (device_create_file(sd_info_dev,
+					&dev_attr_fc) < 0)
+			pr_err("%s : Failed to create device file(%s)!\n",
+					__func__, dev_attr_fc.attr.name);
 
 		dev_set_drvdata(sd_info_dev, msm_host->mmc);
 	}

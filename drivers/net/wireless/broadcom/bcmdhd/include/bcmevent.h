@@ -26,7 +26,7 @@
  *
  * <<Broadcom-WL-IPTag/Open:>>
  *
- * $Id: bcmevent.h 808160 2019-03-06 03:22:13Z $
+ * $Id: bcmevent.h 820259 2019-05-17 03:01:54Z $
  *
  */
 
@@ -371,8 +371,6 @@ void wl_event_to_network_order(wl_event_msg_t * evt);
 #define WLC_E_REASON_INFRA_ROAM		2
 #define WLC_E_REASON_INFRA_DISASSOC	3
 #define WLC_E_REASON_NO_MODE_CHANGE_NEEDED	4
-#define WLC_E_REASON_AWDL_ENABLE	5
-#define WLC_E_REASON_AWDL_DISABLE	6
 
 /* WLC_E_SDB_TRANSITION event data */
 #define WL_MAX_BSSCFG     4
@@ -394,7 +392,6 @@ typedef struct wl_event_sdb_trans {
 
 /* reason codes for WLC_E_GTK_KEYROT_NO_CHANSW event */
 #define WLC_E_GTKKEYROT_SCANDELAY       0       /* Delay scan while gtk in progress */
-#define WLC_E_GTKKEYROT_SKIPCHANSW_AWDL 1       /* Avoid chansw by awdl while gtk in progress */
 #define WLC_E_GTKKEYROT_SKIPCHANSW_P2P  2       /* Avoid chansw by p2p while gtk in progress */
 
 /* roam reason codes */
@@ -418,7 +415,9 @@ typedef struct wl_event_sdb_trans {
 #define WLC_E_REASON_CSA		14	/* roamed due to CSA from AP */
 #define WLC_E_REASON_ESTM_LOW		15	/* roamed due to ESTM low tput */
 #define WLC_E_REASON_SILENT_ROAM	16	/* roamed due to Silent roam */
-#define WLC_E_REASON_LAST		17	/* NOTE: increment this as you add reasons above */
+#define WLC_E_REASON_INACTIVITY		17	/* full roam scan due to inactivity */
+#define WLC_E_REASON_ROAM_SCAN_TIMEOUT		18	/* roam scan timer timeout */
+#define WLC_E_REASON_LAST		19	/* NOTE: increment this as you add reasons above */
 
 /* prune reason codes */
 #define WLC_E_PRUNE_ENCR_MISMATCH	1	/* encryption mismatch */
@@ -624,6 +623,7 @@ typedef struct wl_event_wa_lqm {
 #define WLC_E_LINK_DISASSOC     2   /* Link down because of disassoc */
 #define WLC_E_LINK_ASSOC_REC    3   /* Link down because assoc recreate failed */
 #define WLC_E_LINK_BSSCFG_DIS   4   /* Link down due to bsscfg down */
+#define WLC_E_LINK_ASSOC_FAIL   5   /* Link down because assoc to new AP during roaming failed */
 
 /* WLC_E_NDIS_LINK event data */
 typedef BWL_PRE_PACKED_STRUCT struct ndis_link_parms {
@@ -1063,11 +1063,6 @@ typedef enum {
 	CHANSW_NAN = 18,	/* channel switch due to NAN */
 	CHANSW_NAN_DISC = 19,	/* channel switch due to NAN Disc */
 	CHANSW_NAN_SCHED = 20,	/* channel switch due to NAN Sched */
-	CHANSW_AWDL_AW = 21,	/* channel switch due to AWDL aw */
-	CHANSW_AWDL_SYNC = 22,	/* channel switch due to AWDL sync */
-	CHANSW_AWDL_CAL = 23,	/* channel switch due to AWDL Cal */
-	CHANSW_AWDL_PSF = 24,	/* channel switch due to AWDL PSF */
-	CHANSW_AWDL_OOB_AF = 25, /* channel switch due to AWDL OOB action frame */
 	CHANSW_TDLS = 26,	/* channel switch due to TDLS */
 	CHANSW_PROXD = 27,	/* channel switch due to PROXD */
 	CHANSW_SLOTTED_BSS = 28, /* channel switch due to slotted bss */

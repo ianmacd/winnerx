@@ -21,6 +21,9 @@ int cam_flash_establish_link(struct cam_req_mgr_core_dev_link_setup *link);
 int cam_flash_apply_request(struct cam_req_mgr_apply_request *apply);
 int cam_flash_process_evt(struct cam_req_mgr_link_evt_data *event_data);
 int cam_flash_flush_request(struct cam_req_mgr_flush_request *flush);
-
+#if defined(CONFIG_LEDS_PMIC_QPNP)
+ssize_t flash_power_store(struct device *dev, struct device_attribute *attr, 
+        const char *buf, size_t size);
+#endif
 
 #endif /*_CAM_FLASH_CORE_H_*/

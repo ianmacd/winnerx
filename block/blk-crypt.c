@@ -134,11 +134,25 @@ static inline blk_crypt_t *__bio_crypt(const struct bio *bio)
 	return NULL;
 }
 
+bool blk_crypt_encrypted(const struct bio *bio)
+{
+	return __bio_crypt(bio) ? true : false;
+}
+
 bool blk_crypt_mergeable(const struct bio *a, const struct bio *b)
 {
 #ifdef CONFIG_BLK_DEV_CRYPT
 	if (__bio_crypt(a) != __bio_crypt(b))
 		return false;
+
+#ifdef CONFIG_BLK_DEV_CRYPT_DUN
+        if (__bio_crypt(a)) {
+                if (!bio_dun(a) ^ !bio_dun(b))
+                        return false;
+                if (bio_dun(a) && bio_end_dun(a) != bio_dun(b))
+                        return false;
+        }
+#endif
 #endif
 	return true;
 }

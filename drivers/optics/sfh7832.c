@@ -22,7 +22,7 @@
 #define SFHXXXX_CHIP_NAME	"SFHXXXX"
 
 #define VERSION				"1"
-#define SUB_VERSION			"25"
+#define SUB_VERSION			"28"
 #define VENDOR_VERSION		"o"
 
 #define MODULE_NAME_HRM		"hrm_sensor"
@@ -57,7 +57,7 @@ static void sfh7832_debug_var(struct sfh7832_device_data *data)
 	HRM_dbg("%s pin_hrm_int %d\n", __func__, data->pin_hrm_int);
 	HRM_dbg("%s pin_hrm_en %d\n", __func__, data->pin_hrm_en);
 	HRM_dbg("%s hrm_irq %d\n", __func__, data->hrm_irq);
-	HRM_dbg("%s irq_state %d\n", __func__, data->irq_state);
+	HRM_dbg("%s irq_state %d\n", __func__, atomic_read(&sfh7832_data->irq_state));
 	HRM_dbg("%s led_current %d\n", __func__, data->led_current);
 	HRM_dbg("%s xtalk_code %d\n", __func__, data->xtalk_code);
 	HRM_dbg("%s hrm_threshold %d\n", __func__, data->hrm_threshold);
@@ -1672,6 +1672,38 @@ int sfh7832_update_scan_mode(enum op_mode mode)
 		    ~(NO_DATA << PCNTRL2_FIFO_DATA_CTRL);
 
 		phase_num = 13;
+	} else if (mode == MODE_SVC_IR) {
+		afe4420_phase13_reg[PHASE3_INDEX][1] = LED_AMBIENT;
+		afe4420_phase13_reg[PHASE5_INDEX][1] = LED_IR_200MA_DRV;
+		afe4420_phase13_reg[PHASE7_INDEX][1] = LED_RED_200MA_DRV;
+		afe4420_phase13_reg[PHASE9_INDEX][1] = LED_AMBIENT;
+		afe4420_phase13_reg[PHASE11_INDEX][1] = LED_GREEN_200MA_DRV;
+		afe4420_phase13_reg[PHASE13_INDEX][1] = LED_BLUE_200MA_DRV;
+	
+		sfh7832_reset_numav();
+		afe4420_phase13_reg[PHASE3_INDEX + 1][1] |= (sfh7832_data->numav & 0xf);
+		afe4420_phase13_reg[PHASE5_INDEX + 1][1] |= (sfh7832_data->numav & 0xf);
+		afe4420_phase13_reg[PHASE7_INDEX + 1][1] |= (sfh7832_data->numav & 0xf);
+		afe4420_phase13_reg[PHASE9_INDEX + 1][1] |= (sfh7832_data->numav & 0xf);
+		afe4420_phase13_reg[PHASE11_INDEX + 1][1] |= (sfh7832_data->numav & 0xf);
+		afe4420_phase13_reg[PHASE13_INDEX + 1][1] |= (sfh7832_data->numav & 0xf);
+	
+		sfh7832_reset_tia_gain();
+		afe4420_phase13_reg[PHASE3_INDEX + 1][1] |=
+			(sfh7832_data->rfgain_amb1 << TIA_GAIN_RF);
+		afe4420_phase13_reg[PHASE5_INDEX + 1][1] |=
+			(sfh7832_data->rfgain_led1 << TIA_GAIN_RF);
+		afe4420_phase13_reg[PHASE7_INDEX + 1][1] |=
+			(sfh7832_data->rfgain_led2 << TIA_GAIN_RF);
+		afe4420_phase13_reg[PHASE9_INDEX + 1][1] |=
+			(sfh7832_data->rfgain_amb2 << TIA_GAIN_RF);
+		afe4420_phase13_reg[PHASE11_INDEX + 1][1] |=
+			(sfh7832_data->rfgain_led3 << TIA_GAIN_RF);
+		afe4420_phase13_reg[PHASE13_INDEX + 1][1] |=
+			(sfh7832_data->rfgain_led4 << TIA_GAIN_RF);
+		sfh7832_reset_fifo_data_ctl();
+
+		phase_num = 13;
 	} else if (mode == MODE_AMBIENT) {	/* dummy, Ambient */
 		err = sfh7832_AACM_disable();
 		if (err != 0) {
@@ -1905,7 +1937,7 @@ int sfh7832_prox_enable(void)
 int sfh7832_sdk_enable(void)
 {
 	int err = 0;
-
+	
 	sfh7832_set_param_sdk();
 
 	err = sfh7832_reg_init();
@@ -1914,6 +1946,37 @@ int sfh7832_sdk_enable(void)
 		return err;
 	}
 	err = sfh7832_update_scan_mode(MODE_SDK_IR);
+	if (err != 0) {
+		HRM_dbg("%s - sfh7832_update_scan_mode fail!\n", __func__);
+		return err;
+	}
+
+	err = sfh7832_timer_rst_fifo_en();
+	if (err != 0) {
+		HRM_dbg("%s - sfh7832_timer_rst_fifo_en fail!\n", __func__);
+		return err;
+	}
+
+	err = sfh7832_set_current(sfh7832_data->iled1, sfh7832_data->iled4, sfh7832_data->iled2, sfh7832_data->iled3, LED_ALL);
+	if (err != 0)
+		HRM_dbg("%s - sfh7832_set_current fail!\n", __func__);
+
+	return err;
+}
+
+int sfh7832_svc_led_enable(void)
+{
+	int err = 0;
+	
+	sfh7832_set_param_sdk();
+	sfh7832_data->agc_mode = M_NONE;
+
+	err = sfh7832_reg_init();
+	if (err != 0) {
+		HRM_dbg("%s - sfh7832_reg_init fail!\n", __func__);
+		return err;
+	}
+	err = sfh7832_update_scan_mode(MODE_SVC_IR);
 	if (err != 0) {
 		HRM_dbg("%s - sfh7832_update_scan_mode fail!\n", __func__);
 		return err;
@@ -1973,6 +2036,8 @@ static int sfh7832_enable(enum op_mode mode)
 		err = sfh7832_prox_enable();
 	else if (mode == MODE_SDK_IR)
 		err = sfh7832_sdk_enable();
+	else if (mode == MODE_SVC_IR)
+		err = sfh7832_svc_led_enable();
 	else if (mode == MODE_AMBIENT)
 		err = sfh7832_ambient_enable();
 	else
@@ -3331,20 +3396,20 @@ int sfh7832_read_data(struct output_data *data)
 
 static void sfh7832_irq_set_state(int irq_enable)
 {
+	int irq_cnt = atomic_read(&sfh7832_data->irq_state);
 	HRM_info("%s - irq_enable : %d, irq_state : %d\n",
-		 __func__, irq_enable, sfh7832_data->irq_state);
+		 __func__, irq_enable, irq_cnt);
 
 	if (irq_enable) {
-		if (sfh7832_data->irq_state++ == 0) {
+ 		if (atomic_inc_return(&sfh7832_data->irq_state) == 1)
 			enable_irq(sfh7832_data->hrm_irq);
-		}
+ 		else
+ 			atomic_dec(&sfh7832_data->irq_state);
 	} else {
-		if (sfh7832_data->irq_state == 0)
-			return;
-		if (--sfh7832_data->irq_state <= 0) {
+ 		if (atomic_dec_return(&sfh7832_data->irq_state) == 0)
 			disable_irq_nosync(sfh7832_data->hrm_irq);
-			sfh7832_data->irq_state = 0;
-		}
+ 		else
+ 			atomic_inc(&sfh7832_data->irq_state);
 	}
 }
 
@@ -3648,6 +3713,11 @@ void sfh7832_set_mode(int onoff, enum op_mode mode)
 
 		sfh7832_data->enabled_mode = 0;
 		sfh7832_data->mode_sdk_enabled = 0;
+		sfh7832_data->mode_svc_enabled = 0;
+		sfh7832_data->ioffset_led1 = 0;
+		sfh7832_data->ioffset_led2 = 0;
+		sfh7832_data->ioffset_led3 = 0;
+		sfh7832_data->ioffset_led4 = 0;
 		sfh7832_irq_set_state(PWR_OFF);
 		sfh7832_pin_control(PWR_OFF);
 
@@ -3720,6 +3790,24 @@ static ssize_t sfh7832_enable_store(struct device *dev,
 	} else if (sysfs_streq(buf, "-13")) {
 		on_off = PWR_OFF;
 		mode = MODE_SDK_BLUE;
+	} else if (sysfs_streq(buf, "15")) {
+		on_off = PWR_ON;
+		mode = MODE_SVC_RED;
+	} else if (sysfs_streq(buf, "16")) {
+		on_off = PWR_ON;
+		mode = MODE_SVC_GREEN;
+	} else if (sysfs_streq(buf, "17")) {
+		on_off = PWR_ON;
+		mode = MODE_SVC_BLUE;
+	} else if (sysfs_streq(buf, "-15")) {
+		on_off = PWR_OFF;
+		mode = MODE_SVC_RED;
+	} else if (sysfs_streq(buf, "-16")) {
+		on_off = PWR_OFF;
+		mode = MODE_SVC_GREEN;
+	} else if (sysfs_streq(buf, "-17")) {
+		on_off = PWR_OFF;
+		mode = MODE_SVC_BLUE;
 	} else {
 		HRM_err("%s - invalid value %d\n", __func__, *buf);
 		sfh7832_data->mode_cnt.unkn_cnt++;
@@ -3766,6 +3854,42 @@ static ssize_t sfh7832_enable_store(struct device *dev,
 			}
 		}
 		HRM_dbg("%s - Current SDK Mode %02x\n", __func__, sfh7832_data->mode_sdk_enabled);
+	} else if (mode == MODE_SVC_IR || mode == MODE_SVC_RED
+		|| mode == MODE_SVC_GREEN || mode == MODE_SVC_BLUE) {
+		HRM_dbg("%s - SVC en : %d m : %d c : %d\n", __func__, on_off, mode, sfh7832_data->mode_svc_enabled);
+		if (on_off == PWR_ON) {
+			if (sfh7832_data->mode_svc_enabled & (1<<(mode - MODE_SVC_IR))) { /* already enabled */
+				/* Do Nothing */
+				HRM_dbg("%s - SVC %d mode already enabled\n", __func__, mode);
+				mutex_unlock(&sfh7832_data->activelock);
+				return count;
+			}
+			if (sfh7832_data->mode_svc_enabled == 0) {
+				sfh7832_data->mode_svc_enabled |= (1<<(mode - MODE_SVC_IR));
+				mode = MODE_SVC_IR;
+				sfh7832_data->mode_cnt.unkn_cnt++;
+			} else {
+				sfh7832_data->mode_svc_enabled |= (1<<(mode - MODE_SVC_IR));
+				mutex_unlock(&sfh7832_data->activelock);
+				return count;
+			}
+		} else {
+			if ((sfh7832_data->mode_svc_enabled & (1<<(mode - MODE_SVC_IR))) == 0) { /* Not Enabled */
+				/* Do Nothing */
+				HRM_dbg("%s - SVC %d mode not enabled\n", __func__, mode);
+				mutex_unlock(&sfh7832_data->activelock);
+				return count;
+			}
+			/* Oring disable mode */
+			sfh7832_data->mode_svc_enabled &= ~(1<<(mode - MODE_SVC_IR));
+	
+			if (sfh7832_data->mode_svc_enabled == 0) {
+				mode = MODE_NONE;
+			} else {
+				mutex_unlock(&sfh7832_data->activelock);
+				return count;
+			}
+		}
 	}
 
 	HRM_dbg("%s en : %d m : %d c : %d\n", __func__, on_off, mode, sfh7832_data->enabled_mode);
@@ -4641,9 +4765,9 @@ irqreturn_t sfh7832_irq_handler(int hrm_irq, void *device)
 
 	memset(&read_data, 0, sizeof(struct output_data));
 
-	if (sfh7832_data->regulator_state == 0 || sfh7832_data->enabled_mode == 0) {
-		HRM_dbg("%s - stop irq handler (reg_state : %d, enabled_mode : %d)\n",
-				__func__, sfh7832_data->regulator_state, sfh7832_data->enabled_mode);
+	if (sfh7832_data->regulator_state == 0 || sfh7832_data->enabled_mode == 0 || sfh7832_data->mode_svc_enabled != 0) {
+		HRM_dbg("%s - stop irq handler (reg_state : %d, enabled_mode : %d, rear_led : 0x%x)\n",
+				__func__, sfh7832_data->regulator_state, sfh7832_data->enabled_mode, sfh7832_data->mode_svc_enabled);
 		return IRQ_HANDLED;
 	}
 #ifdef CONFIG_ARCH_QCOM
@@ -4702,6 +4826,8 @@ static int sfh7832_setup_irq(void)
 		errorno = -ENODEV;
 		return errorno;
 	}
+	disable_irq_nosync(sfh7832_data->hrm_irq);
+
 	if (!IS_ERR_OR_NULL(sfh7832_data->pins_sleep)) {
 		status = pinctrl_select_state(sfh7832_data->hrm_pinctrl,
 						  sfh7832_data->pins_sleep);
@@ -4725,8 +4851,8 @@ static void sfh7832_init_var1(void)
 	sfh7832_data->i2c_1p8 = NULL;
 	sfh7832_data->enabled_mode = 0;
 	sfh7832_data->mode_sdk_enabled = 0;
+	sfh7832_data->mode_svc_enabled = 0;
 	sfh7832_data->regulator_state = 0;
-	sfh7832_data->irq_state = 0;
 	sfh7832_data->hrm_threshold = DEFAULT_THRESHOLD;
 	sfh7832_data->eol_test_is_enable = 0;
 	sfh7832_data->eol_test_status = 0;
@@ -4734,6 +4860,7 @@ static void sfh7832_init_var1(void)
 	sfh7832_data->reg_read_buf = 0;
 	sfh7832_data->lib_ver = NULL;
 	sfh7832_data->pm_state = PM_RESUME;
+	atomic_set(&sfh7832_data->irq_state, 0);
 }
 
 int sfh7832_init_var2(void)
@@ -5438,6 +5565,9 @@ static int sfh7832_pm_suspend(struct device *dev)
 
 	HRM_dbg("%s - %d\n", __func__, sfh7832_data->enabled_mode);
 
+	if (sfh7832_data->mode_svc_enabled)
+		return err;
+
 	if (sfh7832_data->enabled_mode != 0 || sfh7832_data->regulator_state != 0) {
 		mutex_lock(&sfh7832_data->activelock);
 		sfh7832_irq_set_state(PWR_OFF);
@@ -5465,6 +5595,9 @@ static int sfh7832_pm_resume(struct device *dev)
 	int err = 0;
 
 	HRM_dbg("%s - %d\n", __func__, sfh7832_data->enabled_mode);
+
+	if (sfh7832_data->mode_svc_enabled)
+		return err;
 
 	mutex_lock(&sfh7832_data->suspendlock);
 	sfh7832_data->pm_state = PM_RESUME;

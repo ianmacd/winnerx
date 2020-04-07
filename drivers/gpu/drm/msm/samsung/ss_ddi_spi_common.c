@@ -14,12 +14,80 @@
 
 #define SPI_CTRL_RX 0x00
 
-int ss_spi_read(struct spi_device *spi, u8 *buf,
-				int tx_bpw, int rx_bpw, int tx_size, int rx_size, u8 rx_addr)
+int ss_spi_write(struct spi_device *spi, int tx_bpw, u8 *tx_buf, int tx_size)
 {
 	u64 i;
-	u8 *rx_buf = NULL;
-	u8 *tx_buf = NULL;
+	u8 *tbuf = NULL;
+	struct samsung_display_driver_data *vdd = NULL;
+	struct spi_message msg;
+	int ret = 0;
+
+	struct spi_transfer xfer[] = {
+		{ .bits_per_word = tx_bpw,	.len = tx_size,	},
+	};
+
+	if (!spi) {
+		LCD_ERR("no spi device..\n");
+		return -EINVAL;
+	}
+
+	vdd = container_of(spi->dev.driver,
+				struct samsung_display_driver_data,
+				spi_driver.driver);
+
+	if (IS_ERR_OR_NULL(vdd)) {
+		LCD_ERR("no vdd");
+		return -ENODEV;
+	}
+
+	mutex_lock(&vdd->ss_spi_lock);
+
+	tbuf = kmalloc(tx_size, GFP_KERNEL | GFP_DMA);
+	if (tbuf == NULL) {
+		LCD_ERR("fail to alloc tx_buf..\n");
+		goto err;
+	}
+	memcpy(tbuf, tx_buf, tx_size);
+	xfer[0].tx_buf = tbuf;
+
+	LCD_DEBUG("tx len = %d\n", xfer[0].len);
+
+	if (vdd->ddi_spi_status == DDI_SPI_SUSPEND) {
+		LCD_DEBUG("ddi spi is suspend..\n");
+		ret = -EINVAL;
+		goto err;
+	}
+
+	LCD_DEBUG("++\n");
+
+	spi_message_init(&msg);
+
+	for (i = 0; i < ARRAY_SIZE(xfer); i++)
+		spi_message_add_tail(&xfer[i], &msg);
+
+	ret = spi_sync(spi, &msg);
+	if (ret) {
+		pr_err("[spi] %s : spi_sync fail..\n", __func__);
+		goto err;
+	}
+
+err:
+	mutex_unlock(&vdd->ss_spi_lock);
+
+	if (tbuf)
+		kfree(tbuf);
+	
+	LCD_DEBUG("--\n");
+
+	return ret;
+}
+
+int ss_spi_read(struct spi_device *spi, u8 *buf,
+				int tx_bpw, int rx_bpw, u8 *tx_buf, int tx_size, int rx_size)
+{
+	u64 i;
+	u8 *rbuf = NULL;
+	u8 *tbuf = NULL;
 #if defined(CONFIG_SEC_FACTORY)
 	u8 *dummy_buf = NULL;
 #endif
@@ -51,20 +119,20 @@ int ss_spi_read(struct spi_device *spi, u8 *buf,
 
 	mutex_lock(&vdd->ss_spi_lock);
 
-	tx_buf = kmalloc(tx_size, GFP_KERNEL | GFP_DMA);
-	if (tx_buf == NULL) {
+	tbuf = kmalloc(tx_size, GFP_KERNEL | GFP_DMA);
+	if (tbuf == NULL) {
 		LCD_ERR("fail to alloc tx_buf..\n");
 		goto err;
 	}
-	tx_buf[0] = rx_addr; // TX
-	xfer[0].tx_buf = tx_buf;
+	memcpy(&tbuf[0], &tx_buf[0], tx_size);
+	xfer[0].tx_buf = tbuf;
 
-	rx_buf = kmalloc(rx_size, GFP_KERNEL | GFP_DMA);
-	if (rx_buf == NULL) {
+	rbuf = kmalloc(rx_size, GFP_KERNEL | GFP_DMA);
+	if (rbuf == NULL) {
 		LCD_ERR("fail to alloc rx_buf..\n");
 		goto err;
 	}
-	xfer[1].rx_buf = rx_buf;
+	xfer[1].rx_buf = rbuf;
 
 #if defined(CONFIG_SEC_FACTORY)
 	dummy_buf = kmalloc(xfer[2].len, GFP_KERNEL | GFP_DMA);
@@ -83,6 +151,10 @@ int ss_spi_read(struct spi_device *spi, u8 *buf,
 
 	LCD_DEBUG("++\n");
 
+	LCD_DEBUG("tx_size(%d) (%02x %02x %02x %02x) \n", xfer[0].len, 
+		tbuf[0], tbuf[1],tbuf[2], tbuf[3]);
+	LCD_DEBUG("rx_size(%d)\n", xfer[1].len);
+	
 	spi_message_init(&msg);
 
 	for (i = 0; i < ARRAY_SIZE(xfer); i++)
@@ -90,17 +162,11 @@ int ss_spi_read(struct spi_device *spi, u8 *buf,
 
 	ret = spi_sync(spi, &msg);
 	if (ret) {
-		pr_err("[mdss spi] %s : spi_sync fail..\n", __func__);
+		pr_err("[spi] %s : spi_sync fail..\n", __func__);
 		goto err;
 	}
-
-	LCD_DEBUG("rx(0x%x) : ", tx_buf[1]);
-	for (i = 0; i < rx_size; i++) {
-		LCD_DEBUG("[%d] %02x ", i+1, rx_buf[i]);
-	}
-	LCD_DEBUG("\n");
-
-	memcpy(buf, rx_buf, rx_size);
+	
+	memcpy(buf, rbuf, rx_size);
 
 	if (vdd->ddi_spi_cs_high_gpio_for_gpara > 0) {
 		LCD_INFO("%s wait \n", dev_name(spi->controller->dev.parent));
@@ -128,10 +194,10 @@ int ss_spi_read(struct spi_device *spi, u8 *buf,
 err:
 	mutex_unlock(&vdd->ss_spi_lock);
 
-	if (rx_buf)
-		kfree(rx_buf);
-	if (tx_buf)
-		kfree(tx_buf);
+	if (rbuf)
+		kfree(rbuf);
+	if (tbuf)
+		kfree(tbuf);
 #if defined(CONFIG_SEC_FACTORY)
 	if (dummy_buf)
 		kfree(dummy_buf);
@@ -141,6 +207,195 @@ err:
 
 	return ret;
 }
+
+int ss_spi_sync(struct spi_device *spi, u8 *buf, enum spi_cmd_set_type type)
+{
+	struct samsung_display_driver_data *vdd = NULL;	
+	struct ddi_spi_cmd_set *cmd_set = NULL;
+	struct spi_message msg;	
+	u8 *rbuf = NULL;
+	int ret = 0;
+
+	struct spi_transfer tx_xfer = { .tx_buf = NULL };
+	struct spi_transfer rx_xfer = { .rx_buf = NULL };
+
+	if (!spi) {
+		LCD_ERR("no spi device..\n");
+		return -EINVAL;
+	}
+
+	vdd = container_of(spi->dev.driver,
+				struct samsung_display_driver_data,
+				spi_driver.driver);
+
+	if (IS_ERR_OR_NULL(vdd)) {
+		LCD_ERR("no vdd");
+		return -ENODEV;
+	}
+
+	mutex_lock(&vdd->ss_spi_lock);
+
+	cmd_set = ss_get_spi_cmds(vdd, type);
+	if (cmd_set == NULL) {
+		LCD_ERR("cmd_set is null..\n");
+		ret = -EINVAL;
+		goto err;
+	}
+
+	spi_message_init(&msg);
+
+	/* tx xfer */
+	if (cmd_set->tx_size) {
+		/* set address when cmd is write/erase cmd */
+		if (cmd_set->tx_buf[0] == SPI_PAGE_PROGRAM ||
+			cmd_set->tx_buf[0] == SPI_SECTOR_ERASE_CMD ||
+			cmd_set->tx_buf[0] == SPI_32K_ERASE_CMD ||
+			cmd_set->tx_buf[0] == SPI_64K_ERASE_CMD) {
+			cmd_set->tx_buf[1] = (cmd_set->tx_addr & 0xFF0000) >> 16;
+			cmd_set->tx_buf[2] = (cmd_set->tx_addr & 0x00FF00) >> 8;
+			cmd_set->tx_buf[3] = (cmd_set->tx_addr & 0x0000FF);
+		}
+
+		tx_xfer.tx_buf = cmd_set->tx_buf;
+		tx_xfer.len = cmd_set->tx_size;
+		tx_xfer.bits_per_word = cmd_set->tx_bpw;
+		spi_message_add_tail(&tx_xfer, &msg);
+	} else {
+		LCD_ERR("No tx_size (%d)\n", cmd_set->tx_size);
+		ret = -EINVAL;
+		goto err;
+	}
+
+	/* rx xfer */
+	if (cmd_set->rx_size) {
+		rbuf = kmalloc(cmd_set->rx_size, GFP_KERNEL | GFP_DMA);
+		if (rbuf == NULL) {
+			LCD_ERR("fail to alloc rx_buf..\n");
+			ret = -ENODEV;
+			goto err;
+		}	
+
+		if (type == RX_DATA && (cmd_set->tx_size == 4)) {
+			/* set address when cmd is read cmd */
+			cmd_set->tx_buf[1] = (cmd_set->rx_addr & 0xFF0000) >> 16;
+			cmd_set->tx_buf[2] = (cmd_set->rx_addr & 0x00FF00) >> 8;
+			cmd_set->tx_buf[3] = (cmd_set->rx_addr & 0x0000FF);
+		}
+
+		rx_xfer.rx_buf = rbuf;
+		rx_xfer.len = cmd_set->rx_size;
+		rx_xfer.bits_per_word = cmd_set->rx_bpw;
+		spi_message_add_tail(&rx_xfer, &msg);
+	}	
+		
+	if (vdd->ddi_spi_status == DDI_SPI_SUSPEND) {
+		LCD_DEBUG("ddi spi is suspend..\n");
+		ret = -EINVAL;
+		goto err;
+	}
+
+	ret = spi_sync(spi, &msg);
+	if (ret) {
+		pr_err("[spi] %s : spi_sync fail..\n", __func__);
+		goto err;
+	}
+
+	if (cmd_set->rx_size)
+		memcpy(buf, rbuf, cmd_set->rx_size);
+
+err:
+	mutex_unlock(&vdd->ss_spi_lock);
+
+	if (rbuf)
+		kfree(rbuf);
+
+	return ret;
+}
+
+struct ddi_spi_cmd_set *ss_get_spi_cmds(struct samsung_display_driver_data *vdd, 
+	enum spi_cmd_set_type type) 
+{
+	struct ddi_spi_cmd_set *cmd_set = NULL;
+
+	if (type >= SS_SPI_CMD_SET_MAX) {
+		LCD_ERR("type is not valid.. %d/%d\n", type, SS_SPI_CMD_SET_MAX);
+		return NULL;	
+	}
+
+	cmd_set = &vdd->spi_cmd_set[type];
+
+	return cmd_set;
+}
+
+static char *spi_cmd_set_map[SS_SPI_CMD_SET_MAX] = {
+	"samsung,winbond_spi_wr_enable",
+	"samsung,winbond_spi_wr_page_program",
+	"samsung,winbond_spi_wr_status_reg1",
+	"samsung,winbond_spi_wr_status_reg2",
+	"samsung,winbond_spi_wr_status_reg1_end",
+	"samsung,winbond_spi_wr_status_reg2_end",
+	"samsung,winbond_spi_er",	
+	"SS_SPI_RX_START",
+	"samsung,winbond_spi_rd_data",
+	"samsung,winbond_spi_rd_status_reg1",
+	"samsung,winbond_spi_rd_manufacture_id",
+};
+
+void ss_panel_parse_spi_cmd(struct device_node *np,
+		struct samsung_display_driver_data *vdd)
+{
+	int i,j;
+	const char *data;
+	struct ddi_spi_cmd_set *cmd_set;
+	int len;
+
+	vdd->spi_cmd_set = kzalloc(sizeof(struct ddi_spi_cmd_set) * SS_SPI_CMD_SET_MAX, GFP_KERNEL);
+	if (vdd->spi_cmd_set == NULL) {
+		LCD_ERR("fail to kmalloc for vdd->spi_cmd_set..\n");
+		goto err;
+	}
+	
+	for (i = 0; i < SS_SPI_CMD_SET_MAX; i++) {	
+		data = of_get_property(np, spi_cmd_set_map[i], &len);
+		if (!data || !len) {
+			LCD_ERR("Unable to read table %s %d\n", spi_cmd_set_map[i], len);
+			continue;
+		}
+		
+		cmd_set = &vdd->spi_cmd_set[i];
+
+		j = 0;
+		
+		/* tx */
+		cmd_set->tx_bpw = data[j++];
+		cmd_set->tx_size = (data[j++] << 8);	
+		cmd_set->tx_size |= data[j++];
+				
+		cmd_set->tx_buf = kmalloc(cmd_set->tx_size,  GFP_KERNEL | GFP_DMA);
+		if (cmd_set->tx_buf == NULL) {
+			LCD_ERR("fail to kmalloc for tx_buf..\n");
+			goto err;
+		}
+
+		memcpy(cmd_set->tx_buf, &data[j], cmd_set->tx_size);
+
+		j += cmd_set->tx_size;		
+
+		/* rx */
+		if (i >= SS_SPI_RX_START) {
+			cmd_set->rx_bpw = data[j++];
+			cmd_set->rx_size = (data[j++] << 8);
+			cmd_set->rx_size |= data[j++];
+		}
+
+		LCD_ERR("success to parse [%s] tx - bpw(%d) size(%d) / rx - bpw(%d) size(%d)\n",
+			spi_cmd_set_map[i], cmd_set->tx_bpw, cmd_set->tx_size, cmd_set->rx_bpw, cmd_set->rx_size);
+	}
+
+err:
+	return;
+}
+
 
 static int ss_spi_parse_dt(struct spi_device *spi_dev)
 {
@@ -179,6 +434,26 @@ static int ss_spi_parse_dt(struct spi_device *spi_dev)
 	return ret;
 }
 
+void ss_set_spi_speed(struct samsung_display_driver_data *vdd, int speed)
+{
+	int ret = 0;
+
+	if (!vdd || !vdd->spi_dev) {
+		LCD_ERR("dev is null..\n");
+		return;
+	}
+
+	vdd->spi_dev->max_speed_hz = speed;
+	
+	ret = spi_setup(vdd->spi_dev);
+	if (ret < 0) {
+		LCD_ERR("%s : spi_setup error (%d)\n", __func__, ret);
+		return;
+	}
+
+	return;
+}
+
 static int ss_spi_probe(struct spi_device *client)
 {
 	struct samsung_display_driver_data *vdd;
@@ -211,13 +486,23 @@ static int ss_spi_probe(struct spi_device *client)
 	vdd->spi_dev = client;
 	dev_set_drvdata(&client->dev, vdd);
 
+	if (vdd->dtsi_data.flash_gamma_support && 
+		!vdd->panel_br_info.flash_data.init_done &&
+		!strcmp(vdd->dtsi_data.flash_read_intf, "spi") ) {
+		if (vdd->spi_no_dev && !work_busy(&vdd->flash_br_work.work)) {
+			queue_delayed_work(vdd->flash_br_workqueue, &vdd->flash_br_work,
+				msecs_to_jiffies(0));
+			LCD_ERR("Queue flash work again.\n");
+		}
+	}
+
 	LCD_ERR("%s : --\n", __func__);
 	return ret;
 }
 
 static int ss_spi_remove(struct spi_device *spi)
 {
-	pr_err("[mdss] %s : remove \n", __func__);
+	LCD_ERR("%s : remove \n", __func__);
 	return 0;
 }
 
@@ -314,6 +599,7 @@ int ss_spi_init(struct samsung_display_driver_data *vdd)
 		return -ENODEV;
 	}
 
+
 	if(!vdd->samsung_support_ddi_spi) {
 		LCD_ERR("%s : No support for ddi spi\n", __func__);
 		return 0;
@@ -324,7 +610,7 @@ int ss_spi_init(struct samsung_display_driver_data *vdd)
 	else
 		sprintf(drivername, "ddi_spi%d", vdd->ndx);
 
-	LCD_ERR("%s : ++\n", __func__);
+	LCD_ERR("%s : ++ %s\n", __func__, drivername);
 
 	vdd->spi_driver.driver.name = drivername;
 	vdd->spi_driver.driver.owner = THIS_MODULE;

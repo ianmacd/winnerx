@@ -24,7 +24,7 @@
  *
  * <<Broadcom-WL-IPTag/Open:>>
  *
- * $Id: dhd_ip.c 790572 2018-11-26 11:03:46Z $
+ * $Id: dhd_ip.c 813282 2019-04-04 09:42:28Z $
  */
 #include <typedefs.h>
 #include <osl.h>
@@ -128,7 +128,7 @@ typedef struct {
 	uint8 supp_cnt;
 	dhd_pub_t *dhdp;
 #ifndef TCPACK_SUPPRESS_HOLD_HRT
-	struct timer_list timer;
+	timer_list_compat_t timer;
 #else
 	struct tasklet_hrtimer timer;
 #endif /* TCPACK_SUPPRESS_HOLD_HRT */
@@ -503,9 +503,8 @@ int dhd_tcpack_suppress_set(dhd_pub_t *dhdp, uint8 mode)
 					&tcpack_sup_module->tcpack_info_tbl[i];
 				tcpack_info_tbl->dhdp = dhdp;
 #ifndef TCPACK_SUPPRESS_HOLD_HRT
-				init_timer(&tcpack_info_tbl->timer);
-				tcpack_info_tbl->timer.data = (ulong)tcpack_info_tbl;
-				tcpack_info_tbl->timer.function = dhd_tcpack_send;
+				init_timer_compat(&tcpack_info_tbl->timer,
+					dhd_tcpack_send, tcpack_info_tbl);
 #else
 				tasklet_hrtimer_init(&tcpack_info_tbl->timer,
 					dhd_tcpack_send, CLOCK_MONOTONIC, HRTIMER_MODE_REL);

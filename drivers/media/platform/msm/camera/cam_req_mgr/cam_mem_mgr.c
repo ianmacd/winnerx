@@ -238,18 +238,23 @@ int cam_mem_get_cpu_buf(int32_t buf_handle, uintptr_t *vaddr_ptr, size_t *len)
 		return -EINVAL;
 
 	idx = CAM_MEM_MGR_GET_HDL_IDX(buf_handle);
-	if (idx >= CAM_MEM_BUFQ_MAX || idx <= 0)
+	if (idx >= CAM_MEM_BUFQ_MAX || idx <= 0) {
 		return -EINVAL;
+	}
 
-	if (!tbl.bufq[idx].active)
+	if (!tbl.bufq[idx].active) {
+		CAM_ERR(CAM_MEM, "idx %d not active", idx);
 		return -EPERM;
+	}
 
 	if (buf_handle != tbl.bufq[idx].buf_handle) {
+		CAM_ERR(CAM_MEM, "idx %d invalid buf_handle %d", idx, buf_handle);
 		rc = -EINVAL;
 		goto exit_func;
 	}
 
 	if (!(tbl.bufq[idx].flags & CAM_MEM_FLAG_KMD_ACCESS)) {
+		CAM_ERR(CAM_MEM, "idx %d Invalid Flag 0x%x", idx, tbl.bufq[idx].flags);
 		rc = -EINVAL;
 		goto exit_func;
 	}

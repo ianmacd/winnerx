@@ -103,7 +103,7 @@ static int sec_dual_check_eoc_current(struct sec_dual_battery_info *battery)
 }
 #endif
 
-static int sec_dual_battery_current_avg(struct sec_dual_battery_info *battery, int bat_type, int mode)
+static int sec_dual_battery_current_avg(struct sec_dual_battery_info *battery, int bat_type)
 {
 	union power_supply_propval value;
 	int ichg = 0, idis = 0;
@@ -138,7 +138,26 @@ static int sec_dual_battery_current_avg(struct sec_dual_battery_info *battery, i
 	}
 }
 
-static int sec_dual_battery_voltage_avg(struct sec_dual_battery_info *battery, int bat_type, int mode)
+static int sec_dual_battery_current_limit(struct sec_dual_battery_info *battery, int bat_type)
+{
+	union power_supply_propval value = {0, };
+	int fcc = 0;
+
+	if(bat_type == SEC_DUAL_BATTERY_MAIN) {
+		psy_do_property(battery->pdata->main_limiter_name, get,
+			(enum power_supply_property)POWER_SUPPLY_EXT_PROP_FASTCHG_LIMIT_CURRENT, value);
+	} else {
+		psy_do_property(battery->pdata->sub_limiter_name, get,
+			(enum power_supply_property)POWER_SUPPLY_EXT_PROP_FASTCHG_LIMIT_CURRENT, value);
+	}
+	fcc = value.intval;	
+
+	pr_info("%s: fcc=%d\n", __func__, fcc);
+
+	return fcc;
+}
+
+static int sec_dual_battery_voltage_avg(struct sec_dual_battery_info *battery, int bat_type)
 {
 	union power_supply_propval value;
 	int vbat = 0;
@@ -177,15 +196,15 @@ static int sec_dual_battery_get_property(struct power_supply *psy,
 		break;
 	case POWER_SUPPLY_PROP_VOLTAGE_AVG:
 		if(value.intval == SEC_DUAL_BATTERY_MAIN)
-			val->intval = sec_dual_battery_voltage_avg(battery, SEC_DUAL_BATTERY_MAIN, SEC_BATTERY_VOLTAGE_MV);
+			val->intval = sec_dual_battery_voltage_avg(battery, SEC_DUAL_BATTERY_MAIN);
 		else
-			val->intval = sec_dual_battery_voltage_avg(battery, SEC_DUAL_BATTERY_SUB, SEC_BATTERY_VOLTAGE_MV);
+			val->intval = sec_dual_battery_voltage_avg(battery, SEC_DUAL_BATTERY_SUB);
 		break;
 	case POWER_SUPPLY_PROP_CURRENT_AVG:
 		if(value.intval == SEC_DUAL_BATTERY_MAIN)
-			val->intval = sec_dual_battery_current_avg(battery, SEC_DUAL_BATTERY_MAIN, SEC_BATTERY_CURRENT_MA);
+			val->intval = sec_dual_battery_current_avg(battery, SEC_DUAL_BATTERY_MAIN);
 		else
-			val->intval = sec_dual_battery_current_avg(battery, SEC_DUAL_BATTERY_SUB, SEC_BATTERY_CURRENT_MA);
+			val->intval = sec_dual_battery_current_avg(battery, SEC_DUAL_BATTERY_SUB);
 		break;
 	case POWER_SUPPLY_PROP_MAX ... POWER_SUPPLY_EXT_PROP_MAX:
 		switch (ext_psp) {
@@ -193,18 +212,24 @@ static int sec_dual_battery_get_property(struct power_supply *psy,
 			if (value.intval == SEC_DUAL_BATTERY_MAIN) {
 				if (battery->pdata->main_bat_con_det_gpio) {
 					val->intval = !gpio_get_value(battery->pdata->main_bat_con_det_gpio);
-					pr_info("%s : main det(%d) = %d \n", __func__, battery->pdata->main_bat_con_det_gpio, (int)value.intval);
+					pr_info("%s : main det(%d) = %d \n", __func__, battery->pdata->main_bat_con_det_gpio, (int)val->intval);
 				}
 				else
 					val->intval = -1;
-			} else if (value.intval == SEC_DUAL_BATTERY_SUB) {
+			} else {
 				if (battery->pdata->sub_bat_con_det_gpio) {
 					val->intval = !gpio_get_value(battery->pdata->sub_bat_con_det_gpio);
-					pr_info("%s : sub det(%d) = %d \n", __func__, battery->pdata->sub_bat_con_det_gpio, (int)value.intval);
+					pr_info("%s : sub det(%d) = %d \n", __func__, battery->pdata->sub_bat_con_det_gpio, (int)val->intval);
 				}
 				else
 					val->intval = -1;
 			}
+			break;
+		case POWER_SUPPLY_EXT_PROP_FASTCHG_LIMIT_CURRENT:
+			if(value.intval == SEC_DUAL_BATTERY_MAIN)
+				val->intval = sec_dual_battery_current_limit(battery, SEC_DUAL_BATTERY_MAIN);
+			else
+				val->intval = sec_dual_battery_current_limit(battery, SEC_DUAL_BATTERY_SUB);
 			break;
 		default:
 			return -EINVAL;
@@ -241,14 +266,16 @@ static int sec_dual_battery_set_property(struct power_supply *psy,
 				POWER_SUPPLY_PROP_CHARGE_FULL, value);
 			battery->full_total_status = SEC_DUAL_BATTERY_NONE;			
 		}
-		//else {
-			//value.intval = 1;
+#if 0
+		else {
+			value.intval = 1;
 			/* enable main/sub supplement mode */
-			//psy_do_property(battery->pdata->main_limiter_name, set,
-			//	POWER_SUPPLY_PROP_CHARGE_FULL, value);
-			//psy_do_property(battery->pdata->sub_limiter_name, set,
-			//	POWER_SUPPLY_PROP_CHARGE_FULL, value);
-		//}
+			psy_do_property(battery->pdata->main_limiter_name, set,
+				POWER_SUPPLY_PROP_CHARGE_FULL, value);
+			psy_do_property(battery->pdata->sub_limiter_name, set,
+				POWER_SUPPLY_PROP_CHARGE_FULL, value);
+		}
+#endif
 		break;
 	case POWER_SUPPLY_PROP_ENERGY_NOW:
 		/* SET PWR OFF MODE 2*/		
@@ -264,6 +291,13 @@ static int sec_dual_battery_set_property(struct power_supply *psy,
 		break;
 	case POWER_SUPPLY_PROP_MAX ... POWER_SUPPLY_EXT_PROP_MAX:
 		switch (ext_psp) {
+		case POWER_SUPPLY_EXT_PROP_FULL_CONDITION:
+			battery->pdata->main_full_condition_vcell = val->intval;
+			battery->pdata->sub_full_condition_vcell = val->intval;
+			pr_info("%s : main_full_condition_vcell(%d), sub_full_condition_vcell(%d)\n", __func__,
+				battery->pdata->main_full_condition_vcell,
+				battery->pdata->sub_full_condition_vcell);
+			break;
 		default:
 			return -EINVAL;
 		}

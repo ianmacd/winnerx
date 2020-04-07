@@ -98,7 +98,7 @@ static void fts_reset_work(struct work_struct *work);
 static void fts_read_info_work(struct work_struct *work);
 
 #if defined(CONFIG_TOUCHSCREEN_DUMP_MODE)
-#include <linux/sec_debug.h>
+#include <linux/sec_ts_common.h>
 static void tsp_dump(void);
 static void dump_tsp_rawdata(struct work_struct *work);
 struct delayed_work *p_debug_work;
@@ -547,24 +547,15 @@ exit:
 	return 0;
 }
 
-#ifdef FTS_SUPPORT_SPONGELIB
-#ifdef CONFIG_SEC_FACTORY
-static void fts_disable_sponge(struct fts_ts_info *info)
-{
-	u8 regAdd[3] = {0xC1, 0x05, 0x00};
-	int ret = 0;
-
-	ret = fts_write_reg(info, &regAdd[0], 3);
-	input_info(true, &info->client->dev, "%s: Sponge Library Disabled, ret = %d\n", __func__, ret);
-}
-#endif
-
 static int fts_read_from_sponge(struct fts_ts_info *info,
 		u16 offset, u8 *data, int length)
 {
 	u8 sponge_reg[3];
 	u8 *buf;
 	int rtn;
+
+	if (!info->use_sponge)
+		return -ENODEV;
 
 #ifdef CONFIG_TRUSTONIC_TRUSTED_UI
 	if (TRUSTEDUI_MODE_INPUT_SECURED & trustedui_get_current_mode()) {
@@ -581,14 +572,17 @@ static int fts_read_from_sponge(struct fts_ts_info *info,
 	}
 #endif
 
+	mutex_lock(&info->sponge_mutex);
 	offset += FTS_CMD_SPONGE_ACCESS;
 	sponge_reg[0] = 0xAA;
 	sponge_reg[1] = (offset >> 8) & 0xFF;
 	sponge_reg[2] = offset & 0xFF;
 
 	buf = kzalloc(length, GFP_KERNEL);
-	if (buf == NULL)
-		return -ENOMEM;
+	if (buf == NULL) {
+		rtn = -ENOMEM;
+		goto out;
+	}
 
 	rtn = fts_read_reg(info, sponge_reg, 3, buf, length);
 	if (rtn >= 0)
@@ -597,6 +591,8 @@ static int fts_read_from_sponge(struct fts_ts_info *info,
 		input_err(true, &info->client->dev, "%s: failed\n", __func__);
 
 	kfree(buf);
+out:
+	mutex_unlock(&info->sponge_mutex);
 	return rtn;
 }
 
@@ -610,6 +606,9 @@ static int fts_write_to_sponge(struct fts_ts_info *info,
 {
 	u8 regAdd[3 + length];
 	int ret = 0;
+
+	if (!info->use_sponge)
+		return -ENODEV;
 
 	if (info->fts_power_state == FTS_POWER_STATE_POWERDOWN) {
 		input_err(true, &info->client->dev, "%s: Sensor stopped\n", __func__);
@@ -631,6 +630,7 @@ static int fts_write_to_sponge(struct fts_ts_info *info,
 	}
 #endif
 
+	mutex_lock(&info->sponge_mutex);
 	offset += FTS_CMD_SPONGE_ACCESS;
 	regAdd[0] = FTS_CMD_SPONGE_READ_WRITE_CMD;
 	regAdd[1] = (offset >> 8) & 0xFF;
@@ -653,12 +653,13 @@ static int fts_write_to_sponge(struct fts_ts_info *info,
 	if (ret <= 0) {
 		input_err(true, &info->client->dev,
 				"%s: sponge notify is failed.\n", __func__);
-		return ret;
+		goto out;
 	}
 
 	input_info(true, &info->client->dev,
 			"%s: sponge notify is OK[0x%02X].\n", __func__, *data);
-
+out:
+	mutex_unlock(&info->sponge_mutex);
 	return ret;
 }
 
@@ -708,17 +709,45 @@ int fts_check_custom_library(struct fts_ts_info *info)
 	else
 		info->use_sponge = false;
 
-	if (info->use_sponge)
-		fts_write_to_sponge(info, FTS_CMD_SPONGE_OFFSET_MODE,
-				&info->lowpower_flag, sizeof(info->lowpower_flag));
+	info->fts_write_to_sponge(info, FTS_CMD_SPONGE_OFFSET_MODE,
+			&info->lowpower_flag, sizeof(info->lowpower_flag));
+
+	if (!info->board->support_fod)
+		goto out;
+
+	ret = info->fts_read_from_sponge(info, FTS_CMD_SPONGE_FOD_INFO, regAdd, 3);
+	if (ret <= 0)
+		goto out;
+
+	info->fod_x = regAdd[0];
+	info->fod_y = regAdd[1];
+	info->fod_vi_size = regAdd[2];
+	input_info(true, &info->client->dev, "%s: fod_x:%d fod_y:%d fod_vi_size:%d\n",
+			__func__, info->fod_x, info->fod_y, info->fod_vi_size);
 
 out:
-	input_err(true, &info->client->dev, "%s: use %s\n",
+	input_info(true, &info->client->dev, "%s: use %s\n",
 			__func__, info->use_sponge ? "SPONGE" : "VENDOR");
 
 	return ret;
 }
-#endif
+
+int fts_set_press_property(struct fts_ts_info *info)
+{
+	int ret = 0;
+
+	if (!info->board->support_fod)
+		return 0;
+
+	ret = info->fts_write_to_sponge(info, FTS_CMD_SPONGE_PRESS_PROPERTY,
+			&info->press_prop, sizeof(info->press_prop));
+	if (ret < 0)
+		input_err(true, &info->client->dev, "%s: failed. ret: %d\n", __func__, ret);
+
+	input_info(true, &info->client->dev, "%s: %d\n", __func__, info->press_prop);
+
+	return ret;
+}
 
 void fts_delay(unsigned int ms)
 {
@@ -781,7 +810,7 @@ int fts_set_opmode(struct fts_ts_info *info, u8 mode)
 
 	ret = fts_write_reg(info, &regAdd[0], 2);
 	if (ret <= 0)
-		input_err(true, &info->client->dev, "%s: Failed to send command: %d", __func__, data[0]);
+		input_err(true, &info->client->dev, "%s: Failed to send command: %d\n", __func__, data[0]);
 
 	ret = fts_fw_wait_for_echo_event(info, &regAdd[0], 2);
 	if (ret < 0) {
@@ -794,12 +823,34 @@ int fts_set_opmode(struct fts_ts_info *info, u8 mode)
 		regAdd[1] = 0x02;
 		ret = fts_write_reg(info, &regAdd[0], 2);
 		if (ret <= 0)
-			input_err(true, &info->client->dev, "%s: Failed to send command: %d", __func__, data[0]);
+			input_err(true, &info->client->dev, "%s: Failed to send command: %d\n", __func__, data[0]);
 	}
 
 	fts_interrupt_set(info, INT_ENABLE);
 
 	return ret;
+}
+
+void fts_set_fod_finger_merge(struct fts_ts_info *info)
+{
+	int ret;
+	u8 regAdd[2] = {FTS_CMD_SET_FOD_FINGER_MERGE, 0};
+
+	if (!info->board->support_fod)
+		return;
+
+	if (info->lowpower_flag & FTS_MODE_PRESS)
+		regAdd[1] = 1;
+	else
+		regAdd[1] = 0;
+	
+	mutex_lock(&info->sponge_mutex);
+	input_info(true, &info->client->dev, "%s: %d\n", __func__, regAdd[1]);
+
+	ret = fts_write_reg(info, regAdd, 2);
+	if (ret < 0)
+		input_err(true, &info->client->dev, "%s: failed\n", __func__);
+	mutex_unlock(&info->sponge_mutex);
 }
 
 static void fts_set_cover_type(struct fts_ts_info *info, bool enable)
@@ -947,6 +998,7 @@ void fts_interrupt_set(struct fts_ts_info *info, int enable)
 	mutex_unlock(&info->irq_mutex);
 }
 
+#if 0
 void fts_ic_interrupt_set(struct fts_ts_info *info, int enable)
 {
 	u8 regAdd[3] = { 0xA4, 0x01, 0x00 };
@@ -959,6 +1011,7 @@ void fts_ic_interrupt_set(struct fts_ts_info *info, int enable)
 	fts_write_reg(info, &regAdd[0], 3);
 	fts_delay(10);
 }
+#endif
 
 static int fts_read_chip_id(struct fts_ts_info *info)
 {
@@ -1453,11 +1506,6 @@ reset:
 		kfree(info->pFrame);
 		return 1;
 	}
-
-#if defined(FTS_SUPPORT_SPONGELIB) && defined(CONFIG_SEC_FACTORY)
-	if (info->use_sponge)
-		fts_disable_sponge(info);
-#endif
 #endif
 
 	/* fts driver set functional feature */
@@ -1522,11 +1570,11 @@ static void fts_print_info(struct fts_ts_info *info)
 		info->print_info_cnt_release++;
 
 	input_info(true, &info->client->dev,
-			"noise:%x,%x chg:%d tc:%d iq:%d depth:%d lp:%x wet:%d // v:%04X cal:%02X,C%02XT%04X.%4s%s Cal_flag:%s,%d // #%d %d\n",
+			"noise:%x,%x chg:%d tc:%d iq:%d depth:%d lp:%x wet:%d flip:%d // v:%04X cal:%02X,C%02XT%04X.%4s%s Cal_flag:%s,%d // #%d %d\n",
 			info->touch_noise_status, info->touch_noise_reason,
 			info->charger_mode, info->touch_count,
 			gpio_get_value(info->board->irq_gpio), desc->depth,
-			info->lowpower_flag, info->wet_mode,
+			info->lowpower_flag, info->wet_mode, info->flip_enable,
 			(info->module_version_of_ic << 8) | (info->fw_main_version_of_ic & 0xFF),
 			info->test_result.data[0],
 #ifdef TCLM_CONCEPT
@@ -1552,6 +1600,34 @@ static void fts_print_info_work(struct work_struct *work)
 	fts_print_info(info);
 	schedule_delayed_work(&info->work_print_info, msecs_to_jiffies(TOUCH_PRINT_INFO_DWORK_TIME));
 }
+/************************************************************
+ *  720  * 1480 : <48 96 60> indicator: 24dp navigator:48dp edge:60px dpi=320
+ * 1080  * 2220 :  4096 * 4096 : <133 266 341>  (approximately value)
+ ************************************************************/
+
+static void location_detect(struct fts_ts_info *info, char *loc, int x, int y)
+{
+	int i;
+
+	for (i = 0; i < FTS_TS_LOCATION_DETECT_SIZE; ++i)
+		loc[i] = 0;
+
+	if (x < info->board->area_edge)
+		strcat(loc, "E.");
+	else if (x < (info->board->max_x - info->board->area_edge))
+		strcat(loc, "C.");
+	else
+		strcat(loc, "e.");
+
+	if (y < info->board->area_indicator)
+		strcat(loc, "S");
+	else if (y < (info->board->max_y - info->board->area_navigation))
+		strcat(loc, "C");
+	else
+		strcat(loc, "N");
+}
+
+static const char finger_mode[10] = {'N', '1', '2', 'G', '4', 'P'};
 
 static u8 fts_event_handler_type_b(struct fts_ts_info *info)
 {
@@ -1567,8 +1643,8 @@ static u8 fts_event_handler_type_b(struct fts_ts_info *info)
 	struct fts_gesture_status *p_gesture_status;
 	struct fts_event_status *p_event_status;
 
-	u8 prev_ttype = 0;
 	u8 prev_action = 0;
+	char location[FTS_TS_LOCATION_DETECT_SIZE] = { 0 };
 
 	regAdd = FTS_READ_ONE_EVENT;
 	fts_read_reg(info, &regAdd, 1, (u8 *)&data[0 * FTS_EVENT_SIZE], FTS_EVENT_SIZE);
@@ -1654,7 +1730,7 @@ static u8 fts_event_handler_type_b(struct fts_ts_info *info)
 				break;
 			}
 
-			prev_ttype = info->finger[TouchID].ttype;
+			info->finger[TouchID].prev_ttype = info->finger[TouchID].ttype;
 			prev_action = info->finger[TouchID].action;
 			info->finger[TouchID].id = TouchID;
 			info->finger[TouchID].action = p_event_coord->tchsta;
@@ -1680,6 +1756,9 @@ static u8 fts_event_handler_type_b(struct fts_ts_info *info)
 					(info->finger[TouchID].ttype == FTS_EVENT_TOUCHTYPE_PALM)   ||
 					(info->finger[TouchID].ttype == FTS_EVENT_TOUCHTYPE_WET)    ||
 					(info->finger[TouchID].ttype == FTS_EVENT_TOUCHTYPE_GLOVE)) {
+
+				location_detect(info, location, info->finger[TouchID].x, info->finger[TouchID].y);
+
 				if (info->finger[TouchID].action == FTS_COORDINATE_ACTION_RELEASE) {
 					input_mt_slot(info->input_dev, TouchID);
 
@@ -1702,23 +1781,33 @@ static u8 fts_event_handler_type_b(struct fts_ts_info *info)
 
 #if !defined(CONFIG_SAMSUNG_PRODUCT_SHIP)
 					input_info(true, &info->client->dev,
-							"[R] tID:%d mc:%d tc:%d lx:%d ly:%d\n",
-							TouchID, info->finger[TouchID].mcount, info->touch_count,
+							"[R] tID:%d loc:%s dd:%d,%d mc:%d tc:%d lx:%d ly:%d\n",
+							TouchID, location,
+							info->finger[TouchID].x - info->finger[TouchID].p_x,
+							info->finger[TouchID].y - info->finger[TouchID].p_y,
+							info->finger[TouchID].mcount, info->touch_count,
 							info->finger[TouchID].x, info->finger[TouchID].y);
 #else
 					input_info(true, &info->client->dev,
-							"[R] tID:%d mc:%d tc:%d\n",
-							TouchID, info->finger[TouchID].mcount, info->touch_count);
+							"[R] tID:%d loc:%s dd:%d,%d mc:%d tc:%d\n",
+							TouchID, location,
+							info->finger[TouchID].x - info->finger[TouchID].p_x,
+							info->finger[TouchID].y - info->finger[TouchID].p_y,
+							info->finger[TouchID].mcount, info->touch_count);
 #endif
 
 					info->finger[TouchID].action = FTS_COORDINATE_ACTION_NONE;
 					info->finger[TouchID].mcount = 0;
 					info->finger[TouchID].palm_count = 0;
+					info->finger[TouchID].prev_ttype = 0;
 
 				} else if (info->finger[TouchID].action == FTS_COORDINATE_ACTION_PRESS) {
 
 					info->touch_count++;
 					info->all_finger_count++;
+
+					info->finger[TouchID].p_x = info->finger[TouchID].x;
+					info->finger[TouchID].p_y = info->finger[TouchID].y;
 
 					input_mt_slot(info->input_dev, TouchID);
 					input_mt_report_slot_state(info->input_dev, MT_TOOL_FINGER, 1);
@@ -1752,19 +1841,19 @@ static u8 fts_event_handler_type_b(struct fts_ts_info *info)
 
 #if !defined(CONFIG_SAMSUNG_PRODUCT_SHIP)
 					input_info(true, &info->client->dev,
-							"[P] tID:%d.%d x:%d y:%d w:%d h:%d z:%d type:%X tc:%d tm:%02X\n",
+							"[P] tID:%d.%d x:%d y:%d z:%d major:%d minor:%d loc:%s tc:%d\n",
 							TouchID, (info->input_dev->mt->trkid - 1) & TRKID_MAX,
 							info->finger[TouchID].x, info->finger[TouchID].y,
+							info->finger[TouchID].z,
 							info->finger[TouchID].major, info->finger[TouchID].minor,
-							info->finger[TouchID].z, info->finger[TouchID].ttype,
-							info->touch_count, (u8)info->touch_functions);
+							location, info->touch_count);
 #else
 					input_info(true, &info->client->dev,
-							"[P] tID:%d.%d w:%d h:%d z:%d type:%X tc:%d tm:%02X\n",
+							"[P] tID:%d.%d z:%d major:%d minor:%d loc:%s tc:%d\n",
 							TouchID, (info->input_dev->mt->trkid - 1) & TRKID_MAX,
+							info->finger[TouchID].z,
 							info->finger[TouchID].major, info->finger[TouchID].minor,
-							info->finger[TouchID].z, info->finger[TouchID].ttype,
-							info->touch_count, (u8)info->touch_functions);
+							location, info->touch_count);
 #endif
 				} else if (info->finger[TouchID].action == FTS_COORDINATE_ACTION_MOVE) {
 					if (info->touch_count == 0) {
@@ -1811,7 +1900,7 @@ static u8 fts_event_handler_type_b(struct fts_ts_info *info)
 							"%s: do not support coordinate action(%d)\n",
 							__func__, info->finger[TouchID].action);
 				}
-
+/*
 				if ((info->finger[TouchID].action == FTS_COORDINATE_ACTION_PRESS) ||
 						(info->finger[TouchID].action == FTS_COORDINATE_ACTION_MOVE)) {
 					if (info->finger[TouchID].ttype != prev_ttype) {
@@ -1820,6 +1909,15 @@ static u8 fts_event_handler_type_b(struct fts_ts_info *info)
 								prev_ttype, info->finger[TouchID].ttype);
 					}
 				}
+*/
+				if (info->finger[TouchID].prev_ttype != info->finger[TouchID].ttype)
+					input_info(true, &info->client->dev, "%s: iID:%d ttype(%c->%c) : %s\n",
+							__func__, info->finger[TouchID].id,
+							finger_mode[info->finger[TouchID].prev_ttype],
+							finger_mode[info->finger[TouchID].ttype],
+							info->finger[TouchID].action == FTS_COORDINATE_ACTION_PRESS ? "P" :
+							info->finger[TouchID].action == FTS_COORDINATE_ACTION_MOVE ? "M" : "R");
+
 			} else {
 				input_dbg(true, &info->client->dev,
 						"%s: do not support coordinate type(%d)\n",
@@ -1834,24 +1932,63 @@ static u8 fts_event_handler_type_b(struct fts_ts_info *info)
 				p_gesture_status->gesture_data_1, p_gesture_status->gesture_data_2,
 				p_gesture_status->gesture_data_3, p_gesture_status->gesture_data_4);
 
-#ifdef FTS_SUPPORT_SPONGELIB
 			if (p_gesture_status->sf == FTS_GESTURE_SAMSUNG_FEATURE) {
-				if ((info->lowpower_flag & FTS_MODE_DOUBLETAP_WAKEUP) &&
-						p_gesture_status->stype == FTS_SPONGE_EVENT_DOUBLETAP) {
-					input_report_key(info->input_dev, KEY_HOMEPAGE, 1);
+				switch (p_gesture_status->stype) {
+				case FTS_SPONGE_EVENT_SWIPE_UP:
+					info->scrub_id = SPONGE_EVENT_TYPE_SPAY;
+					input_info(true, &info->client->dev, "%s: SPAY\n", __func__);
+					input_report_key(info->input_dev, KEY_BLACK_UI_GESTURE, 1);
 					input_sync(info->input_dev);
-					input_report_key(info->input_dev, KEY_HOMEPAGE, 0);
-					input_info(true, &info->client->dev, "%s: Dobule Tap Wake up\n", __func__);
+					input_report_key(info->input_dev, KEY_BLACK_UI_GESTURE, 0);
 					break;
-				}
-			} else
-#endif
-			{
-				if ((info->lowpower_flag & FTS_MODE_DOUBLETAP_WAKEUP) && p_gesture_status->gesture_id == 0x01) {
-					input_info(true, &info->client->dev, "%s: AOT\n", __func__);
-					input_report_key(info->input_dev, KEY_HOMEPAGE, 1);
+				case FTS_SPONGE_EVENT_DOUBLETAP:
+					if (p_gesture_status->gesture_id == FTS_SPONGE_EVENT_GESTURE_ID_AOD) {
+						info->scrub_id = SPONGE_EVENT_TYPE_AOD_DOUBLETAB;
+						info->scrub_x = (p_gesture_status->gesture_data_1 << 4) | (p_gesture_status->gesture_data_3 >> 4);
+						info->scrub_y = (p_gesture_status->gesture_data_2 << 4) | (p_gesture_status->gesture_data_3 & 0x0F);
+
+						input_info(true, &info->client->dev, "%s: AOD\n", __func__);
+						input_report_key(info->input_dev, KEY_BLACK_UI_GESTURE, 1);
+						input_sync(info->input_dev);
+						input_report_key(info->input_dev, KEY_BLACK_UI_GESTURE, 0);
+					} else if (p_gesture_status->gesture_id == FTS_SPONGE_EVENT_GESTURE_ID_DOUBLETAP_TO_WAKEUP) {
+						input_report_key(info->input_dev, KEY_WAKEUP, 1);
+						input_sync(info->input_dev);
+						input_report_key(info->input_dev, KEY_WAKEUP, 0);
+						input_info(true, &info->client->dev, "%s: DOUBLE TAP TO WAKEUP\n", __func__);
+					}
+					break;
+				case FTS_SPONGE_EVENT_SINGLETAP:
+					info->scrub_id = SPONGE_EVENT_TYPE_SINGLE_TAP;
+					info->scrub_x = (p_gesture_status->gesture_data_1 << 4) | (p_gesture_status->gesture_data_3 >> 4);
+					info->scrub_y = (p_gesture_status->gesture_data_2 << 4) | (p_gesture_status->gesture_data_3 & 0x0F);
+
+					input_info(true, &info->client->dev, "%s: SINGLE TAP\n", __func__);
+					input_report_key(info->input_dev, KEY_BLACK_UI_GESTURE, 1);
 					input_sync(info->input_dev);
-					input_report_key(info->input_dev, KEY_HOMEPAGE, 0);
+					input_report_key(info->input_dev, KEY_BLACK_UI_GESTURE, 0);
+					break;
+				case FTS_SPONGE_EVENT_PRESS:
+					if (p_gesture_status->gesture_id == FTS_SPONGE_EVENT_GESTURE_ID_FOD_LONG ||
+							p_gesture_status->gesture_id == FTS_SPONGE_EVENT_GESTURE_ID_FOD_NORMAL) {
+						info->scrub_id = SPONGE_EVENT_TYPE_FOD;
+						input_info(true, &info->client->dev, "%s: FOD %sPRESS\n",
+								__func__, p_gesture_status->gesture_id ? "" : "LONG");
+					} else if (p_gesture_status->gesture_id == FTS_SPONGE_EVENT_GESTURE_ID_FOD_RELEASE) {
+						info->scrub_id = SPONGE_EVENT_TYPE_FOD_RELEASE;
+						input_info(true, &info->client->dev, "%s: FOD RELEASE\n", __func__);
+					} else if (p_gesture_status->gesture_id == FTS_SPONGE_EVENT_GESTURE_ID_FOD_OUT) {
+						info->scrub_id = SPONGE_EVENT_TYPE_FOD_OUT;
+						input_info(true, &info->client->dev, "%s: FOD OUT\n", __func__);
+					} else {
+						input_info(true, &info->client->dev, "%s: invalid id %d\n",
+								__func__, p_gesture_status->gesture_id);
+						break;
+					}
+					input_report_key(info->input_dev, KEY_BLACK_UI_GESTURE, 1);
+					input_sync(info->input_dev);
+					input_report_key(info->input_dev, KEY_BLACK_UI_GESTURE, 0);
+					break;
 				}
 			}
 			break;
@@ -2124,6 +2261,7 @@ static int fts_parse_dt(struct i2c_client *client)
 	struct fts_i2c_platform_data *pdata = dev->platform_data;
 	struct device_node *np = dev->of_node;
 	u32 coords[2];
+	u32 px_zone[3] = { 0 };
 	u32 ic_match_value;
 	int retval = 0;
 	int lcdtype = 0;
@@ -2198,6 +2336,17 @@ static int fts_parse_dt(struct i2c_client *client)
 	pdata->max_x = coords[0];
 	pdata->max_y = coords[1];
 
+	if (of_property_read_u32_array(np, "stm,display_resolution", coords, 2)) {
+		input_err(true, dev,
+				"%s: display_resolution is not set. set to same as max_coords\n",
+				__func__);
+		pdata->display_x = pdata->max_x;
+		pdata->display_y = pdata->max_y;
+	} else {
+		pdata->display_x = coords[0];
+		pdata->display_y = coords[1];
+	}
+
 	if (of_property_read_string(np, "stm,regulator_dvdd", &pdata->regulator_dvdd)) {
 		input_err(true, dev, "%s: Failed to get regulator_dvdd name property\n", __func__);
 		return -EINVAL;
@@ -2231,8 +2380,11 @@ static int fts_parse_dt(struct i2c_client *client)
 	of_property_read_u32(np, "stm,bringup", &pdata->bringup);
 
 	pdata->enable_settings_aot = of_property_read_bool(np, "stm,enable_settings_aot");
+	pdata->sync_reportrate_120 = of_property_read_bool(np, "sync-reportrate-120");
 
 	pdata->enable_vbus_noti = of_property_read_bool(np, "stm,enable_vbus_noti");
+
+	pdata->support_fod = of_property_read_bool(np, "stm,support_fod");
 
 	pdata->support_hover = false;
 	pdata->support_glove = false;
@@ -2299,13 +2451,30 @@ static int fts_parse_dt(struct i2c_client *client)
 
 	pdata->panel_revision = ((lcdtype >> 8) & 0xFF) >> 4;
 
+	if (of_property_read_u32_array(np, "stm,area-size", px_zone, 3)) {
+		input_info(true, &client->dev, "Failed to get zone's size\n");
+		pdata->area_indicator = 48;
+		pdata->area_navigation = 96;
+		pdata->area_edge = 60;
+	} else {
+		pdata->area_indicator = px_zone[0];
+		pdata->area_navigation = px_zone[1];
+		pdata->area_edge = px_zone[2];
+	}
+	input_info(true, dev, "%s: zone's size - indicator:%d, navigation:%d, edge:%d\n",
+			__func__, pdata->area_indicator, pdata->area_navigation, pdata->area_edge);
+
 	input_err(true, dev,
-			"%s: irq :%d, irq_type: 0x%04x, max[x,y]: [%d,%d], project/model_name: %s/%s, "
-			"panel_revision: %d, gesture: %d, device_num: %d, dex: %d, aot: %d%s, vbus: %d\n",
+			"%s: irq :%d, irq_type: 0x%04x, max[x,y]: [%d,%d], display:%d,%d,"
+			" project/model_name: %s/%s, panel_revision: %d, gesture: %d, "
+			"device_num: %d, dex: %d, RR120Hz: %d, aot: %d%s, vbus: %d, fod:%d\n",
 			__func__, pdata->irq_gpio, pdata->irq_type, pdata->max_x, pdata->max_y,
+			pdata->display_x, pdata->display_y,
 			pdata->project_name, pdata->model_name, pdata->panel_revision,
-			pdata->support_sidegesture, pdata->device_num, pdata->support_dex, pdata->enable_settings_aot,
-			pdata->chip_on_board ? ", COB type" : "", pdata->enable_vbus_noti);
+			pdata->support_sidegesture, pdata->device_num, pdata->support_dex,
+			pdata->sync_reportrate_120, pdata->enable_settings_aot,
+			pdata->chip_on_board ? ", COB type" : "", pdata->enable_vbus_noti,
+			pdata->support_fod);
 
 	return retval;
 }
@@ -2410,10 +2579,9 @@ static int fts_setup_drv_data(struct i2c_client *client)
 	info->fts_get_version_info = fts_get_version_info;
 	info->fts_get_sysinfo_data = fts_get_sysinfo_data;
 	info->fts_wait_for_ready = fts_wait_for_ready;
-#ifdef FTS_SUPPORT_SPONGELIB
 	info->fts_read_from_sponge = fts_read_from_sponge;
 	info->fts_write_to_sponge = fts_write_to_sponge;
-#endif
+
 	info->tdata = tdata;
 	if (!info->tdata) {
 		input_err(true, &client->dev, "%s: No tclm data found\n", __func__);
@@ -2472,7 +2640,7 @@ static void fts_set_input_prop(struct fts_ts_info *info, struct input_dev *dev, 
 	set_bit(BTN_TOUCH, dev->keybit);
 	set_bit(BTN_TOOL_FINGER, dev->keybit);
 	set_bit(KEY_BLACK_UI_GESTURE, dev->keybit);
-	set_bit(KEY_HOMEPAGE, dev->keybit);
+	set_bit(KEY_WAKEUP, dev->keybit);
 
 #ifdef FTS_SUPPORT_TOUCH_KEY
 	if (info->board->support_mskey) {
@@ -2578,6 +2746,7 @@ static int fts_probe(struct i2c_client *client, const struct i2c_device_id *idp)
 	mutex_init(&info->i2c_mutex);
 	mutex_init(&info->irq_mutex);
 	mutex_init(&info->eventlock);
+	mutex_init(&info->sponge_mutex);
 
 	retval = fts_init(info);
 	if (retval) {
@@ -2714,9 +2883,7 @@ static int fts_probe(struct i2c_client *client, const struct i2c_device_id *idp)
 
 	device_init_wakeup(&client->dev, true);
 
-#ifdef FTS_SUPPORT_SPONGELIB
 	fts_check_custom_library(info);
-#endif
 
 	schedule_delayed_work(&info->work_read_info, msecs_to_jiffies(100));
 
@@ -2770,6 +2937,7 @@ err_register_input:
 	kfree(info->pFrame);
 #endif
 err_fts_init:
+	mutex_destroy(&info->sponge_mutex);
 	mutex_destroy(&info->device_mutex);
 	mutex_destroy(&info->i2c_mutex);
 	if (info->board->support_dex) {
@@ -2810,6 +2978,7 @@ static int fts_remove(struct i2c_client *client)
 	cancel_delayed_work_sync(&info->work_print_info);
 	cancel_delayed_work_sync(&info->work_read_info);
 	cancel_delayed_work_sync(&info->reset_work);
+	cancel_delayed_work_sync(&info->work_print_info);
 
 	wake_lock_destroy(&info->wakelock);
 
@@ -2963,43 +3132,6 @@ static void fts_input_close(struct input_dev *dev)
 }
 #endif
 
-#if 0 //def CONFIG_SEC_FACTORY
-static void fts_reinit_fac(struct fts_ts_info *info)
-{
-	u8 regAdd[3] = {0};
-
-	info->touch_count = 0;
-
-	fts_command(info, FTS_CMD_CLEAR_ALL_EVENT, true);
-
-	info->scan_mode = FTS_SCAN_MODE_DEFAULT;
-
-#ifdef FTS_SUPPORT_TOUCH_KEY
-	if (info->board->support_mskey)
-		info->scan_mode |= FTS_SCAN_MODE_KEY_SCAN;
-#endif
-
-	fts_set_scanmode(info, info->scan_mode);
-
-	if (info->flip_enable)
-		fts_set_cover_type(info, true);
-
-#ifdef CONFIG_GLOVE_TOUCH
-	/* enable glove touch when flip cover is closed */
-	if (info->glove_enabled) {
-		info->touch_functions = info->touch_functions | FTS_TOUCHTYPE_BIT_GLOVE;
-		regAdd[0] = FTS_CMD_SET_GET_TOUCHTYPE;
-		regAdd[1] = (u8)(info->touch_functions & 0xFF);
-		regAdd[2] = (u8)(info->touch_functions >> 8);
-		fts_write_reg(info, &regAdd[0], 3);
-	}
-#endif
-	fts_command(info, FTS_CMD_FORCE_CALIBRATION, true);
-
-	input_info(true, &info->client->dev, "%s\n", __func__);
-}
-#endif
-
 void fts_reinit(struct fts_ts_info *info, bool delay)
 {
 	u8 regAdd[3] = {0};
@@ -3032,11 +3164,6 @@ void fts_reinit(struct fts_ts_info *info, bool delay)
 		return;
 	}
 
-#if defined(FTS_SUPPORT_SPONGELIB) && defined(CONFIG_SEC_FACTORY)
-	if (info->use_sponge)
-		fts_disable_sponge(info);
-#endif
-
 	fts_command(info, FTS_CMD_CLEAR_ALL_EVENT, true);
 
 	info->touch_functions = FTS_TOUCHTYPE_DEFAULT_ENABLE;
@@ -3060,6 +3187,8 @@ void fts_reinit(struct fts_ts_info *info, bool delay)
 	/* need to add new command (dex mode ~ touchable area) */
 	fts_set_external_noise_mode(info, EXT_NOISE_MODE_MAX);
 
+	fts_set_fod_rect(info);
+
 	if (info->brush_mode) {
 		u8 regAdd[3] = {0xC1, 0x02, info->brush_mode};
 
@@ -3082,7 +3211,11 @@ void fts_reinit(struct fts_ts_info *info, bool delay)
 	info->touch_count = 0;
 
 	fts_delay(50);
-	fts_set_scanmode(info, info->scan_mode);
+
+	if (!info->flip_enable)
+		fts_set_scanmode(info, info->scan_mode);
+	else	
+		fts_set_scanmode(info, FTS_SCAN_MODE_SCAN_OFF);
 }
 
 void fts_release_all_finger(struct fts_ts_info *info)
@@ -3114,8 +3247,6 @@ void fts_release_all_finger(struct fts_ts_info *info)
 
 	input_report_key(info->input_dev, BTN_TOUCH, 0);
 	input_report_key(info->input_dev, BTN_TOOL_FINGER, 0);
-
-	input_report_key(info->input_dev, KEY_HOMEPAGE, 0);
 
 	if (info->board->support_sidegesture) {
 		input_report_key(info->input_dev, KEY_SIDE_GESTURE, 0);
@@ -3230,25 +3361,16 @@ static void fts_reset_work(struct work_struct *work)
 		input_err(true, &info->client->dev, "%s: Failed to start device\n", __func__);
 
 	if (info->input_dev_touch->disabled) {
-		u8 data[8] = { 0 };
 		input_err(true, &info->client->dev, "%s: call input_close\n", __func__);
 
 		fts_stop_device(info, info->lowpower_flag);
 
-		if ((info->lowpower_flag & FTS_MODE_DOUBLETAP_WAKEUP) && info->use_sponge &&
-				memcmp(data, info->rect_data, sizeof(info->rect_data)) != 0) {
-			int i;
-
-			for (i = 0; i < 4; i++) {
-				data[i * 2] = info->rect_data[i] & 0xFF;
-				data[i * 2 + 1] = (info->rect_data[i] >> 8) & 0xFF;
-			}
-#ifdef FTS_SUPPORT_SPONGELIB
-			info->fts_write_to_sponge(info, FTS_CMD_SPONGE_OFFSET_AOD_RECT,
-					data, sizeof(data));
-#endif
-		}
+		if (info->lowpower_flag & FTS_MODE_AOD)
+			fts_set_aod_rect(info);
 	}
+	fts_set_press_property(info);
+	fts_set_fod_finger_merge(info);
+
 	info->reset_is_on_going = false;
 	wake_unlock(&info->wakelock);
 }
@@ -3292,6 +3414,20 @@ static void fts_read_info_work(struct work_struct *work)
 	input_info(true, &info->client->dev, "%s done\n", __func__);
 }
 
+void fts_set_utc_sponge(struct fts_ts_info *info)
+{
+	struct timeval current_time;
+	u8 data[4];
+
+	do_gettimeofday(&current_time);
+	data[0] = (u8)(current_time.tv_sec >> 0 & 0xFF);
+	data[1] = (u8)(current_time.tv_sec >> 8 & 0xFF);
+	data[2] = (u8)(current_time.tv_sec >> 16 & 0xFF);
+	data[3] = (u8)(current_time.tv_sec >> 24 & 0xFF);
+
+	fts_write_to_sponge(info, FTS_CMD_SPONGE_OFFSET_UTC, data, sizeof(data));
+}
+
 static int fts_stop_device(struct fts_ts_info *info, bool lpmode)
 {
 	input_info(true, &info->client->dev, "%s\n", __func__);
@@ -3310,8 +3446,12 @@ static int fts_stop_device(struct fts_ts_info *info, bool lpmode)
 		goto out;
 	}
 
+	info->touch_noise_status = 0;
+	info->touch_noise_reason = 0;
+	info->wet_mode = 0;
+
 	if (lpmode) {
-		input_info(true, &info->client->dev, "%s: lowpower flag:%d\n", __func__, info->lowpower_flag);
+		input_info(true, &info->client->dev, "%s: lowpower flag:0x%02X\n", __func__, info->lowpower_flag);
 
 		if (device_may_wakeup(&info->client->dev))
 			enable_irq_wake(info->irq);
@@ -3322,28 +3462,22 @@ static int fts_stop_device(struct fts_ts_info *info, bool lpmode)
 #endif
 
 		fts_set_opmode(info, FTS_OPMODE_LOWPOWER);
+		if (info->flip_enable)
+			fts_set_scanmode(info, FTS_SCAN_MODE_SCAN_OFF);
 
 		info->fts_power_state = FTS_POWER_STATE_LOWPOWER;
 
-#ifdef FTS_SUPPORT_SPONGELIB
+		fts_set_utc_sponge(info);
+
 		info->fts_write_to_sponge(info, FTS_CMD_SPONGE_OFFSET_MODE,
 				&info->lowpower_flag, sizeof(info->lowpower_flag));
-#endif
 	} else {
-		fts_ic_interrupt_set(info, INT_DISABLE);
-		fts_command(info, FTS_CMD_CLEAR_ALL_EVENT, true);
 		fts_interrupt_set(info, INT_DISABLE);
 		fts_release_all_finger(info);
 
 #ifdef FTS_SUPPORT_TOUCH_KEY
 		fts_release_all_key(info);
 #endif
-
-		info->hover_enabled = false;
-		info->hover_ready = false;
-		info->touch_noise_status = 0;
-		info->touch_noise_reason = 0;
-		info->wet_mode = 0;
 		info->fts_power_state = FTS_POWER_STATE_POWERDOWN;
 
 		if (info->board->power)
@@ -3398,13 +3532,8 @@ static int fts_start_device(struct fts_ts_info *info)
 	}
 	info->fts_power_state = FTS_POWER_STATE_ACTIVE;
 
-#ifdef FTS_SUPPORT_SPONGELIB
-#ifndef CONFIG_SEC_FACTORY
-	if (info->lowpower_flag)
-#endif
-		info->fts_write_to_sponge(info, FTS_CMD_SPONGE_OFFSET_MODE,
-				&info->lowpower_flag, sizeof(info->lowpower_flag));
-#endif
+	info->fts_write_to_sponge(info, FTS_CMD_SPONGE_OFFSET_MODE,
+			&info->lowpower_flag, sizeof(info->lowpower_flag));
 
 out:
 	mutex_unlock(&info->device_mutex);

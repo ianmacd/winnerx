@@ -48,7 +48,7 @@
 #include <linux/of_gpio.h>
 #endif
 
-#define HEADER_VERSION		"15"
+#define HEADER_VERSION		"17"
 
 #define PWR_ON		1
 #define PWR_OFF		0
@@ -731,7 +731,11 @@ enum op_mode {
 	MODE_SDK_RED = 11,
 	MODE_SDK_GREEN = 12,
 	MODE_SDK_BLUE = 13,
-	MODE_UNKNOWN = 14,
+	MODE_SVC_IR = 14,
+	MODE_SVC_RED = 15,
+	MODE_SVC_GREEN = 16,
+	MODE_SVC_BLUE = 17,
+	MODE_UNKNOWN = 18,
 };
 
 struct mode_count {
@@ -762,11 +766,12 @@ struct sfh7832_device_data {
 	char *i2c_1p8;
 	enum op_mode enabled_mode;
 	u8 mode_sdk_enabled;
+	u8 mode_svc_enabled;
 	u8 regulator_state;
 	s32 pin_hrm_int;
 	s32 pin_hrm_en;
 	s32 hrm_irq;
-	u8 irq_state;
+	atomic_t irq_state;
 	u32 led_current;
 	u32 xtalk_code;
 	s32 hrm_threshold;
@@ -840,7 +845,6 @@ struct sfh7832_device_data {
 	u8 ir_adc;
 	u8 red_adc;
 	u8 part_type;
-
 	int max_current;
 
 	/* new trimming parameters from OTPs */

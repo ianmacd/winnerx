@@ -4,7 +4,7 @@ How to build Module for Platform
 
 [Step to build]
 1. Get android open source.
-    : version info - Android 9.0
+    : version info - Android 10.0
     ( Download site : http://source.android.com )
 
 2. Copy module that you want to build - to original android open source
@@ -18,6 +18,7 @@ How to build Module for Platform
 	case 3) libjpega : should add 'libjpega.camera.samsung' to PRODUCT_PACKAGES
 	case 4) keyutils : should add 'libknox_keyutils' to PRODUCT_PACKAGES
 	
+
 ex.) [build\target\product\core.mk] - add all module name for case 1 ~ 5 at once
     
 # e2fsprog
@@ -44,21 +45,19 @@ PRODUCT_PACKAGES += \
    ./build_64bit.sh
 
 5. Note : 
-   To download the source code of S/W listed below, please visit http://opensource.samsung.com and find ¡°Mobile -> Mobile Application¡± menu, 
+   To download the source code of S/W listed below, please visit http://opensource.samsung.com and find "Mobile -> Mobile Application" menu, 
    and then, you will be able to download what you want. 
    You might save time in finding the right one by making use of the search keyword below. 
-
-   - SmartSwitch.apk : "Smart Switch"   
-   - BixbyVisionFramework3.apk : "BixbyVisionFramework"
-   - SBrowser_9.2_Removable.apk : "SBrowser" (version : SBrowser v9)   
-   - SamsungConnect.apk : "SamsungConnect"
-   - KidsHome_Installer.apk : "KidsHome"      
-   - Notes_Removable.apk : "Samsung Notes"
-   - AREmoji.apk : "AREmoji"
-   - SamsungCamera.apk : "Camera8"
-   - SamsungMessages_10.0.apk : "Messaging"      
-   - Fmm.apk : "FMM"
-   - SecEmail_P.apk : "Email"
-   - VoiceNote_5.0.apk : "Voice Recorder"
-   - MdecService : "MdecService"
-   - LightweightWebEngine.apk : "LightweightWebEngine"
+	- Notes33_Removable.apk : "Samsung Notes"
+	- SmartSwitch.apk : "Smart Switch"
+	- MdecService.apk : "MdecService"
+	- AREmoji.apk : "AREmoji"
+	- VoiceNote_5.0.apk : "Voice Recorder"
+	- SecEmail_P.apk : "Email"
+	- SamsungCamera.apk : "Camera"
+	- Fmm.apk : "FMM"
+	- KidsHome.apk : "KidsHome"
+	- BixbyVisionFramework3.apk : "BixbyVisionFramework"
+	- SamsungMessages_11.apk : "Messaging"
+	- SBrowser_11.0_Removable.apk : "SBrowser"
+	- SamsungConnect.apk : "SamsungConnect"

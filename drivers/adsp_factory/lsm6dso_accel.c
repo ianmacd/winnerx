@@ -16,6 +16,9 @@
 #include <linux/module.h>
 #include "adsp.h"
 #ifdef CONFIG_SLPI_MOTOR
+#ifdef CONFIG_SUPPORT_MOTOR_NOTIFIER
+#include <linux/vib_notifier.h>
+#endif
 #include <linux/adsp/slpi_motor.h>
 #endif
 #define VENDOR "STM"
@@ -25,20 +28,26 @@
 #define ACCEL_RAW_DATA_CNT 3
 #define MAX_ACCEL_1G 4096
 
+#define MAX_MOTOR_STOP_TIMEOUT (8 * NSEC_PER_SEC)
 /* Haptic Pattern A vibrate during 7ms.
  * touch, touchkey, operation feedback use this.
  * Do not call motor_workfunc when duration is 7ms.
  */
-#define DURATION_SKIP 10
-#define MOTOR_OFF 0
+#define DURATION_SKIP	10
+#define MOTOR_OFF	0
+#define MOTOR_ON	1
 
 #define ACCEL_FACTORY_CAL_PATH "/efs/FactoryApp/accel_factory_cal"
 
 #ifdef CONFIG_SLPI_MOTOR
 struct accel_motor_data {
+#ifdef CONFIG_SUPPORT_MOTOR_NOTIFIER
+	struct notifier_block motor_nb;
+	struct hrtimer motor_stop_timer;
+#endif
 	struct workqueue_struct *slpi_motor_wq;
 	struct work_struct work_slpi_motor;
-	int motor_state;
+	atomic_t motor_state;
 };
 
 struct accel_motor_data *pdata_motor;
@@ -247,7 +256,7 @@ RETRY_ACCEL_SELFTEST:
 
 	while (!(data->ready_flag[MSG_TYPE_ST_SHOW_DATA] & 1 << MSG_ACCEL) &&
 		cnt++ < TIMEOUT_CNT)
-		msleep(20);
+		msleep(25);
 
 	data->ready_flag[MSG_TYPE_ST_SHOW_DATA] &= ~(1 << MSG_ACCEL);
 
@@ -382,45 +391,89 @@ static ssize_t accel_lowpassfilter_store(struct device *dev,
 		return size;
 	}
 
-	pdata->lpf_onoff = (bool)data->msg_buf[MSG_ACCEL][1];
+	pdata->lpf_onoff = (bool)data->msg_buf[MSG_ACCEL][0];
 
-	pr_info("[FACTORY] %s: lpf_on_off done (%d)(0x%x)\n", __func__,
-		data->msg_buf[MSG_ACCEL][0], data->msg_buf[MSG_ACCEL][1]);
+	pr_info("[FACTORY] %s: %d, 0x0A:%02x 0x0D:%02x 0x10:%02x\n", __func__,
+		data->msg_buf[MSG_ACCEL][0], data->msg_buf[MSG_ACCEL][1],
+		data->msg_buf[MSG_ACCEL][2], data->msg_buf[MSG_ACCEL][3]);
 
 	return size;
 }
 
 #ifdef CONFIG_SLPI_MOTOR
+#ifdef CONFIG_SUPPORT_MOTOR_NOTIFIER
+int ssc_motor_notify(struct notifier_block *nb,
+	unsigned long enable, void *v)
+{
+	if(enable == 1) {
+		if (atomic_read(&pdata_motor->motor_state) == MOTOR_OFF) {
+			atomic_set(&pdata_motor->motor_state, MOTOR_ON);
+			queue_work(pdata_motor->slpi_motor_wq,
+				&pdata_motor->work_slpi_motor);                       
+			pr_info("[FACTORY] %s: Send Motor enable\n", __func__);
+		} else {
+			hrtimer_cancel(&pdata_motor->motor_stop_timer);
+			hrtimer_start(&pdata_motor->motor_stop_timer,
+				ns_to_ktime(MAX_MOTOR_STOP_TIMEOUT),
+				HRTIMER_MODE_REL);
+			pr_info("[FACTORY] %s: Reset Motor timer\n", __func__);
+		}
+	} else {
+		pr_info("[FACTORY] %s: Not support 0 value\n", __func__);
+	}
+
+	return 0;
+}
+
+static enum hrtimer_restart motor_stop_timer_func(struct hrtimer *timer)
+{
+	pr_info("[FACTORY] %s\n", __func__);
+	atomic_set(&pdata_motor->motor_state, MOTOR_OFF);
+	queue_work(pdata_motor->slpi_motor_wq, &pdata_motor->work_slpi_motor);
+
+	return HRTIMER_NORESTART;
+}
+#else
 int setSensorCallback(int state, int duration)
 {
 	pr_info("[FACTORY] %s IN: state = %d, duration = %d\n",
-		__func__, pdata_motor->motor_state, duration);
+		__func__, (int)atomic_read(&pdata_motor->motor_state), duration);
 
 	if ((duration > MOTOR_OFF && duration <= DURATION_SKIP) || !pdata->lpf_onoff)
 		return 0;
 
-	if (pdata_motor->motor_state != state) {
+	if (atomic_read(&pdata_motor->motor_state) != state) {
 		pr_info("[FACTORY] %s: state = %d/%d, duration = %d\n",
-			__func__, pdata_motor->motor_state, state, duration);
-		pdata_motor->motor_state = state;
+			__func__, (int)atomic_read(&pdata_motor->motor_state),
+			state, duration);
+		atomic_set(&pdata_motor->motor_state, state);
 		queue_work(pdata_motor->slpi_motor_wq,
 			&pdata_motor->work_slpi_motor);
 	}
 
 	return 0;
 }
-
+#endif
 void slpi_motor_work_func(struct work_struct *work)
 {
 	int32_t msg_buf = 0;
 
-	if (pdata_motor->motor_state == 1)
+	if (atomic_read(&pdata_motor->motor_state) == MOTOR_ON) {
+#ifdef CONFIG_SUPPORT_MOTOR_NOTIFIER
+		hrtimer_start(&pdata_motor->motor_stop_timer,
+			ns_to_ktime(MAX_MOTOR_STOP_TIMEOUT),
+			HRTIMER_MODE_REL);
+#endif
 		msg_buf = 1;
-	else if (pdata_motor->motor_state == 0)
+	} else if (atomic_read(&pdata_motor->motor_state) == MOTOR_OFF) {
+#ifdef CONFIG_SUPPORT_MOTOR_NOTIFIER
+		hrtimer_cancel(&pdata_motor->motor_stop_timer);
+#endif
 		msg_buf = 0;
-	else
+	} else {
 		pr_info("[FACTORY] %s: invalid state %d\n",
-			__func__, pdata_motor->motor_state);
+			__func__, (int)atomic_read(&pdata_motor->motor_state));
+	}
 
 	pr_info("[FACTORY] %s: msg_buf = %d\n", __func__, msg_buf);
 
@@ -436,7 +489,6 @@ static ssize_t accel_dhr_sensor_info_show(struct device *dev,
 	uint8_t cnt = 0;
 	char ctrl1_xl = 0;
 	uint8_t fullscale = 0;
-	int32_t *info = data->msg_buf[MSG_ACCEL];
 
 	adsp_unicast(NULL, 0, MSG_ACCEL, 0, MSG_TYPE_GET_DHR_INFO);
 	while (!(data->ready_flag[MSG_TYPE_GET_DHR_INFO] & 1 << MSG_ACCEL) &&
@@ -445,30 +497,30 @@ static ssize_t accel_dhr_sensor_info_show(struct device *dev,
 
 	data->ready_flag[MSG_TYPE_GET_DHR_INFO] &= ~(1 << MSG_ACCEL);
 
-	if (cnt >= TIMEOUT_CNT)
+	if (cnt >= TIMEOUT_CNT) {
 		pr_err("[FACTORY] %s: Timeout!!!\n", __func__);
+	} else {
+		ctrl1_xl = data->msg_buf[MSG_ACCEL][16];
 
-	ctrl1_xl = *info;
+		ctrl1_xl &= 0xC;
 
-	ctrl1_xl &= 0xC;
-
-	switch (ctrl1_xl) {
-	case 0xC:
-		fullscale = 8;
-		break;
-	case 0x8:
-		fullscale = 4;
-		break;
-	case 0x4:
-		fullscale = 16;
-		break;
-	case 0:
-		fullscale = 2;
-		break;
-	default:
-		break;
+		switch (ctrl1_xl) {
+		case 0xC:
+			fullscale = 8;
+			break;
+		case 0x8:
+			fullscale = 4;
+			break;
+		case 0x4:
+			fullscale = 16;
+			break;
+		case 0:
+			fullscale = 2;
+			break;
+		default:
+			break;
+		}
 	}
-
 	pr_info("[FACTORY] %s: f/s %u\n", __func__, fullscale);
 
 	return snprintf(buf, PAGE_SIZE, "\"FULL_SCALE\":\"%uG\"\n", fullscale);
@@ -554,6 +606,14 @@ static int __init lsm6dso_accel_factory_init(void)
 	if (pdata_motor == NULL)
 		return -ENOMEM;
 
+#ifdef CONFIG_SUPPORT_MOTOR_NOTIFIER
+	pdata_motor->motor_nb.notifier_call = ssc_motor_notify,
+	pdata_motor->motor_nb.priority = 1,
+	vib_notifier_register(&pdata_motor->motor_nb);
+
+	hrtimer_init(&pdata_motor->motor_stop_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
+	pdata_motor->motor_stop_timer.function = motor_stop_timer_func;
+#endif
 	pdata_motor->slpi_motor_wq =
 		create_singlethread_workqueue("slpi_motor_wq");
 
@@ -565,7 +625,7 @@ static int __init lsm6dso_accel_factory_init(void)
 
 	INIT_WORK(&pdata_motor->work_slpi_motor, slpi_motor_work_func);
 
-	pdata_motor->motor_state = 0;
+	atomic_set(&pdata_motor->motor_state, MOTOR_OFF);
 #endif
 	pdata = kzalloc(sizeof(*pdata), GFP_KERNEL);
 	pdata->accel_wq = create_singlethread_workqueue("accel_wq");
@@ -581,10 +641,15 @@ static void __exit lsm6dso_accel_factory_exit(void)
 {
 	adsp_factory_unregister(MSG_ACCEL);
 #ifdef CONFIG_SLPI_MOTOR
+#ifdef CONFIG_SUPPORT_MOTOR_NOTIFIER
+	if (atomic_read(&pdata_motor->motor_state) == MOTOR_ON)
+		hrtimer_cancel(&pdata_motor->motor_stop_timer);
+#endif
 	if (pdata_motor != NULL && pdata_motor->slpi_motor_wq != NULL) {
 		cancel_work_sync(&pdata_motor->work_slpi_motor);
 		destroy_workqueue(pdata_motor->slpi_motor_wq);
 		pdata_motor->slpi_motor_wq = NULL;
+		kfree(pdata_motor);
 	}
 #endif
 	pr_info("[FACTORY] %s\n", __func__);

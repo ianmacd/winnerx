@@ -26,7 +26,11 @@
 #if defined(CONFIG_VBUS_NOTIFIER)
 #include <linux/vbus_notifier.h>
 #endif
+#if defined(CONFIG_BATTERY_SAMSUNG_LEGO_STYLE)
+#include "../../battery/common/include/sec_charging_common.h"
+#else
 #include "../../battery_v2/include/sec_charging_common.h"
+#endif
 #if defined(CONFIG_USB_TYPEC_MANAGER_NOTIFIER)
 #include <linux/usb/manager/usb_typec_manager_notifier.h>
 #endif

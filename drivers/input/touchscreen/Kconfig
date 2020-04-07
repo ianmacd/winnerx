@@ -1263,9 +1263,12 @@ config TOUCHSCREEN_DUAL_FOLDABLE
 source "drivers/input/touchscreen/sec_ts/y771/Kconfig"
 source "drivers/input/touchscreen/sec_ts/y771_d/Kconfig"
 source "drivers/input/touchscreen/sec_ts/y761_sub/Kconfig"
+source "drivers/input/touchscreen/sec_ts/y771_R5/Kconfig"
 source "drivers/input/touchscreen/st/Kconfig"
-source "drivers/input/touchscreen/zinitix/Kconfig"
+source "drivers/input/touchscreen/zinitix/zt75xx/Kconfig"
+source "drivers/input/touchscreen/zinitix/ztw522/Kconfig"
 source "drivers/input/touchscreen/stm/fts9cu80f/Kconfig"
+source "drivers/input/touchscreen/stm/fts9cu80f_b/Kconfig"
 source "drivers/input/touchscreen/stm/fts1ba90a/Kconfig"
 
 config TOUCHSCREEN_HIMAX_CHIPSET
@@ -1290,4 +1293,15 @@ config TOUCHSCREEN_SYNAPTICS_DSX
 
 source "drivers/input/touchscreen/synaptics_dsx/Kconfig"
 
+config TOUCHSCREEN_SYNAPTICS_TCM
+	bool "Synaptics TCM Touchscreen Driver"
+	depends on I2C
+	help
+	  Say Y here if you have a Synaptics Touchscreen.
+
+	  If unsure, say N.
+
+source "drivers/input/touchscreen/synaptics_tcm/Kconfig"
+source "drivers/input/touchscreen/imagis/ist40xx/Kconfig"
+source "drivers/input/touchscreen/melfas/mss100/Kconfig"
 endif

@@ -285,6 +285,9 @@ void mdev_handle_ccic_detach(muic_data_t *pmuic)
 	pmuic->retry_afc = false;
 	pmuic->afc_retry_count = 0;
 #endif
+#if defined(CONFIG_MUIC_SUPPORT_KEYBOARDDOCK)
+	pmuic->adc_rescan_count = 0;
+#endif
 #if defined(CONFIG_MAX77854_HV)
 	pmuic->phv->attached_dev = 0;
 #endif

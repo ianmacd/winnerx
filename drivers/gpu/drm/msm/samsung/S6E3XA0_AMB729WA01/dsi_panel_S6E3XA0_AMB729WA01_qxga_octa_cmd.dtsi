@@ -964,6 +964,20 @@
 			29 01 00 00 00 00 03 F0 A5 A5
 		];
 
+		samsung,demux_stress_on_tx_cmds_revA = [
+			29 00 00 00 00 00 03 F0 5A 5A
+			29 01 00 00 00 00 03 B0 24 CB
+			29 01 00 00 00 00 04 CB 14 1B 2E
+			29 01 00 00 00 00 03 F0 A5 A5
+		];
+
+		samsung,demux_stress_off_tx_cmds_revA = [
+			29 00 00 00 00 00 03 F0 5A 5A
+			29 01 00 00 00 00 03 B0 24 CB
+			29 01 00 00 00 00 04 CB 08 27 41
+			29 01 00 00 00 00 03 F0 A5 A5
+		];
+
 		/* *************************************************************
 		 * AID command list and mappings
 		 * **************************************************************
@@ -1995,6 +2009,72 @@
 			29 01 00 00 00 00 03 F0 5A 5A	/* TEST KEY Enable */
 			29 01 00 00 00 00 03 7D 00 00
 			29 01 00 00 00 00 03 F0 A5 A5	/* TEST KEY Disable */
+		];
+
+		/*
+		*************************************************************************************************************************
+		* Self mask check debug (SELF MASK CHECK)
+		*************************************************************************************************************************
+		*/
+
+		samsung,mask_crc_pass_data = [58 6f];
+
+		samsung,self_mask_check_tx_pre1 = [
+			29 01 00 00 00 00 03 9F A5 A5	/* TEST KEY Enable */
+			29 01 00 00 00 00 03 F0 5A 5A	/* TEST KEY Enable */
+			29 01 00 00 00 00 03 FC 5A 5A	/* TEST KEY Enable */
+
+			/* CRC ON */
+			29 01 00 00 00 00 03 B0 27 D8
+			29 01 00 00 00 00 02 D8 10
+			29 01 00 00 00 00 03 B0 25 FE
+			29 01 00 00 00 00 02 FE 08
+
+			/* DBIST ON */
+			29 01 00 00 00 00 0A BF 01 07 00 00 00 10 00 00 00
+			
+			29 01 00 00 14 00 02 7A 00		/* self mask off */
+
+			/* delay 1frame */
+
+			/* side memory write */			
+			29 01 00 00 00 00 02 75 10
+
+			/* write self mask data (4C, 5C) */
+		
+			29 01 00 00 00 00 03 FC A5 A5	/* TEST KEY Disable */
+			29 01 00 00 00 00 03 F0 A5 A5	/* TEST KEY Disable */
+			29 01 00 00 00 00 03 9F 5A 5A	/* TEST KEY Enable */
+		];
+
+		samsung,self_mask_check_tx_pre2 = [
+			29 01 00 00 00 00 03 9F A5 A5	/* TEST KEY Enable */
+			29 01 00 00 00 00 03 F0 5A 5A	/* TEST KEY Enable */
+			29 01 00 00 00 00 03 FC 5A 5A	/* TEST KEY Enable */
+
+			29 01 00 00 00 00 02 75 01
+			29 01 00 00 22 00 10 7A			/* self mask on */
+								21 00 00 02 BB 05 38 05
+								FF 09 10 FF FF FF FF
+			/* delay 2frame */
+			29 01 00 00 00 00 03 FC A5 A5	/* TEST KEY Disable */
+			29 01 00 00 00 00 03 F0 A5 A5	/* TEST KEY Disable */
+			29 01 00 00 00 00 03 9F 5A 5A	/* TEST KEY Enable */
+		];
+		
+		samsung,self_mask_check_rx_cmds = [ 06 01 00 00 00 00 01 14 02 00];	/* read FB 1st ~ 2nd */
+
+		samsung,self_mask_check_tx_post = [
+			29 01 00 00 00 00 03 9F A5 A5	/* TEST KEY Enable */
+			29 01 00 00 00 00 03 F0 5A 5A	/* TEST KEY Enable */
+			29 01 00 00 00 00 03 FC 5A 5A	/* TEST KEY Enable */
+			29 01 00 00 00 00 10 7A				/* self mask & grid restore */
+								21 06 00 06 63 06 64 06 C7 09 10
+								00 00 00 00
+			29 01 00 00 00 00 0A BF 00 07 FF 00 00 10 00 00 00	/* Exit DBIST */						
+			29 01 00 00 00 00 03 FC A5 A5	/* TEST KEY Disable */
+			29 01 00 00 00 00 03 F0 A5 A5	/* TEST KEY Disable */
+			29 01 00 00 00 00 03 9F 5A 5A	/* TEST KEY Enable */
 		];
 
 		/*

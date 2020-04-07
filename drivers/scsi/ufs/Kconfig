@@ -156,3 +156,10 @@ config SCSI_UFSHCD_CMD_LOGGING
 
 	  Select this if you want above mentioned debug information captured.
 	  If unsure, say N.
+
+config SCSI_UFS_TEST_MODE
+	bool "Samsung UFS TEST feature"
+	depends on SCSI_UFSHCD && SCSI_UFSHCD_PLATFORM
+	---help---
+	  This selects support for test mode for debugging.
+	  Select this option if this feature is needed on working.

@@ -391,6 +391,7 @@ static int hall_probe(struct platform_device *pdev)
 	int error = 0;
 	int wakeup = 0;
 
+	pr_info("folder %s called", __func__);
 	ddata = kzalloc(sizeof(struct hall_drvdata), GFP_KERNEL);
 	if (!ddata) {
 		dev_err(dev, "failed to allocate state\n");
@@ -461,6 +462,7 @@ static int hall_probe(struct platform_device *pdev)
 
 	is_probe_done = 1;
 
+	pr_info("folder %s end", __func__);
 	return 0;
 fail3:
 	device_remove_file(dev, &dev_attr_flipStatus);

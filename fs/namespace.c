@@ -35,14 +35,25 @@
 #include "internal.h"
 
 #ifdef CONFIG_RKP_NS_PROT
-#define KDP_MOUNT_SYSTEM "/root" //system-as-root
+#define KDP_MOUNT_SYSTEM "/system"
 #define KDP_MOUNT_SYSTEM_LEN strlen(KDP_MOUNT_SYSTEM)
+
+#define KDP_MOUNT_SYSTEM2 "/root" //system-as-root
+#define KDP_MOUNT_SYSTEM2_LEN strlen(KDP_MOUNT_SYSTEM2)
 
 #define KDP_MOUNT_PRODUCT "/product"
 #define KDP_MOUNT_PRODUCT_LEN strlen(KDP_MOUNT_PRODUCT)
 
 #define KDP_MOUNT_VENDOR "/vendor"
 #define KDP_MOUNT_VENDOR_LEN strlen(KDP_MOUNT_VENDOR)
+
+#define KDP_MOUNT_ART "/apex/com.android.runtime"
+#define KDP_MOUNT_ART_LEN strlen(KDP_MOUNT_ART)
+
+#define KDP_MOUNT_ART2 "/com.android.runtime@1"
+#define KDP_MOUNT_ART2_LEN strlen(KDP_MOUNT_ART2)
+
+#define ART_ALLOW 2
 #endif /*CONFIG_RKP_NS_PROT */
 
 /* Maximum number of mounts in a mount namespace */
@@ -89,10 +100,11 @@ static struct hlist_head *mount_hashtable __read_mostly;
 static struct hlist_head *mountpoint_hashtable __read_mostly;
 static struct kmem_cache *mnt_cache __read_mostly;
 #ifdef CONFIG_RKP_NS_PROT
-RKP_RO_AREA struct super_block *sys_sb = NULL;
-RKP_RO_AREA struct super_block *odm_sb = NULL;
-RKP_RO_AREA struct super_block *vendor_sb = NULL;
-RKP_RO_AREA struct super_block *rootfs_sb = NULL;
+struct super_block *sys_sb __kdp_ro = NULL;
+struct super_block *odm_sb __kdp_ro = NULL;
+struct super_block *vendor_sb __kdp_ro = NULL;
+struct super_block *art_sb __kdp_ro = NULL;
+struct super_block *rootfs_sb __kdp_ro = NULL;
 static struct kmem_cache *vfsmnt_cache __read_mostly;
 /* Populate all superblocks required for NS Protection */
 
@@ -101,10 +113,11 @@ enum kdp_sb {
 	KDP_SB_ODM,
 	KDP_SB_SYS,
 	KDP_SB_VENDOR,
+	KDP_SB_ART,
 	KDP_SB_MAX
 };
 
-
+int art_count = 0;
 #endif
 
 static DECLARE_RWSEM(namespace_sem);
@@ -140,11 +153,28 @@ enum {
 };
 
 static const char *umount_exit_str[UMOUNT_STATUS_MAX] = {
-	"ADDED_TASK", "REMAIN_NS", "REMAIN_CNT", "DELAY_TASK"};
+	"ADDED_TASK", "REMAIN_NS", "REMAIN_CNT", "DELAY_TASK"
+};
+
+static const char *exception_process[] = {
+	"main", "ch_zygote", "usap32", "usap64", NULL,
+};
 
 static inline void sys_umount_trace_set_status(unsigned int status)
 {
 	sys_umount_trace_status = status;
+}
+
+static inline int is_exception(char *comm)
+{
+	unsigned int idx = 0;
+
+	do {
+		if (!strcmp(comm, exception_process[idx]))
+			return 1;
+	} while (exception_process[++idx]);
+
+	return 0;
 }
 
 static inline void sys_umount_trace_print(struct mount *mnt, int flags)
@@ -159,7 +189,7 @@ static inline void sys_umount_trace_print(struct mount *mnt, int flags)
 	/* We don`t want to see what zygote`s umount */
 	if (((sb->s_magic == SDFAT_SUPER_MAGIC) ||
 		(sb->s_magic == MSDOS_SUPER_MAGIC)) &&
-		((current_uid().val == 0) && (strcmp(current->comm, "main")))) {
+		((current_uid().val == 0) && !is_exception(current->comm))) {
 		struct block_device *bdev = sb->s_bdev;
 		dev_t bd_dev = bdev ? bdev->bd_dev : 0;
 
@@ -197,17 +227,17 @@ unsigned int cmp_ns_integrity(void)
 
 void rkp_set_mnt_root_sb(struct vfsmount *mnt,	struct dentry *mnt_root,struct super_block *mnt_sb)
 {
-	uh_call(UH_APP_RKP, 0x53, (u64)mnt, (u64)mnt_root, (u64)mnt_sb, 0);
+	uh_call(UH_APP_RKP, RKP_KDP_X53, (u64)mnt, (u64)mnt_root, (u64)mnt_sb, 0);
 }
 
 void rkp_assign_mnt_flags(struct vfsmount *mnt,int flags)
 {
-	uh_call(UH_APP_RKP, 0x54, (u64)mnt, (u64)flags, 0, 0);
+	uh_call(UH_APP_RKP, RKP_KDP_X54, (u64)mnt, (u64)flags, 0, 0);
 }
 
 void rkp_set_data(struct vfsmount *mnt,void *data)
 {
-	uh_call(UH_APP_RKP, 0x55, (u64)mnt, (u64)data, 0, 0);
+	uh_call(UH_APP_RKP, RKP_KDP_X55, (u64)mnt, (u64)data, 0, 0);
 }
 
 void rkp_set_mnt_flags(struct vfsmount *mnt,int flags)
@@ -251,7 +281,7 @@ retry:
 #ifdef CONFIG_RKP_NS_PROT
 void rkp_init_ns(struct vfsmount *vfsmnt,struct mount *mnt)
 {
-	uh_call(UH_APP_RKP, 0x52, (u64)vfsmnt, (u64)mnt, 0, 0);
+	uh_call(UH_APP_RKP, RKP_KDP_X52, (u64)vfsmnt, (u64)mnt, 0, 0);
 }
 
 static int mnt_alloc_vfsmount(struct mount *mnt)
@@ -3059,31 +3089,32 @@ unlock:
 }
 
 #ifdef CONFIG_RKP_NS_PROT
-
-static void rkp_populate_sb(const char __user *dir_name,struct vfsmount *mnt) 
+static void rkp_populate_sb(char *mount_point, struct vfsmount *mnt) 
 {
-	char *mount_point = NULL;
-
-	if (!dir_name || !mnt)
+	if (!mount_point || !mnt)
 		return;
-
-	mount_point = copy_mount_string(dir_name);
-	if (IS_ERR(mount_point)) {
-		printk(KERN_WARNING" NS Protection: empty string copy failed %s\n",mount_point);
-		return;
-	}
 
 	if (!odm_sb &&
-		!strncmp(mount_point,KDP_MOUNT_PRODUCT,KDP_MOUNT_PRODUCT_LEN)) {
-		uh_call(UH_APP_RKP, (0x56), (u64)&odm_sb, (u64)mnt, KDP_SB_ODM, 0);
+		!strncmp(mount_point, KDP_MOUNT_PRODUCT, KDP_MOUNT_PRODUCT_LEN)) {
+		uh_call(UH_APP_RKP, RKP_KDP_X56, (u64)&odm_sb, (u64)mnt, KDP_SB_ODM, 0);
 	} else if (!sys_sb &&
-		!strncmp(mount_point,KDP_MOUNT_SYSTEM,KDP_MOUNT_SYSTEM_LEN)) {
-		uh_call(UH_APP_RKP, (0x56), (u64)&sys_sb, (u64)mnt, KDP_SB_SYS, 0);
+		!strncmp(mount_point, KDP_MOUNT_SYSTEM, KDP_MOUNT_SYSTEM_LEN)) {
+		uh_call(UH_APP_RKP, RKP_KDP_X56, (u64)&sys_sb, (u64)mnt, KDP_SB_SYS, 0);
+	} else if (!sys_sb &&
+		!strncmp(mount_point, KDP_MOUNT_SYSTEM2, KDP_MOUNT_SYSTEM2_LEN)) {
+		uh_call(UH_APP_RKP, RKP_KDP_X56, (u64)&sys_sb, (u64)mnt, KDP_SB_SYS, 0);
 	} else if (!vendor_sb &&
-		!strncmp(mount_point,KDP_MOUNT_VENDOR,KDP_MOUNT_VENDOR_LEN)) {
-		uh_call(UH_APP_RKP, (0x56), (u64)&vendor_sb, (u64)mnt, KDP_SB_VENDOR, 0);
+		!strncmp(mount_point, KDP_MOUNT_VENDOR, KDP_MOUNT_VENDOR_LEN)) {
+		uh_call(UH_APP_RKP, RKP_KDP_X56, (u64)&vendor_sb, (u64)mnt, KDP_SB_VENDOR, 0);
+	} else if (!art_sb &&
+		!strncmp(mount_point, KDP_MOUNT_ART, KDP_MOUNT_ART_LEN - 1)) {
+		uh_call(UH_APP_RKP, RKP_KDP_X56, (u64)&art_sb, (u64)mnt, KDP_SB_ART, 0);
+	} else if ((art_count < ART_ALLOW) &&
+		!strncmp(mount_point, KDP_MOUNT_ART2, KDP_MOUNT_ART2_LEN - 1)) {
+		if (art_count)
+			uh_call(UH_APP_RKP, RKP_KDP_X56, (u64)&art_sb, (u64)mnt, KDP_SB_ART, 0);
+		art_count++;
 	}
-	kfree(mount_point);
 }
 #endif /*CONFIG_RKP_NS_PROT*/
 
@@ -3093,17 +3124,15 @@ static bool mount_too_revealing(struct vfsmount *mnt, int *new_mnt_flags);
  * create a new mount for userspace and request it to be added into the
  * namespace's tree
  */
-#ifdef CONFIG_RKP_NS_PROT
-static int do_new_mount(const char __user *dir_name, struct path *path, const char *fstype, int sb_flags,
-			int mnt_flags, const char *name, void *data)
-#else
 static int do_new_mount(struct path *path, const char *fstype, int sb_flags,
 			int mnt_flags, const char *name, void *data)
-#endif
 {
 	struct file_system_type *type;
 	struct vfsmount *mnt;
 	int err;
+#ifdef CONFIG_RKP_NS_PROT
+	char *buf, *dir_name;
+#endif
 
 	if (!fstype)
 		return -EINVAL;
@@ -3130,8 +3159,15 @@ static int do_new_mount(struct path *path, const char *fstype, int sb_flags,
 	if (err)
 		mntput(mnt);
 #ifdef CONFIG_RKP_NS_PROT
-	if(!sys_sb || !odm_sb || !vendor_sb) 
-		rkp_populate_sb(dir_name,mnt);
+	buf = kzalloc(PATH_MAX, GFP_KERNEL);
+	if (!buf){
+		kfree(buf);
+		return -ENOMEM;
+	}
+	dir_name = dentry_path_raw(path->dentry, buf, PATH_MAX);
+	if (!sys_sb || !odm_sb || !vendor_sb || !art_sb || (art_count < ART_ALLOW)) 
+		rkp_populate_sb(dir_name, mnt);
+	kfree(buf);
 #endif
 
 	return err;
@@ -3451,13 +3487,8 @@ long do_mount(const char *dev_name, const char __user *dir_name,
 	else if (flags & MS_MOVE)
 		retval = do_move_mount(&path, dev_name);
 	else
-#ifdef CONFIG_RKP_NS_PROT
-		retval = do_new_mount(dir_name, &path, type_page, sb_flags, mnt_flags,
-				      dev_name, data_page);
-#else
 		retval = do_new_mount(&path, type_page, sb_flags, mnt_flags,
 				      dev_name, data_page);
-#endif
 dput_out:
 	path_put(&path);
 	return retval;

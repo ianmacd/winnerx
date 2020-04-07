@@ -175,6 +175,8 @@ cpp_flags      = -Wp,-MD,$(depfile) $(NOSTDINC_FLAGS) $(LINUXINCLUDE)     \
 ld_flags       = $(LDFLAGS) $(ldflags-y)
 
 DTC_INCLUDE    := $(srctree)/scripts/dtc/include-prefixes
+DTC_INCLUDE    += $(srctree)/arch/arm64/boot/dts/qcom
+DTC_INCLUDE    += $(srctree)/arch/arm64/boot/dts/samsung
 
 dtc_cpp_flags  = -Wp,-MD,$(depfile).pre.tmp -nostdinc                    \
 		 $(addprefix -I,$(DTC_INCLUDE))                          \
@@ -308,7 +310,7 @@ $(obj)/%.dtb.S: $(obj)/%.dtb
 	$(call cmd,dt_S_dtb)
 
 ifneq ($(DTC_EXT),)
-DTC = $(DTC_EXT)
+DTC = $(DTC_EXT) -q 
 else
 DTC = $(objtree)/scripts/dtc/dtc
 endif

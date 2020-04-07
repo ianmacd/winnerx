@@ -10,21 +10,24 @@
  *  option) any later version.
  *
  */
-
+ 
 #include <linux/string.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/cpumask.h>
 #include <linux/sec_argos.h>
 #include <linux/netdevice.h>
+#include <linux/if_arp.h>
 #include <linux/pm_qos.h>
+
+#include "rmnet_data_pm_argos.h"
 
 /*
  * argos rmnet speed matching table
  *
  * pm qos threshold : 10 Mbps
  * tx aggre threshold : 100 Mbps
- * ipa napi chained rx threshold : 100 Mbps
+ * ipa napi chained rx threshold : 200 Mbps
  * big core boot threshold : 300 Mbps
  *
  *  ------------------------------- default ---------------------------
@@ -34,15 +37,16 @@
  *  10		0d	2	disable		enable	disable
  *  30		0d	2	disable		enable	disable
  *  60		0d	2	disable		enable	disable
- *  100		0d	5	enable		enable	enable
+ *  100		0d	5	disable		enable	enable
  *  200		0d	5	enable		enable	enable
  *  300		c0	0(max)	enable		enable	enable
  *
  */
 
-#define ARGOS_IPA_LABEL "IPA"
+#define MIF_ARGOS_IPC_LABEL "IPC"
 #define RMNET_DATA_MAX_VND	8
 const char *ndev_prefix = "rmnet_data";
+static struct rmnet_data_pm_config *cfg;
 
 /* rps boosting */
 #define ARGOS_RMNET_RPS_BIG_MASK "c0" /* big core 2, 3 */
@@ -70,27 +74,28 @@ MODULE_PARM_DESC(rmnet_tx_aggr_mbps, "TX aggr Threshold");
 bool rmnet_data_tx_aggr_enabled;
 
 /* ipa napi chained rx */
-#define ARGOS_RMNET_IPA_NAPI_CHAIN_MBPS 100
+#define ARGOS_RMNET_IPA_NAPI_CHAIN_MBPS 200
 static unsigned int rmnet_ipa_napi_chain_mbps = ARGOS_RMNET_IPA_NAPI_CHAIN_MBPS;
 module_param(rmnet_ipa_napi_chain_mbps, uint, 0644);
 MODULE_PARM_DESC(rmnet_ipa_napi_chain_mbps, "IPA NAPI chained rx Threshold");
 extern void ipa3_set_napi_chained_rx(bool enable);
 
-/* gro count variation */
-extern u32 config_flushcount;
-static bool gro_avoided;
+/* mhi napi chained rx */
+#define ARGOS_RMNET_MHI_NAPI_CHAIN_MBPS 200
+static unsigned int rmnet_mhi_napi_chain_mbps = ARGOS_RMNET_MHI_NAPI_CHAIN_MBPS;
 
+/* gro count variation */
+u32 config_flushcount = 2;
 #define RMNET_GRO_CNT_LVL1_MBPS 100
 #define RMNET_GRO_CNT_LVL2_MBPS 300
 #define RMNET_GRO_LVL1_CNT 2
 #define RMNET_GRO_LVL2_CNT 5
 #define RMNET_GRO_MAX_CNT 0
 
-#define get_gro_cnt(speed) (gro_avoided ? 1 :			\
-			    (speed < RMNET_GRO_CNT_LVL1_MBPS ?	\
-				RMNET_GRO_LVL1_CNT :		\
+#define get_gro_cnt(speed) (speed < RMNET_GRO_CNT_LVL1_MBPS ?	\
+			    RMNET_GRO_LVL1_CNT :		\
 			    (speed < RMNET_GRO_CNT_LVL2_MBPS ?	\
-				RMNET_GRO_LVL2_CNT : RMNET_GRO_MAX_CNT)))
+			     RMNET_GRO_LVL2_CNT : RMNET_GRO_MAX_CNT))
 
 
 #ifdef CONFIG_RPS
@@ -220,16 +225,6 @@ static void rmnet_data_pm_set_gro_cnt(unsigned long speed)
 	config_flushcount = get_gro_cnt(speed);
 }
 
-static void rmnet_data_pm_set_ipa_napi_chain(unsigned long speed)
-{
-	if (speed >= rmnet_ipa_napi_chain_mbps) {
-		pr_info("%s enabled\n", __func__);
-		ipa3_set_napi_chained_rx(true);
-	} else {
-		pr_info("%s disabled\n", __func__);
-		ipa3_set_napi_chained_rx(false);
-	}
-}
 static void rmnet_data_pm_boost_rps(unsigned long speed)
 {
 	if (speed >= rmnet_rps_boost_mbps && !rmnet_data_pm_in_boost) {
@@ -252,73 +247,158 @@ static void rmnet_data_pm_boost_rps(unsigned long speed)
 	}
 }
 
+static void rmnet_data_pm_set_mhi_napi_chain(unsigned long speed)
+{
+	if (speed >= rmnet_mhi_napi_chain_mbps) {
+		mhi_set_napi_chained_rx(cfg->real_dev, true);
+	} else {
+		mhi_set_napi_chained_rx(cfg->real_dev, false);
+	}
+}
+
+static void rmnet_data_pm_set_ipa_napi_chain(unsigned long speed)
+{
+	if (speed >= rmnet_ipa_napi_chain_mbps) {
+		pr_info("%s enabled\n", __func__);
+		ipa3_set_napi_chained_rx(true);
+	} else {
+		pr_info("%s disabled\n", __func__);
+		ipa3_set_napi_chained_rx(false);
+	}
+}
+
+struct rmnet_data_pm_ops rmnet_mhi_ops = {
+	.boost_rps = rmnet_data_pm_boost_rps,
+	.pnd_chain = rmnet_data_pm_set_mhi_napi_chain,
+	.gro_count = rmnet_data_pm_set_gro_cnt,
+	.tx_aggr = rmnet_data_pm_set_tx_aggr,
+	.pm_qos = rmnet_data_pm_set_pm_qos,
+};
+
+struct rmnet_data_pm_ops rmnet_ipa_ops = {
+	.boost_rps = rmnet_data_pm_boost_rps,
+	.pnd_chain = rmnet_data_pm_set_ipa_napi_chain,
+	.gro_count = rmnet_data_pm_set_gro_cnt,
+	.tx_aggr = rmnet_data_pm_set_tx_aggr,
+	.pm_qos = rmnet_data_pm_set_pm_qos,
+};
+
+struct rmnet_data_pm_ops rmnet_dummy_ops = {
+	.boost_rps = NULL,
+	.pnd_chain = NULL,
+	.gro_count = NULL,
+	.tx_aggr = NULL,
+	.pm_qos = NULL,
+};
+
+void rmnet_data_pm_set_ops(struct net_device *real_dev) 
+{
+	if (!strncmp(real_dev->name, "rmnet_mhi", strlen("rmnet_mhi")))
+		cfg->ops = &rmnet_mhi_ops;
+	else if (!strncmp(real_dev->name, "rmnet_ipa", strlen("rmnet_ipa")))
+		cfg->ops = &rmnet_ipa_ops;
+	else 
+		cfg->ops = &rmnet_dummy_ops;
+	pr_info("%s as %pf for %s\n", __func__, cfg->ops, real_dev->name);
+}
+
 /* argos event callback : speed notified deaclared in argos table */
 static int rmnet_data_pm_argos_cb(struct notifier_block *nb,
 				  unsigned long speed, void *data)
 {
 	pr_info("%s in speed %lu Mbps\n", __func__, speed);
 
-	rmnet_data_pm_set_pm_qos(speed);
-	rmnet_data_pm_set_tx_aggr(speed);
-
-	rmnet_data_pm_set_gro_cnt(speed);
-
-	rmnet_data_pm_set_ipa_napi_chain(speed);
-		
-	rmnet_data_pm_boost_rps(speed);
+	if (cfg->ops->pm_qos)
+		cfg->ops->pm_qos(speed);
+	if (cfg->ops->boost_rps)
+		cfg->ops->boost_rps(speed);
+	if (cfg->ops->pnd_chain)
+		cfg->ops->pnd_chain(speed);
+	if (cfg->ops->gro_count)
+		cfg->ops->gro_count(speed);
+	if (cfg->ops->tx_aggr)
+		cfg->ops->tx_aggr(speed);
 
 	return NOTIFY_DONE;
 }
 
-static struct notifier_block rmnet_data_nb = {
+static struct notifier_block rmnet_data_argos_nb __read_mostly = {
 	.notifier_call = rmnet_data_pm_argos_cb,
 };
 
-#define SOFTAP_NAME "swlan0"
-static int rmnet_data_pm_softap_exception(struct notifier_block *nb,
-					  unsigned long event, void *ptr)
+static int rmnet_data_dev_cb(struct notifier_block *nb,
+				  unsigned long event, void *data)
 {
-	struct net_device *dev = netdev_notifier_info_to_dev(ptr);
+	struct net_device *dev = netdev_notifier_info_to_dev(data);
+	struct rmnet_priv *priv;
+	int ret;
 
-	if (!strncmp(dev->name, SOFTAP_NAME, 6)) {
-		if (event == NETDEV_UP) {
-			pr_err("%s() gro avoided\n", __func__);
-			gro_avoided = true;
-			rmnet_data_pm_set_gro_cnt(0);
-		} else if (event == NETDEV_DOWN) {
-			pr_err("%s() gro allowed\n", __func__);
-			gro_avoided = false;
-			/* don't need to set here */
-			/* it will follow next argos notif */
+	if (strncmp(dev->name, ndev_prefix, strlen(ndev_prefix)) ||
+			dev->type != ARPHRD_RAWIP) 
+		return NOTIFY_DONE;
+
+	switch (event) {
+	case NETDEV_REGISTER:
+		if (cfg)
+			break;
+				
+		priv = netdev_priv(dev);
+		if (priv && priv->real_dev)
+			pr_info("real_dev of %s is %s\n", dev->name, priv->real_dev->name);
+		else
+			break;
+		
+		cfg = kzalloc(sizeof(*cfg), GFP_KERNEL);
+		if (!cfg) {
+			pr_err("Fail to allocate rmnet_data_pm config\n");
+			break;
 		}
+		
+		cfg->real_dev = priv->real_dev;
+		rmnet_data_pm_set_ops(cfg->real_dev);
+		
+		/* Set initial value */
+		rmnet_data_pm_argos_cb(NULL, 0, NULL);
+
+		ret = sec_argos_register_notifier(&rmnet_data_argos_nb, MIF_ARGOS_IPC_LABEL);
+		if (ret) 
+			pr_err("Fail to register rmnet_data pm argos notifier block\n");
+		break;
+	case NETDEV_UNREGISTER:
+		if (!cfg)
+			break;
+
+		pr_info("Reset rmnet_data_pm_argos configure\n");
+		ret = sec_argos_unregister_notifier(&rmnet_data_argos_nb, MIF_ARGOS_IPC_LABEL);
+		if (ret) 
+			pr_err("Fail to unregister rmnet_data pm argos notifier block\n");
+
+		kfree(cfg);
+		cfg = NULL;
+		break;
+	default:
+		break;
 	}
 
 	return NOTIFY_DONE;
 }
 
-static struct notifier_block rmnet_data_event_nb = {
-	.notifier_call = rmnet_data_pm_softap_exception,
+static struct notifier_block rmnet_data_dev_nb __read_mostly = {
+	.notifier_call = rmnet_data_dev_cb,
 };
 
 static int __init rmnet_data_pm_argos_init(void)
 {
-	int ret = sec_argos_register_notifier(&rmnet_data_nb, ARGOS_IPA_LABEL);
+	int ret = register_netdevice_notifier(&rmnet_data_dev_nb);
 	if (ret) {
-		pr_err("Fail to register rmnet_data pm argos notifier block\n");
-	}
-
-	ret = register_netdevice_notifier(&rmnet_data_event_nb);
-	if (ret) {
-		pr_err("Fail to register rmnetdata pm argos netdev notifier\n");
-		sec_argos_unregister_notifier(&rmnet_data_nb, ARGOS_IPA_LABEL);
+		pr_err("Fail to register rmnet_data device notifier block\n");
 	}
 	return ret;
 }
 
 static void __exit rmnet_data_pm_argos_exit(void)
 {
-	unregister_netdevice_notifier(&rmnet_data_event_nb);
-	sec_argos_unregister_notifier(&rmnet_data_nb, ARGOS_IPA_LABEL);
+	unregister_netdevice_notifier(&rmnet_data_dev_nb);
 }
 
 module_init(rmnet_data_pm_argos_init);

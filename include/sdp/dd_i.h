@@ -13,7 +13,12 @@
 
 #define DDAR_DRIVER_VERSION_0	0	// SEC_PRODUCT_FEATURE_KNOX_CONFIG_DUALDAR_VERSION: NULL
 #define DDAR_DRIVER_VERSION_1	1	// SEC_PRODUCT_FEATURE_KNOX_CONFIG_DUALDAR_VERSION: 1.0.1
-#define DDAR_DRIVER_VERISON_CURRENT (DDAR_DRIVER_VERSION_1)
+/**
+ * Use AES-CBC mode for en/decrypting data in DualDAR samsung-crypto.
+ * In case of FOTA update, maintain AES-XTS mode.
+ */
+#define DDAR_DRIVER_VERSION_2	2
+#define DDAR_DRIVER_VERISON_CURRENT (DDAR_DRIVER_VERSION_2)
 
 #define DD_KEY_DESC_PREFIX		"ddar:"
 #define DD_KEY_DESC_PREFIX_LEN 	5
@@ -22,6 +27,8 @@
 #define DD_POLICY_USER_SPACE_CRYPTO 	(0x02)
 #define DD_POLICY_KERNEL_CRYPTO 		(0x04)
 #define DD_POLICY_GID_RESTRICTION		(0x08)
+#define DD_POLICY_SKIP_DECRYPTION_INNER	(0x10)
+#define DD_POLICY_SKIP_DECRYPTION_OUTER	(0x20)
 #define DD_POLICY_SECURE_ERASE			(0x80)
 
 #define AID_VENDOR_DDAR_DE_ACCESS		(5300)
@@ -57,6 +64,15 @@ static inline int dd_policy_gid_restriction(char flags) {
 
 static inline int dd_policy_secure_erase(char flags) {
 	return (flags & DD_POLICY_SECURE_ERASE) ? 1:0;
+}
+
+static inline int dd_policy_skip_decryption_inner_and_outer(char flags) {
+	return ((flags & DD_POLICY_SKIP_DECRYPTION_INNER) ? 1:0)
+			&& ((flags & DD_POLICY_SKIP_DECRYPTION_OUTER) ? 1:0);
+}
+
+static inline int dd_policy_skip_decryption_inner(char flags) {
+	return (flags & DD_POLICY_SKIP_DECRYPTION_INNER) ? 1:0;
 }
 
 typedef enum {
@@ -148,6 +164,9 @@ struct dd_mmap_layout {
 #define DD_IOCTL_ADD_KEY				_IO('K', 0x01)
 #define DD_IOCTL_EVICT_KEY				_IO('K', 0x02)
 #define DD_IOCTL_DUMP_KEY				_IO('K', 0x03)
+#define DD_IOCTL_SKIP_DECRYPTION_BOTH	_IO('K', 0x04)
+#define DD_IOCTL_SKIP_DECRYPTION_INNER	_IO('K', 0x05)
+#define DD_IOCTL_NO_SKIP_DECRYPTION		_IO('K', 0x06)
 #define DD_IOCTL_SEND_LOG				_IO('D', 0x01)
 
 //#define EXT4_IOC_GET_DD_POLICY			_IO('P', 0x00)

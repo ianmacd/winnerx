@@ -53,6 +53,7 @@ struct uci_dev {
 	struct uci_chan ul_chan;
 	struct uci_chan dl_chan;
 	size_t mtu;
+	size_t actual_mtu; /* maximum size of incoming buffer */
 	int ref_count;
 	bool enabled;
 	void *ipc_log;
@@ -122,24 +123,26 @@ static int mhi_queue_inbound(struct uci_dev *uci_dev)
 	struct mhi_device *mhi_dev = uci_dev->mhi_dev;
 	int nr_trbs = mhi_get_no_free_descriptors(mhi_dev, DMA_FROM_DEVICE);
 	size_t mtu = uci_dev->mtu;
+	size_t actual_mtu = uci_dev->actual_mtu;
 	void *buf;
 	struct uci_buf *uci_buf;
 	int ret = -EIO, i;
 
 	for (i = 0; i < nr_trbs; i++) {
-		buf = vmalloc(mtu + sizeof(*uci_buf));
+		buf = kmalloc(mtu, GFP_KERNEL);
 		if (!buf)
 			return -ENOMEM;
 
-		uci_buf = buf + mtu;
+		uci_buf = buf + actual_mtu;
 		uci_buf->data = buf;
 
-		MSG_VERB("Allocated buf %d of %d size %ld\n", i, nr_trbs, mtu);
+		MSG_VERB("Allocated buf %d of %d size %ld\n", i, nr_trbs,
+			 actual_mtu);
 
-		ret = mhi_queue_transfer(mhi_dev, DMA_FROM_DEVICE, buf, mtu,
-					 MHI_EOT);
+		ret = mhi_queue_transfer(mhi_dev, DMA_FROM_DEVICE, buf,
+					 actual_mtu, MHI_EOT);
 		if (ret) {
-			vfree(buf);
+			kfree(buf);
 			MSG_ERR("Failed to queue buffer %d\n", i);
 			return ret;
 		}
@@ -183,10 +186,10 @@ static int mhi_uci_release(struct inode *inode, struct file *file)
 		uci_chan = &uci_dev->dl_chan;
 		list_for_each_entry_safe(itr, tmp, &uci_chan->pending, node) {
 			list_del(&itr->node);
-			vfree(itr->data);
+			kfree(itr->data);
 		}
 		if (uci_chan->cur_buf)
-			vfree(uci_chan->cur_buf->data);
+			kfree(uci_chan->cur_buf->data);
 
 		uci_chan->cur_buf = NULL;
 
@@ -287,7 +290,7 @@ static ssize_t mhi_uci_write(struct file *file,
 		}
 
 		xfer_size = min_t(size_t, count, uci_dev->mtu);
-		kbuf = vmalloc(xfer_size);
+		kbuf = kmalloc(xfer_size, GFP_KERNEL);
 		if (!kbuf) {
 			MSG_ERR("Failed to allocate memory %lu\n", xfer_size);
 			return -ENOMEM;
@@ -295,7 +298,7 @@ static ssize_t mhi_uci_write(struct file *file,
 
 		ret = copy_from_user(kbuf, buf, xfer_size);
 		if (unlikely(ret)) {
-			vfree(kbuf);
+			kfree(kbuf);
 			return ret;
 		}
 
@@ -328,7 +331,7 @@ static ssize_t mhi_uci_write(struct file *file,
 			ret = -ERESTARTSYS;
 
 		if (ret) {
-			vfree(kbuf);
+			kfree(kbuf);
 			goto sys_interrupt;
 		}
 
@@ -442,14 +445,14 @@ static ssize_t mhi_uci_read(struct file *file,
 
 		if (uci_dev->enabled)
 			ret = mhi_queue_transfer(mhi_dev, DMA_FROM_DEVICE,
-						 uci_buf->data, uci_dev->mtu,
-						 MHI_EOT);
+						 uci_buf->data,
+						 uci_dev->actual_mtu, MHI_EOT);
 		else
 			ret = -ERESTARTSYS;
 
 		if (ret) {
 			MSG_ERR("Failed to recycle element\n");
-			vfree(uci_buf->data);
+			kfree(uci_buf->data);
 			goto read_error;
 		}
 
@@ -520,7 +523,7 @@ static int mhi_uci_open(struct inode *inode, struct file *filp)
 	mhi_unprepare_from_transfer(uci_dev->mhi_dev);
 	list_for_each_entry_safe(buf_itr, tmp, &dl_chan->pending, node) {
 		list_del(&buf_itr->node);
-		vfree(buf_itr->data);
+		kfree(buf_itr->data);
 	}
 
  error_open_chan:
@@ -630,6 +633,7 @@ static int mhi_uci_probe(struct mhi_device *mhi_dev,
 	};
 
 	uci_dev->mtu = min_t(size_t, id->driver_data, mhi_dev->mtu);
+	uci_dev->actual_mtu = uci_dev->mtu - sizeof(struct uci_buf);
 	mhi_device_set_devdata(mhi_dev, uci_dev);
 	uci_dev->enabled = true;
 
@@ -651,7 +655,7 @@ static void mhi_ul_xfer_cb(struct mhi_device *mhi_dev,
 	MSG_VERB("status:%d xfer_len:%zu\n", mhi_result->transaction_status,
 		 mhi_result->bytes_xferd);
 
-	vfree(mhi_result->buf_addr);
+	kfree(mhi_result->buf_addr);
 	if (!mhi_result->transaction_status)
 		wake_up(&uci_chan->wq);
 }
@@ -668,12 +672,12 @@ static void mhi_dl_xfer_cb(struct mhi_device *mhi_dev,
 		 mhi_result->bytes_xferd);
 
 	if (mhi_result->transaction_status == -ENOTCONN) {
-		vfree(mhi_result->buf_addr);
+		kfree(mhi_result->buf_addr);
 		return;
 	}
 
 	spin_lock_irqsave(&uci_chan->lock, flags);
-	buf = mhi_result->buf_addr + uci_dev->mtu;
+	buf = mhi_result->buf_addr + uci_dev->actual_mtu;
 	buf->data = mhi_result->buf_addr;
 	buf->len = mhi_result->bytes_xferd;
 	list_add_tail(&buf->node, &uci_chan->pending);

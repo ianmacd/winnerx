@@ -23,11 +23,11 @@
 #include <linux/ccic/s2mm005_fw.h>
 #include <linux/usb_notify.h>
 #include <linux/ccic/ccic_sysfs.h>
-#include <linux/sec_bsp.h>
 #if defined(CONFIG_CCIC_NOTIFIER)
 #include <linux/ccic/ccic_sysfs.h>
 #include <linux/ccic/ccic_core.h>
 #include <linux/ccic/ccic_notifier.h>
+#include <linux/ccic/ccic_alternate.h>
 #include <linux/fs.h>
 #include <linux/uaccess.h>
 #include <linux/regulator/consumer.h>
@@ -45,9 +45,16 @@ static enum ccic_sysfs_property s2mm005_sysfs_properties[] = {
 	CCIC_SYSFS_PROP_FW_UPDATE_STATUS,
 	CCIC_SYSFS_PROP_FW_WATER,
 	CCIC_SYSFS_PROP_DEX_FAN_UVDM,
+	CCIC_SYSFS_PROP_ACC_DEVICE_VERSION,
+	CCIC_SYSFS_PROP_DEBUG_OPCODE,
 	CCIC_SYSFS_PROP_CONTROL_GPIO,
 	CCIC_SYSFS_PROP_USBPD_IDS,
 	CCIC_SYSFS_PROP_USBPD_TYPE,
+	CCIC_SYSFS_PROP_CC_PIN_STATUS,
+	CCIC_SYSFS_PROP_RAM_TEST,
+	CCIC_SYSFS_PROP_SBU_ADC,
+	CCIC_SYSFS_PROP_VSAFE0V_STATUS,
+	CCIC_SYSFS_PROP_MAX_COUNT,
 };
 #endif /* CONFIG_CCIC_NOTIFIER */
 
@@ -184,42 +191,52 @@ int s2mm005_read_byte_flash(const struct i2c_client *i2c, u16 reg, u8 *val, u16 
 
 int s2mm005_write_byte(const struct i2c_client *i2c, u16 reg, u8 *val, u16 size)
 {
-	int ret, i2c_retry; u8 buf[258] = {0,};
-	struct i2c_msg msg[1];
 	struct s2mm005_data *usbpd_data = i2c_get_clientdata(i2c);
+	int ret = 0;
+	const int sendsz = 16;
+	unsigned char data[sendsz+2];
+	int cnt = 0;
 #if defined(CONFIG_USB_HW_PARAM)
 	struct otg_notify *o_notify = get_otg_notify();
 #endif
 
-	if (size > 256)
-	{
-		pr_err("I2C error, over the size %d", size);
-		return -EIO;
-	}
-
-	mutex_lock(&usbpd_data->i2c_mutex);
-	i2c_retry = 0;
-	msg[0].addr = i2c->addr;
-	msg[0].flags = 0;
-	msg[0].len = size+2;
-	msg[0].buf = buf;
-
-	buf[0] = (reg & 0xFF00) >> 8;
-	buf[1] = (reg & 0xFF);
-	memcpy(&buf[2], val, size);
-
-	do {
-		ret = i2c_transfer(i2c->adapter, msg, 1);
-	} while (ret < 0 &&  i2c_retry++ < 5);
-
-	if (ret < 0) {
+	pr_debug("%s: size: 0x%x\n", __func__, size);
+	while(size > sendsz) {
+		data[0] = (reg+cnt) >>8;
+		data[1] = (reg+cnt) & 0xff;
+		memcpy(data+2, val+cnt, sendsz);
+		mutex_lock(&usbpd_data->i2c_mutex);
+		ret = i2c_master_send(i2c, data, sendsz+2);
+		mutex_unlock(&usbpd_data->i2c_mutex);
+		if (ret < sendsz+2) {
 #if defined(CONFIG_USB_HW_PARAM)
 		if (o_notify)
 			inc_hw_param(o_notify, USB_CCIC_I2C_ERROR_COUNT);
 #endif
-		dev_err(&i2c->dev, "i2c write fail reg:0x%x error %d\n", reg, ret);
+			pr_err("%s: i2c write error, reg: 0x%x\n",
+					__func__, reg);
+			return ret < 0 ? ret : -EIO;
+		}
+		cnt = cnt + sendsz;
+		size = size - sendsz;
 	}
-	mutex_unlock(&usbpd_data->i2c_mutex);
+	if (size > 0) {
+		data[0] = (reg+cnt) >>8;
+		data[1] = (reg+cnt) & 0xff;
+		memcpy(data+2, val+cnt, size);
+		mutex_lock(&usbpd_data->i2c_mutex);
+		ret = i2c_master_send(i2c, data, size+2);
+		mutex_unlock(&usbpd_data->i2c_mutex);
+		if (ret < size+2) {
+#if defined(CONFIG_USB_HW_PARAM)
+		if (o_notify)
+			inc_hw_param(o_notify, USB_CCIC_I2C_ERROR_COUNT);
+#endif
+			dev_err(&i2c->dev, "%s: i2c write error, reg: 0x%x\n",
+					__func__, reg);
+			return ret < 0 ? ret : -EIO;
+		}
+	}
 
 	return ret;
 }
@@ -1130,6 +1147,29 @@ water:
 }
 
 #if defined(CONFIG_OF)
+static unsigned int system_rev __read_mostly;
+
+static int __init sec_hw_rev_setup(char *p)
+{
+	int ret;
+
+	ret = kstrtouint(p, 0, &system_rev);
+	if (unlikely(ret < 0)) {
+		pr_warn("androidboot.revision is malformed (%s)\n", p);
+		return -EINVAL;
+	}
+
+	pr_info("androidboot.revision %x\n", system_rev);
+
+	return 0;
+}
+early_param("androidboot.revision", sec_hw_rev_setup);
+
+static unsigned int sec_hw_rev(void)
+{
+	return system_rev;
+}
+
 static int of_s2mm005_usbpd_dt(struct device *dev,
 			       struct s2mm005_data *usbpd_data)
 {
@@ -1455,16 +1495,19 @@ static int s2mm005_usbpd_probe(struct i2c_client *i2c,
 	}
 
 	pMSG_HEADER = (MSG_HEADER_Typedef *)&MSG_BUF[0];
-	pMSG_HEADER->BITS.Number_of_obj += 1;
-	pSINK_MSG = (SINK_VAR_SUPPLY_Typedef *)&MSG_BUF[8];
-	pSINK_MSG->DATA = 0x8F019032; // 5V~12V, 500mA
+	pMSG_HEADER->BITS.Number_of_obj -= 1;
+	pSINK_MSG = (SINK_VAR_SUPPLY_Typedef *)&MSG_BUF[12];
+	pSINK_MSG->DATA = 0x8B4190C8; /* 5~9V, 2A */
 
 	dev_info(&i2c->dev, "--- Write DATA\n");
 	for (cnt = 0; cnt < 8; cnt++) {
 		dev_info(&i2c->dev, "   0x%08X\n", MSG_DATA[cnt]);
 	}
 
-	s2mm005_write_byte(i2c, REG_ADD, &MSG_BUF[0], 8);
+	/* default value is written by CCIC FW. If you need others, overwrite it.*/
+#if 1//defined(CONFIG_SEC_GTS6L_PROJECT)
+	s2mm005_write_byte(i2c, REG_ADD, &MSG_BUF[0], 32);
+#endif
 
 	for (cnt = 0; cnt < 32; cnt++) {
 		MSG_BUF[cnt] = 0;
@@ -1552,12 +1595,21 @@ static int s2mm005_usbpd_probe(struct i2c_client *i2c,
 	usbpd_data->Vendor_ID = 0;
 	usbpd_data->Product_ID = 0;
 	usbpd_data->Device_Version = 0;
-	usbpd_data->host_turn_on_wait_time = 3;
+	usbpd_data->host_turn_on_wait_time = 20;
 	usbpd_data->is_sent_pin_configuration = 0;
 	ccic_register_switch_device(1);
 	INIT_DELAYED_WORK(&usbpd_data->acc_detach_work, acc_detach_check);
 	init_waitqueue_head(&usbpd_data->host_turn_on_wait_q);
 	set_host_turn_on_event(0);
+	ret = ccic_misc_init(pccic_data);
+	if (ret) {
+		dev_err(&i2c->dev, "ccic misc register is failed, error %d\n", ret);
+		goto err_init_irq;
+	}
+	pccic_data->misc_dev->uvdm_read = samsung_uvdm_in_request_message;
+	pccic_data->misc_dev->uvdm_write = samsung_uvdm_out_request_message;
+	pccic_data->misc_dev->uvdm_ready = samsung_uvdm_ready;
+	pccic_data->misc_dev->uvdm_close = samsung_uvdm_close;
 #endif
 
 #if TEMP_CODE

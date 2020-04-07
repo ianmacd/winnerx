@@ -72,6 +72,17 @@ void cam_actuator_shutdown(struct cam_actuator_ctrl_t *a_ctrl);
 
 int32_t cam_actuator_power_up(struct cam_actuator_ctrl_t *a_ctrl);
 int32_t cam_actuator_power_down(struct cam_actuator_ctrl_t *a_ctrl);
+#if defined(CONFIG_SAMSUNG_ACTUATOR_AK7377)
+/* Support soft landing in D1 and D2 project AK7377 */
+int16_t cam_actuator_to_wakeup(struct cam_actuator_ctrl_t *a_ctrl);
+int16_t cam_actuator_to_sleep(struct cam_actuator_ctrl_t *a_ctrl);
+#endif
+
+/* Actuator DW9808 specific changes */
+#if defined(CONFIG_SAMSUNG_ACTUATOR_DW9808)
+int16_t cam_actuator_init(struct cam_actuator_ctrl_t *a_ctrl, struct i2c_settings_array *i2c_set);
+#endif
+
 #if defined(CONFIG_SAMSUNG_OIS_RUMBA_S4) || defined(CONFIG_SAMSUNG_OIS_RUMBA_S6) || defined(CONFIG_SAMSUNG_OIS_MCU_STM32)
 int16_t cam_actuator_move_for_ois_test(struct cam_actuator_ctrl_t *a_ctrl);
 #endif

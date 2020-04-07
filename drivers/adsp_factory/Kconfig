@@ -19,6 +19,15 @@ config LSM6DSO_FACTORY
 	  request selftest to adsp_factory.
 	  receive test result from adsp_factory.
 
+config LSM6DSL_FACTORY
+	tristate "factory test for SSC - LSM6DSL"
+	default n
+	help
+	  lsm6dsl factory driver.
+	  provide sysfs for factory test.
+	  request selftest to adsp_factory.
+	  receive test result from adsp_factory.
+
 config AK09918_FACTORY
 	tristate "factory test for SSC - ak09918"
 	default n
@@ -52,6 +61,34 @@ config SUPPORT_TMD4906_FACTORY
 	default n
 	help
 	  tmd4906 factory driver
+	  provide sysfs for factory test.
+	  request selftest to adsp_factory.
+	  receive test result from adsp_factory.
+
+config SUPPORT_TMD4907_FACTORY
+	tristate "factory test for SSC - tmd4907"
+	depends on TMD490X_FACTORY
+	default n
+	help
+	  tmd4907 factory driver
+	  provide sysfs for factory test.
+	  request selftest to adsp_factory.
+	  receive test result from adsp_factory.
+
+config TCS3701_FACTORY
+	tristate "factory test for SSC - TCS3701"
+	default n
+	help
+	  tcs3701 factory driver.
+	  provide sysfs for factory test.
+	  request selftest to adsp_factory.
+	  receive test result from adsp_factory.
+
+config STK3331_FACTORY
+	tristate "factory test for SSC - STK3331"
+	default n
+	help
+	  stk3331 factory driver.
 	  provide sysfs for factory test.
 	  request selftest to adsp_factory.
 	  receive test result from adsp_factory.
@@ -95,6 +132,14 @@ config SLPI_MOTOR
 	  request selftest to adsp_factory.
 	  receive test result from adsp_factory.
 
+config SUPPORT_MOTOR_NOTIFIER
+	tristate "Sensors support motor notifier"
+	depends on SLPI_MOTOR
+	default n
+	help
+	  Support the motor notifier function
+	  receive motor start setting.
+
 config SUPPORT_MOBEAM
 	tristate "Sensors support mobeam"
 	default n
@@ -113,6 +158,13 @@ config SUPPORT_SUB_MOBEAM
 	  request selftest to adsp_factory.
 	  receive test result from adsp_factory.
 
+config SUPPORT_PROX_POWER_ON_CAL
+	tristate "Sensors support proximity sensor power on cal"
+	default n
+	help
+	  Support power on calibration for proximity sensor
+	  make calibration process done as the device power up.
+
 config SUPPORT_BHL_COMPENSATION_FOR_LIGHT_SENSOR
 	tristate "Sensors support BHL compensation"
 	default n
@@ -128,6 +180,13 @@ config SUPPORT_BRIGHT_COMPENSATION_LUX
 	  Support lux compensation based on brightness
 	  provide sysfs for LCD service.
 	  receive aor and brightness level from lcd driver.
+
+config SUPPORT_BRIGHT_SYSFS_COMPENSATION_LUX
+	tristate "Sensors support lux compensation based on brightness"
+	default n
+	help
+	  Support lux compensation based on brightness sysfs.
+	  receive aor and brightness level from hal injection.
 
 config SUPPORT_DUAL_6AXIS
 	tristate "Sensors support dual 6axis"
@@ -161,3 +220,30 @@ config SUPPORT_DEVICE_MODE
 	default n
 	help
 	  Support device mode.
+
+config SUPPORT_AK0997X
+	tristate "Support ak0997x"
+	default n
+	help
+	  Support ak0997x.
+
+config VEML3328_FACTORY
+	tristate "factory test for SSC - veml3328"
+	default n
+	help
+	  veml3328 factory driver.
+	  provide sysfs for factory test.
+	  request selftest to adsp_factory.
+	  receive test result from adsp_factory.
+
+config SUPPORT_SSC_MODE
+	tristate "Support ssc mode function for adsp sensor"
+	default n
+	help
+	  Support the ssc mode function.
+
+config SUPPORT_SSC_MODE_FOR_MAG
+	tristate "Support ssc mode for mag function for mag sensor"
+	default n
+	help
+	  Support the ssc mode for mag function.

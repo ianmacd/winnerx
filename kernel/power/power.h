@@ -5,6 +5,10 @@
 #include <linux/freezer.h>
 #include <linux/compiler.h>
 
+#ifdef CONFIG_SEC_PM
+#include <linux/notifier.h>
+#endif
+
 struct swsusp_info {
 	struct new_utsname	uts;
 	u32			version_code;
@@ -215,6 +219,9 @@ static inline void suspend_test_finish(const char *label) {}
 extern int __pm_notifier_call_chain(unsigned long val, int nr_to_call,
 				    int *nr_calls);
 extern int pm_notifier_call_chain(unsigned long val);
+#ifdef CONFIG_SEC_PM_DEBUG
+extern void *pm_notifier_call_chain_get_callback(int nr_calls);
+#endif /* CONFIG_SEC_PM_DEBUG */
 #endif
 
 #ifdef CONFIG_HIGHMEM
@@ -313,3 +320,8 @@ extern int pm_wake_lock(const char *buf);
 extern int pm_wake_unlock(const char *buf);
 
 #endif /* !CONFIG_PM_WAKELOCKS */
+
+#ifdef CONFIG_SEC_PM
+int msm_drm_register_notifier_client(struct notifier_block *nb);
+int msm_drm_unregister_notifier_client(struct notifier_block *nb);
+#endif

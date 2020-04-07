@@ -94,6 +94,9 @@ extern char *sec_cable_type[];
 #define SEC_BAT_CURRENT_EVENT_SAFETY_TMR		0x100000
 #define SEC_BAT_CURRENT_EVENT_ISDB				0x200000
 #define SEC_BAT_CURRENT_EVENT_DC_ERR			0x400000
+#define SEC_BAT_CURRENT_EVENT_SIOP_LIMIT		0x800000
+#define SEC_BAT_CURRENT_EVENT_TEMP_CTRL_TEST	0x1000000
+#define SEC_BAT_CURRENT_EVENT_25W_OCP			0x2000000
 
 /* misc_event */
 #define BATT_MISC_EVENT_UNDEFINED_RANGE_TYPE	0x00000001
@@ -108,7 +111,19 @@ extern char *sec_cable_type[];
 #define BATT_MISC_EVENT_WIRELESS_AUTH_FAIL      0x00000800
 #define BATT_MISC_EVENT_WIRELESS_AUTH_PASS      0x00001000
 #define BATT_MISC_EVENT_TEMP_HICCUP_TYPE	0x00002000
+#define BATT_MISC_EVENT_BATTERY_HEALTH			0x000F0000
 
+#define BATTERY_HEALTH_SHIFT                16
+enum misc_battery_health {
+	BATTERY_HEALTH_UNKNOWN = 0,
+	BATTERY_HEALTH_GOOD,
+	BATTERY_HEALTH_NORMAL,
+	BATTERY_HEALTH_AGED,
+	BATTERY_HEALTH_MAX = BATTERY_HEALTH_AGED,
+
+	/* For event */
+	BATTERY_HEALTH_BAD = 0xF,
+};
 
 #if defined(CONFIG_SEC_FACTORY)             // SEC_FACTORY
 #define STORE_MODE_CHARGING_MAX 80
@@ -145,20 +160,25 @@ extern char *sec_cable_type[];
 #define WIRELESS_OTG_INPUT_CURRENT 900
 
 #define SEC_INPUT_VOLTAGE_0V	0
-#define SEC_INPUT_VOLTAGE_5V	5
-#define SEC_INPUT_VOLTAGE_9V	9
-#define SEC_INPUT_VOLTAGE_10V	10
-#define SEC_INPUT_VOLTAGE_12V	12
-#define SEC_INPUT_VOLTAGE_NONE	100
+#define SEC_INPUT_VOLTAGE_5V	50
+#define SEC_INPUT_VOLTAGE_5_5V	55
+#define SEC_INPUT_VOLTAGE_9V	90
+#define SEC_INPUT_VOLTAGE_10V	100
+#define SEC_INPUT_VOLTAGE_12V	120
+#define SEC_INPUT_VOLTAGE_12_5V	125
+#define SEC_INPUT_VOLTAGE_NONE	1000
 
 #define HV_CHARGER_STATUS_STANDARD1	12000 /* mW */
 #define HV_CHARGER_STATUS_STANDARD2	20000 /* mW */
 #define HV_CHARGER_STATUS_STANDARD3 24500 /* mW */
+#define HV_CHARGER_STATUS_STANDARD4 40000 /* mW */
+
 enum {
 	NORMAL_TA,
 	AFC_9V_OR_15W,
 	AFC_12V_OR_20W,
 	SFC_25W,
+	SFC_45W,
 };
 
 #if defined(CONFIG_CCIC_NOTIFIER)
@@ -272,6 +292,7 @@ struct sec_battery_info {
 	bool pdic_attach;
 	bool pdic_ps_rdy;
 	bool hv_pdo;
+	bool init_src_cap;
 	struct pdic_notifier_struct pdic_info;
 	struct sec_bat_pdic_list pd_list;
 #endif
@@ -458,6 +479,8 @@ struct sec_battery_info {
 	int muic_cable_type;
 	int extended_cable_type;
 
+	bool auto_mode;
+
 #if defined(CONFIG_BATTERY_SAMSUNG_MHS)
 	int charging_port;
 #endif
@@ -502,6 +525,7 @@ struct sec_battery_info {
 #endif	
 	int topoff_current;
 	int wpc_vout_level;
+	int wpc_max_vout_level;
 	unsigned int current_event;
 
 	/* wireless charging enable */
@@ -534,6 +558,8 @@ struct sec_battery_info {
 
 	unsigned int tx_mfc_iout;
 	unsigned int tx_uno_iout;
+	unsigned int wc20_power_class;
+	unsigned int wc20_vout;
 
 #if defined(CONFIG_USE_POGO)
 	int pogo_status;
@@ -559,6 +585,7 @@ struct sec_battery_info {
 	bool skip_wpc_temp_check;
 	bool wpc_temp_mode;
 	bool charging_block;
+	bool wpc_vout_ctrl_lcd_on;
 #if defined(CONFIG_BATTERY_SWELLING)
 	unsigned int swelling_mode;
 	int swelling_full_check_cnt;
@@ -569,6 +596,7 @@ struct sec_battery_info {
 #endif
 #if defined(CONFIG_CALC_TIME_TO_FULL)
 	int timetofull;
+	unsigned int ttf_predict_wc20_charge_current;
 	struct delayed_work timetofull_work;
 #endif
 #if defined(CONFIG_WIRELESS_TX_MODE)
@@ -584,7 +612,9 @@ struct sec_battery_info {
 #if defined(CONFIG_BATTERY_AGE_FORECAST)
 	int batt_cycle;
 #endif
+	int batt_asoc;
 #if defined(CONFIG_STEP_CHARGING)
+	bool step_charging_skip_lcd_on;
 	unsigned int step_charging_type;
 	unsigned int step_charging_charge_power;
 	int step_charging_status;
@@ -622,12 +652,23 @@ struct sec_battery_info {
 	unsigned long tx_misalign_passed_time;
 
 	unsigned int hiccup_status;
+	bool hiccup_clear;
 
 	bool stop_timer;
 	unsigned long prev_safety_time;
 	unsigned long expired_time;
 	unsigned long cal_safety_time;
 	int fg_reset;
+
+	/* 25w ta alert */
+	bool ta_alert_wa;
+	int ta_alert_mode;
+
+	bool boot_complete;
+	int raw_bat_temp;
+#if defined(CONFIG_ENG_BATTERY_CONCEPT)
+	char * get_dt_str;
+#endif
 };
 
 /* event check */
@@ -655,7 +696,16 @@ enum {
 
 extern bool sleep_mode;
 extern unsigned int lpcharge;
+extern bool mfc_fw_update;
 extern int fg_reset;
+extern int charging_night_mode;
+extern int temp_control_test;
+extern bool boot_complete;
+#if defined(CONFIG_WIRELESS_IC_PARAM)
+extern unsigned int wireless_fw_ver_param;
+extern unsigned int wireless_chip_id_param;
+extern unsigned int wireless_fw_mode_param;
+#endif
 
 extern void select_pdo(int num);
 #if defined(CONFIG_PDIC_PD30)
@@ -679,6 +729,7 @@ extern unsigned int is_boot_recovery(void);
 extern void sec_bat_set_misc_event(struct sec_battery_info *battery, unsigned int misc_event_val, unsigned int misc_event_mask);
 extern void sec_bat_set_tx_event(struct sec_battery_info *battery, unsigned int tx_event_val, unsigned int tx_event_mask);
 extern void sec_bat_set_current_event(struct sec_battery_info *battery, unsigned int current_event_val, unsigned int current_event_mask);
+extern void sec_bat_set_temp_control_test(struct sec_battery_info *battery, bool temp_enable);
 extern void sec_bat_get_battery_info(struct sec_battery_info *battery);
 extern int sec_bat_set_charge(struct sec_battery_info *battery, int chg_mode);
 extern int sec_bat_set_charging_current(struct sec_battery_info *battery);
@@ -687,6 +738,7 @@ extern void sec_wireless_set_tx_enable(struct sec_battery_info *battery, bool wc
 
 #if defined(CONFIG_WIRELESS_FIRMWARE_UPDATE)
 extern void sec_bat_fw_update_work(struct sec_battery_info *battery, int mode);
+extern bool sec_bat_check_boost_mfc_condition(struct sec_battery_info *battery, int mode);
 #endif
 
 #if defined(CONFIG_STEP_CHARGING)
@@ -712,6 +764,7 @@ extern int sec_battery_update_data(const char* file_path);
 extern bool sec_bat_cisd_check(struct sec_battery_info *battery);
 extern void sec_battery_cisd_init(struct sec_battery_info *battery);
 extern void set_cisd_pad_data(struct sec_battery_info *battery, const char* buf);
+extern void set_cisd_power_data(struct sec_battery_info *battery, const char* buf);
 #endif
 
 #if defined(CONFIG_WIRELESS_AUTH)
@@ -721,5 +774,7 @@ extern int sec_bat_misc_init(struct sec_battery_info *battery);
 int sec_bat_parse_dt(struct device *dev, struct sec_battery_info *battery);
 void sec_bat_parse_mode_dt(struct sec_battery_info *battery);
 void sec_bat_parse_mode_dt_work(struct work_struct *work);
+u8 sec_bat_get_wireless20_power_class(struct sec_battery_info *battery);
+void sec_bat_check_battery_health(struct sec_battery_info *battery);
 
 #endif /* __SEC_BATTERY_H */

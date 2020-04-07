@@ -1613,6 +1613,16 @@ static int do_test(const char *alg, u32 type, u32 mask, int m)
 				  speed_template_32);
 		break;
 
+	case 219:
+		test_cipher_speed("adiantum(xchacha12,aes)", ENCRYPT, sec, NULL,
+				  0, speed_template_32);
+		test_cipher_speed("adiantum(xchacha12,aes)", DECRYPT, sec, NULL,
+				  0, speed_template_32);
+		test_cipher_speed("adiantum(xchacha20,aes)", ENCRYPT, sec, NULL,
+				  0, speed_template_32);
+		test_cipher_speed("adiantum(xchacha20,aes)", DECRYPT, sec, NULL,
+				  0, speed_template_32);
+		break;
 
 	case 300:
 		if (alg) {
@@ -2152,7 +2162,9 @@ static int __init tcrypt_mod_init(void)
 		if (in_fips_err())
 			pr_err("FIPS : POST - CRYPTO API in FIPS Error\n");
 		else
-			pr_info("FIPS : POST - CRYPTO API started in FIPS approved mode\n");
+
+		pr_info("FIPS : POST - CRYPTO API started in FIPS approved mode\n");
+
 	}
 
 	if (!fips_enabled)

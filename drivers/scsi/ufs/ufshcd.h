@@ -3,7 +3,7 @@
  *
  * This code is based on drivers/scsi/ufs/ufshcd.h
  * Copyright (C) 2011-2013 Samsung India Software Operations
- * Copyright (c) 2013-2018, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2013-2019, The Linux Foundation. All rights reserved.
  *
  * Authors:
  *	Santosh Yaraganavi <santosh.sy@samsung.com>
@@ -119,11 +119,13 @@ enum ufs_pm_op {
 	UFS_RUNTIME_PM,
 	UFS_SYSTEM_PM,
 	UFS_SHUTDOWN_PM,
+	UFS_SYSTEM_RESTORE,
 };
 
 #define ufshcd_is_runtime_pm(op) ((op) == UFS_RUNTIME_PM)
 #define ufshcd_is_system_pm(op) ((op) == UFS_SYSTEM_PM)
 #define ufshcd_is_shutdown_pm(op) ((op) == UFS_SHUTDOWN_PM)
+#define ufshcd_is_restore(op) ((op) == UFS_SYSTEM_RESTORE)
 
 /* Host <-> Device UniPro Link state */
 enum uic_link_state {
@@ -162,6 +164,19 @@ enum {
 	UFS_ERR_TASK_ABORT,
 	UFS_ERR_MAX,
 };
+
+enum ufs_tw_state {
+	UFS_TW_OFF_STATE	= 0,	/* turbo write disabled state */
+	UFS_TW_ON_STATE		= 1,	/* turbo write enabled state */
+	UFS_TW_ERR_STATE	= 2,	/* turbo write error state */
+};
+
+#define ufshcd_is_tw_off(hba) ((hba)->ufs_tw_state == UFS_TW_OFF_STATE)
+#define ufshcd_is_tw_on(hba) ((hba)->ufs_tw_state == UFS_TW_ON_STATE)
+#define ufshcd_is_tw_err(hba) ((hba)->ufs_tw_state == UFS_TW_ERR_STATE)
+#define ufshcd_set_tw_off(hba) ((hba)->ufs_tw_state = UFS_TW_OFF_STATE)
+#define ufshcd_set_tw_on(hba) ((hba)->ufs_tw_state = UFS_TW_ON_STATE)
+#define ufshcd_set_tw_err(hba) ((hba)->ufs_tw_state = UFS_TW_ERR_STATE)
 
 /*
  * UFS Power management levels.
@@ -824,6 +839,23 @@ struct SEC_UFS_counting {
 };
 #endif
 
+struct SEC_UFS_TW_info {
+	u64 tw_state_ts;
+	u64 tw_enable_ms;
+	u64 tw_disable_ms;
+	u64 tw_amount_W_kb;
+	u64 tw_enable_count;
+	u64 tw_disable_count;
+	u64 tw_setflag_error_count;
+	u64 hibern8_amount_ms;
+	u64 hibern8_enter_count;
+	u64 hibern8_amount_ms_100ms;
+	u64 hibern8_enter_count_100ms;
+	u64 hibern8_max_ms;
+	ktime_t hibern8_enter_ts;
+	struct timespec timestamp;
+	bool tw_info_disable;
+};
 /**
  * struct ufs_hba - per adapter private structure
  * @mmio_base: UFSHCI base register address
@@ -909,6 +941,7 @@ struct ufs_hba {
 
 	enum ufs_dev_pwr_mode curr_dev_pwr_mode;
 	enum uic_link_state uic_link_state;
+	enum ufs_tw_state ufs_tw_state;
 	/* Desired UFS power management level during runtime PM */
 	int rpm_lvl;
 	/* Desired UFS power management level during system PM */
@@ -1161,10 +1194,17 @@ struct ufs_hba {
 
 	bool reinit_g4_rate_A;
 	bool force_g4;
+	/* distinguish between resume and restore */
+	bool restore;
 
 	char unique_number[UFS_UN_MAX_DIGITS + 1];
 
 	unsigned int lc_info;
+	bool support_tw;
+	bool tw_state_not_allowed;
+	struct mutex tw_ctrl_mutex;
+	struct SEC_UFS_TW_info SEC_tw_info;
+	struct SEC_UFS_TW_info SEC_tw_info_old;
 
 #if defined(CONFIG_SCSI_UFS_QCOM)
 	struct device_attribute hw_reset_info_attr;
@@ -1311,6 +1351,9 @@ static inline bool ufshcd_keep_autobkops_enabled_except_suspend(
 	return hba->caps & UFSHCD_CAP_KEEP_AUTO_BKOPS_ENABLED_EXCEPT_SUSPEND;
 }
 
+extern int ufshcd_system_thaw(struct ufs_hba *hba);
+extern int ufshcd_system_restore(struct ufs_hba *hba);
+extern int ufshcd_system_freeze(struct ufs_hba *hba);
 extern int ufshcd_runtime_suspend(struct ufs_hba *hba);
 extern int ufshcd_runtime_resume(struct ufs_hba *hba);
 extern int ufshcd_runtime_idle(struct ufs_hba *hba);
@@ -1582,6 +1625,10 @@ static inline void ufshcd_vops_dbg_register_dump(struct ufs_hba *hba,
 {
 	if (hba->var && hba->var->vops && hba->var->vops->dbg_register_dump)
 		hba->var->vops->dbg_register_dump(hba, no_sleep);
+#if defined(CONFIG_SCSI_UFS_TEST_MODE)
+	/* do not recover system if test mode is enabled */
+	BUG_ON(1);
+#endif
 }
 
 static inline int ufshcd_vops_update_sec_cfg(struct ufs_hba *hba,

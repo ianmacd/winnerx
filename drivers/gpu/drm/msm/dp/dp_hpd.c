@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2018-2019, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -59,17 +59,15 @@ struct dp_hpd *dp_hpd_get(struct device *dev, struct dp_parser *parser,
 	pr_debug("+++, no_aux_switch<%d>\n", parser->no_aux_switch);
 
 	if (parser->no_aux_switch && parser->lphw_hpd) {
-#ifndef CONFIG_SEC_DISPLAYPORT
 		dp_hpd = dp_lphw_hpd_get(dev, parser, catalog, cb);
-		if (!dp_hpd) {
+		if (IS_ERR(dp_hpd)) {
 			pr_err("failed to get lphw hpd\n");
 			return dp_hpd;
 		}
 		dp_hpd->type = DP_HPD_LPHW;
-#endif
 	} else if (parser->no_aux_switch) {
 		dp_hpd = dp_gpio_hpd_get(dev, cb);
-		if (!dp_hpd) {
+		if (IS_ERR(dp_hpd)) {
 			pr_err("failed to get gpio hpd\n");
 			goto out;
 		}
@@ -80,7 +78,7 @@ struct dp_hpd *dp_hpd_get(struct device *dev, struct dp_parser *parser,
 #else
 		dp_hpd = secdp_usbpd_get(dev, cb);
 #endif
-		if (!dp_hpd) {
+		if (IS_ERR(dp_hpd)) {
 			pr_err("failed to get usbpd\n");
 			goto out;
 		}
@@ -114,11 +112,9 @@ void dp_hpd_put(struct dp_hpd *dp_hpd)
 	case DP_HPD_GPIO:
 		dp_gpio_hpd_put(dp_hpd);
 		break;
-#ifndef CONFIG_SEC_DISPLAYPORT
 	case DP_HPD_LPHW:
 		dp_lphw_hpd_put(dp_hpd);
 		break;
-#endif
 	default:
 		pr_err("unknown hpd type %d\n", dp_hpd->type);
 		break;

@@ -27,6 +27,9 @@
 #define INPUT_BOOSTER_NULL	-1
 #define INIT_ZERO	0
 
+static unsigned int debug_flag = INIT_ZERO;
+static unsigned int enable_event_booster = INIT_ZERO;
+
 #define HEADGAGE "******"
 #define TAILGAGE "****  "
 
@@ -470,14 +473,14 @@ static void input_booster_##_DEVICE_##_set_booster_work_func(struct work_struct 
 
 #define CHANGE_STATE_TO(_STATE_) {_this->input_booster_state = input_booster_##_STATE_##_state; }
 
-#define RUN_BOOSTER(_DEVICE_, _EVENT_) { \
-	if (_DEVICE_##_booster_dt.level > 0) { \
-		_DEVICE_##_booster.event_type = _EVENT_; \
+#define RUN_BOOSTER(_EVENT_,_BOOSTER_,_BOOSTER_DT_) { \
+	if (_BOOSTER_DT_->level > 0) { \
+		_BOOSTER_->event_type = _EVENT_; \
 		if (_EVENT_ == BOOSTER_ON) { \
-			_DEVICE_##_booster.level = -1; \
+			_BOOSTER_->level = -1; \
 		} \
-		(_EVENT_ == BOOSTER_ON)  ? _DEVICE_##_booster.multi_events++ : _DEVICE_##_booster.multi_events--; \
-		schedule_work(&_DEVICE_##_booster.input_booster_set_booster_work); \
+		(_EVENT_ == BOOSTER_ON)  ? _BOOSTER_->multi_events++ : _BOOSTER_->multi_events--; \
+		schedule_work(&_BOOSTER_->input_booster_set_booster_work); \
 	} \
 }
 
@@ -487,6 +490,7 @@ static void input_booster_##_DEVICE_##_set_booster_work_func(struct work_struct 
 	{ \
 		struct t_input_booster_device_tree_gender *dt_gender = &touch_booster_dt; \
 		ssize_t ret; int level; \
+		unsigned int enable_event = 0; \
 		unsigned int debug_level = 0; \
 		unsigned int cpu_freq = 0; \
 		unsigned int ddr_freq = 0; \
@@ -496,6 +500,7 @@ static void input_booster_##_DEVICE_##_set_booster_work_func(struct work_struct 
 		unsigned int tail_time = 0; \
 		struct t_input_booster_device_tree_param *head_param = NULL, *tail_param = NULL; \
 		GET_BOOSTER_PARAM(dt_gender, head_param, tail_param) \
+		enable_event = enable_event_booster; \
 		debug_level = debug_flag; \
 		level = dt_gender->level; \
 		if (strcmp(#_ATTR_, "head") == 0 && head_param != NULL) { \
@@ -512,6 +517,7 @@ static void input_booster_##_DEVICE_##_set_booster_work_func(struct work_struct 
 	{ \
 		struct t_input_booster_device_tree_gender *dt_gender = &touch_booster_dt; \
 		int level[1] = {-1}, len; \
+		unsigned int enable_event[1] = {-1}; \
 		unsigned int debug_level[1] = {-1}; \
 		unsigned int cpu_freq[1] = {-1}; \
 		unsigned int ddr_freq[1] = {-1}; \
@@ -526,6 +532,7 @@ static void input_booster_##_DEVICE_##_set_booster_work_func(struct work_struct 
 		if (sscanf _ARGU_ != _COUNT_) { \
 			return count; \
 		} \
+		enable_event_booster = (*enable_event == (unsigned int)(-1)) ? enable_event_booster : *enable_event; \
 		debug_flag = (*debug_level == (unsigned int)(-1)) ? debug_flag : *debug_level; \
 		dt_gender->level = (*level == (unsigned int)(-1)) ? dt_gender->level : *level; \
 		if (*head_time != (unsigned int)(-1) && head_param != NULL) { \
@@ -652,6 +659,20 @@ enum booster_mode_on_off {
 };
 
 
+enum {
+	NONE_TYPE_DEVICE = -1,
+	TOUCH = 0,
+	TOUCH_KEY,
+	KEYBOARD,
+	SPEN,
+	HOVER,
+	KEY,
+	MOUSE,
+	MOUSH_WHEEL,
+	MULTI_TOUCH,
+	MAX_BOOSTER_CNT
+};
+
 struct input_value input_events[MAX_EVENTS+1];
 
 struct t_input_booster_param {
@@ -752,14 +773,13 @@ struct t_input_booster_device_tree_gender	mouse_booster_dt = {5, 1,};		// type :
 struct t_input_booster_device_tree_gender	mouse_wheel_booster_dt = {6, 1,};	// type : 6,  level : 1
 struct t_input_booster_device_tree_gender	hover_booster_dt = {7, 1,};		// type : 7,  level : 1
 struct t_input_booster_device_tree_gender	pen_booster_dt = {8, 1,};			// type : 8,  level : 1
-struct t_input_booster_device_tree_gender	key_two_booster_dt = {9, 1,};			// type : 9,  level : 1
 struct t_input_booster_device_tree_infor	*device_tree_infor;
 
 int ndevice_in_dt;
 //----------------------------------------------  STRUCT & VARIABLE FOR DEVICE TREE  ----------------------------------------------//
 
 //+++++++++++++++++++++++++++++++++++++++++++++++  STRUCT & VARIABLE FOR SYSFS  +++++++++++++++++++++++++++++++++++++++++++++++//
-unsigned int debug_flag = INIT_ZERO;
+SYSFS_CLASS(enable_event, (buf, "%u\n", enable_event), 1)
 
 #if defined(CONFIG_ARCH_EXYNOS) //______________________________________________________________________________
 SYSFS_CLASS(debug_level, (buf, "%u\n", debug_level), 1)
@@ -816,7 +836,6 @@ static struct attribute_group dvfs_attr_group = {
 
 //----------------------------------------------  STRUCT & VARIABLE FOR SYSFS  ----------------------------------------------//
 
-int TouchIDs[MAX_MULTI_TOUCH_EVENTS];
 char *glGage = HEADGAGE;
 int current_hmp_boost = INIT_ZERO;
 
@@ -829,7 +848,6 @@ struct t_input_booster	mouse_booster;
 struct t_input_booster	mouse_wheel_booster;
 struct t_input_booster	hover_booster;
 struct t_input_booster	pen_booster;
-struct t_input_booster	key_two_booster;
 
 struct t_input_booster *t_input_boosters[] = {
 	&key_booster,
@@ -840,8 +858,12 @@ struct t_input_booster *t_input_boosters[] = {
 	&mouse_booster,
 	&mouse_wheel_booster,
 	&hover_booster,
-	&pen_booster,
-	&key_two_booster
+	&pen_booster
+};
+
+struct device_type_info {
+	struct t_input_booster *input_booster;
+	struct t_input_booster_device_tree_gender *input_booster_dt;
 };
 
 #define MAX_T_INPUT_BOOSTER(ref, _PARAM_) { \
@@ -873,11 +895,18 @@ void input_booster_init(void);
 void input_booster_run_booster_on(void)
 {
 	touch_booster.input_booster_state = input_booster_idle_state;
-	RUN_BOOSTER(touch, BOOSTER_ON); 
+
+	struct t_input_booster_device_tree_gender *trgt_booster_dt = &touch_booster_dt;
+	struct t_input_booster *trgt_booster = &touch_booster;
+	
+	RUN_BOOSTER(BOOSTER_ON,trgt_booster,trgt_booster_dt);
 }
 
 void input_booster_run_booster_off(void)
 {
-	RUN_BOOSTER(touch, BOOSTER_OFF); 
+
+	struct t_input_booster_device_tree_gender *trgt_booster_dt = &touch_booster_dt;
+	struct t_input_booster *trgt_booster = &touch_booster;
+	RUN_BOOSTER(BOOSTER_OFF,trgt_booster,trgt_booster_dt);
 }
 #endif

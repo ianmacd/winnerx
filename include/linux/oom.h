@@ -115,6 +115,9 @@ extern struct task_struct *find_lock_task_mm(struct task_struct *p);
 
 extern void dump_tasks(struct mem_cgroup *memcg,
 		const nodemask_t *nodemask);
+#ifdef CONFIG_ION
+extern void show_ion_system_heap(void);
+#endif
 
 extern void wake_oom_reaper(struct task_struct *tsk);
 

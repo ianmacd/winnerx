@@ -24,7 +24,7 @@
  *
  * <<Broadcom-WL-IPTag/Open:>>
  *
- * $Id: wl_cfgvendor.h 806292 2019-02-22 03:39:06Z $
+ * $Id: wl_cfgvendor.h 814814 2019-04-15 03:31:10Z $
  */
 
 #ifndef _wl_cfgvendor_h_
@@ -527,7 +527,9 @@ typedef enum wl_vendor_event {
 	BRCM_VENDOR_EVENT_SAE_KEY               = 34,
 	BRCM_VENDOR_EVENT_BEACON_RECV           = 35,
 	BRCM_VENDOR_EVENT_PORT_AUTHORIZED       = 36,
-	GOOGLE_FILE_DUMP_EVENT			= 37
+	GOOGLE_FILE_DUMP_EVENT			= 37,
+	BRCM_VENDOR_EVENT_CU			= 38,
+	BRCM_VENDOR_EVENT_WIPS			= 39
 } wl_vendor_event_t;
 
 enum andr_wifi_attr {
@@ -636,6 +638,14 @@ typedef struct wlan_driver_wake_reason_cnt_t {
 } WLAN_DRIVER_WAKE_REASON_CNT;
 #endif /* DHD_WAKE_STATUS */
 
+#ifdef WL_WIPSEVT
+#define BRCM_VENDOR_WIPS_EVENT_BUF_LEN	128
+typedef enum wl_vendor_wips_attr_type {
+	WIPS_ATTR_DEAUTH_CNT = 1,
+	WPPS_ATTR_DEAUTH_BSSID
+} wl_vendor_wips_attr_type_t;
+#endif /* WL_WIPSEVT  */
+
 /* Chipset roaming capabilities */
 typedef struct wifi_roaming_capabilities {
 	u32 max_blacklist_size;
@@ -695,18 +705,15 @@ int wl_cfgvendor_notify_supp_event_str(const char *evt_name, const char *fmt, ..
 	normal_structure.member = value;
 #endif /* CONFIG_COMPAT */
 
-#ifdef WL_BCNRECV
 #if (defined(CONFIG_ARCH_MSM) && defined(SUPPORT_WDEV_CFG80211_VENDOR_EVENT_ALLOC)) || \
 	LINUX_VERSION_CODE >= KERNEL_VERSION(4, 1, 0)
 #define CFG80211_VENDOR_EVENT_ALLOC(wiphy, wdev, len, type, kflags) \
-	cfg80211_vendor_event_alloc(wiphy, ndev_to_wdev(ndev), len, \
-			BRCM_VENDOR_EVENT_BEACON_RECV, kflags);
+	cfg80211_vendor_event_alloc(wiphy, wdev, len, type, kflags);
 #else
 #define CFG80211_VENDOR_EVENT_ALLOC(wiphy, wdev, len, type, kflags) \
-	cfg80211_vendor_event_alloc(wiphy, len, BRCM_VENDOR_EVENT_BEACON_RECV, kflags);
+	cfg80211_vendor_event_alloc(wiphy, len, type, kflags);
 #endif /* (defined(CONFIG_ARCH_MSM) && defined(SUPPORT_WDEV_CFG80211_VENDOR_EVENT_ALLOC)) || */
 	/* LINUX_VERSION_CODE >= KERNEL_VERSION(4, 1, 0) */
-#endif /* WL_BCNRECV */
 
 #ifdef WL_CFGVENDOR_SEND_HANG_EVENT
 void wl_cfgvendor_send_hang_event(struct net_device *dev, u16 reason,

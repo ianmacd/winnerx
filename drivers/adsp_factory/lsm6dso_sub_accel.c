@@ -247,7 +247,7 @@ RETRY_ACCEL_SELFTEST:
 
 	while (!(data->ready_flag[MSG_TYPE_ST_SHOW_DATA] & 1 << MSG_ACCEL_SUB) &&
 		cnt++ < TIMEOUT_CNT)
-		msleep(20);
+		msleep(25);
 
 	data->ready_flag[MSG_TYPE_ST_SHOW_DATA] &= ~(1 << MSG_ACCEL_SUB);
 
@@ -382,10 +382,11 @@ static ssize_t sub_accel_lowpassfilter_store(struct device *dev,
 		return size;
 	}
 
-	pdata->lpf_onoff = (bool)data->msg_buf[MSG_ACCEL_SUB][1];
+	pdata->lpf_onoff = (bool)data->msg_buf[MSG_ACCEL_SUB][0];
 
-	pr_info("[FACTORY] %s: lpf_on_off done (%d)(0x%x)\n", __func__,
-		data->msg_buf[MSG_ACCEL_SUB][0], data->msg_buf[MSG_ACCEL_SUB][1]);
+	pr_info("[FACTORY] %s: %d, 0x0A:%02x 0x0D:%02x 0x10:%02x\n", __func__,
+		data->msg_buf[MSG_ACCEL_SUB][0], data->msg_buf[MSG_ACCEL_SUB][1],
+		data->msg_buf[MSG_ACCEL_SUB][2], data->msg_buf[MSG_ACCEL_SUB][3]);
 
 	return size;
 }
@@ -435,7 +436,6 @@ static ssize_t sub_accel_dhr_sensor_info_show(struct device *dev,
 	uint8_t cnt = 0;
 	char ctrl1_xl = 0;
 	uint8_t fullscale = 0;
-	int32_t *info = data->msg_buf[MSG_ACCEL_SUB];
 
 	adsp_unicast(NULL, 0, MSG_ACCEL_SUB, 0, MSG_TYPE_GET_DHR_INFO);
 	while (!(data->ready_flag[MSG_TYPE_GET_DHR_INFO] & 1 << MSG_ACCEL_SUB) &&
@@ -447,7 +447,7 @@ static ssize_t sub_accel_dhr_sensor_info_show(struct device *dev,
 	if (cnt >= TIMEOUT_CNT)
 		pr_err("[FACTORY] %s: Timeout!!!\n", __func__);
 
-	ctrl1_xl = *info;
+	ctrl1_xl = data->msg_buf[MSG_ACCEL_SUB][16];
 
 	ctrl1_xl &= 0xC;
 

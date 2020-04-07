@@ -56,10 +56,6 @@
 #include <asm/tlb.h>
 #include <asm/alternative.h>
 
-#ifdef CONFIG_UH_RKP
-#include <linux/rkp.h>
-#endif
-
 /*
  * We need to be able to catch inadvertent references to memstart_addr
  * that occur (potentially in generic code) before arm64_memblock_init()
@@ -596,9 +592,6 @@ void __init arm64_memblock_init(void)
 void __init bootmem_init(void)
 {
 	unsigned long min, max;
-#ifdef CONFIG_UH_RKP
-	extern u32 rkp_ro_buf_ready;
-#endif
 
 	set_memsize_kernel_type(MEMSIZE_KERNEL_PAGING);
 	min = PFN_UP(memblock_start_of_DRAM());
@@ -614,13 +607,8 @@ void __init bootmem_init(void)
 	 * done after the fixed reservations.
 	 */
 	arm64_memory_present();
-#ifdef CONFIG_UH_RKP
-	rkp_ro_buf_ready = 0;
-#endif
+
 	sparse_init();
-#ifdef CONFIG_UH_RKP
-	rkp_ro_buf_ready = 1;
-#endif
 	zone_sizes_init(min, max);
 
 	memblock_dump_all();
@@ -790,13 +778,6 @@ void __init mem_init(void)
 	}
 }
 
-#ifdef CONFIG_UH_RKP
-u8 rkp_def_init_done = 0;
-#ifdef CONFIG_RKP_KDP
-extern int rkp_cred_enable;
-#endif
-#endif
-
 void free_initmem(void)
 {
 	free_reserved_area(lm_alias(__init_begin),
@@ -808,9 +789,6 @@ void free_initmem(void)
 	 * is not supported by kallsyms.
 	 */
 	unmap_kernel_range((u64)__init_begin, (u64)(__init_end - __init_begin));
-#ifdef CONFIG_UH_RKP
-	rkp_deferred_init();
-#endif
 }
 
 #ifdef CONFIG_BLK_DEV_INITRD

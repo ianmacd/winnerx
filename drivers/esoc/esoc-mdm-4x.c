@@ -17,6 +17,10 @@
 #include <soc/qcom/sysmon.h>
 #include "esoc-mdm.h"
 
+#ifdef CONFIG_SEC_DEBUG
+#include <linux/sec_debug.h>
+#endif
+
 enum gpio_update_config {
 	GPIO_UPDATE_BOOTING_CONFIG = 1,
 	GPIO_UPDATE_RUNNING_CONFIG,
@@ -35,6 +39,7 @@ static struct gpio_map {
 } gpio_map[] = {
 	{"qcom,mdm2ap-errfatal-gpio",   MDM2AP_ERRFATAL},
 	{"qcom,ap2mdm-errfatal-gpio",   AP2MDM_ERRFATAL},
+	{"qcom,ap2mdm-errfatal2-gpio",  AP2MDM_ERRFATAL2},
 	{"qcom,mdm2ap-status-gpio",     MDM2AP_STATUS},
 	{"qcom,ap2mdm-status-gpio",     AP2MDM_STATUS},
 	{"qcom,mdm2ap-pblrdy-gpio",     MDM2AP_PBLRDY},
@@ -65,6 +70,8 @@ static void mdm_debug_gpio_show(struct mdm_ctrl *mdm)
 			__func__, MDM_GPIO(mdm, MDM2AP_ERRFATAL));
 	dev_dbg(dev, "%s: AP2MDM_ERRFATAL gpio = %d\n",
 			__func__, MDM_GPIO(mdm, AP2MDM_ERRFATAL));
+	dev_dbg(dev, "%s: AP2MDM_ERRFATAL2 gpio = %d\n",
+			__func__, MDM_GPIO(mdm, AP2MDM_ERRFATAL2));			
 	dev_dbg(dev, "%s: MDM2AP_STATUS gpio = %d\n",
 			__func__, MDM_GPIO(mdm, MDM2AP_STATUS));
 	dev_dbg(dev, "%s: AP2MDM_STATUS gpio = %d\n",
@@ -91,6 +98,8 @@ static void mdm_debug_gpio_ipc_log(struct mdm_ctrl *mdm)
 			MDM_GPIO(mdm, MDM2AP_ERRFATAL));
 	esoc_mdm_log("AP2MDM_ERRFATAL gpio = %d\n",
 			MDM_GPIO(mdm, AP2MDM_ERRFATAL));
+	esoc_mdm_log("AP2MDM_ERRFATAL2 gpio = %d\n",
+			MDM_GPIO(mdm, AP2MDM_ERRFATAL2));			
 	esoc_mdm_log("MDM2AP_STATUS gpio = %d\n",
 			MDM_GPIO(mdm, MDM2AP_STATUS));
 	esoc_mdm_log("AP2MDM_STATUS gpio = %d\n",
@@ -212,6 +221,8 @@ static int mdm_cmd_exe(enum esoc_cmd cmd, struct esoc_clink *esoc)
 		}
 		esoc_mdm_log("ESOC_PWR_ON: Setting AP2MDM_ERRFATAL = 0\n");
 		gpio_set_value(MDM_GPIO(mdm, AP2MDM_ERRFATAL), 0);
+		esoc_mdm_log("ESOC_PWR_ON: Setting AP2MDM_ERRFATAL2 = 0\n");
+		gpio_set_value(MDM_GPIO(mdm, AP2MDM_ERRFATAL2), 0);
 		mdm->init = 1;
 		mdm_do_first_power_on(mdm);
 		mdm_enable_irqs(mdm);
@@ -493,6 +504,19 @@ static void mdm_notify(enum esoc_notify notify, struct esoc_clink *esoc)
 		"ESOC_PRIMARY_REBOOT: Powering down the modem\n");
 		mdm_power_down(mdm);
 		break;
+	case ESOC_FORCE_CRASH:
+		esoc_mdm_log(
+			"ESOC_FORCE_CRASH: setting AP2MDM_ERRFATAL2 = 1\n");
+		subsys_set_modem_silent_ssr(false, ESOC_SSR);
+		gpio_set_value(MDM_GPIO(mdm, AP2MDM_ERRFATAL2), 1);
+		break;
+	case ESOC_FORCE_SILENT_RESET:
+		esoc_mdm_log(
+			"ESOC_FORCE_SILENT_RESET: setting AP2MDM_ERRFATAL & 2= 1\n");
+		subsys_set_modem_silent_ssr(true, ESOC_SSR);
+		gpio_set_value(MDM_GPIO(mdm, AP2MDM_ERRFATAL2), 1);
+		gpio_set_value(MDM_GPIO(mdm, AP2MDM_ERRFATAL), 1);
+		break;
 	};
 }
 
@@ -658,6 +682,12 @@ static int mdm_configure_ipc(struct mdm_ctrl *mdm, struct platform_device *pdev)
 						&mdm->ramdump_delay_ms);
 	if (ret)
 		mdm->ramdump_delay_ms = DEF_RAMDUMP_DELAY;
+
+#ifdef CONFIG_SEC_DEBUG
+	if (sec_debug_level() == ANDROID_DEBUG_LEVEL_LOW) 
+		mdm->ramdump_delay_ms = DEF_RAMDUMP_DELAY;
+#endif
+
 	/*
 	 * In certain scenarios, multiple esoc devices are monitoring
 	 * same AP2MDM_STATUS line. But only one of them will have a
@@ -707,6 +737,20 @@ static int mdm_configure_ipc(struct mdm_ctrl *mdm, struct platform_device *pdev)
 
 	if (gpio_is_valid(MDM_GPIO(mdm, AP2MDM_CHNLRDY)))
 		gpio_direction_output(MDM_GPIO(mdm, AP2MDM_CHNLRDY), 0);
+
+	if (gpio_is_valid(MDM_GPIO(mdm, AP2MDM_ERRFATAL2))) {
+		if (gpio_request(MDM_GPIO(mdm, AP2MDM_ERRFATAL2), "AP2MDM_ERRFATAL2")) {
+			dev_err(dev, "%s Failed to configure AP2MDM_ERRFATAL2 gpio\n",
+				   __func__);
+		}
+		else
+			gpio_direction_output(MDM_GPIO(mdm, AP2MDM_ERRFATAL2), 0);	
+	}
+	else {
+		dev_err(dev, "%s set AP2MDM_ERRFATAL2 as a AP2MDM_ERRFATAL\n",
+				__func__);
+		MDM_GPIO(mdm, AP2MDM_ERRFATAL2) = MDM_GPIO(mdm, AP2MDM_ERRFATAL);
+	}
 
 	gpio_direction_input(MDM_GPIO(mdm, MDM2AP_STATUS));
 	gpio_direction_input(MDM_GPIO(mdm, MDM2AP_ERRFATAL));

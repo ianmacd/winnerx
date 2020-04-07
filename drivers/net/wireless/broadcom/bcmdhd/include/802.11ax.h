@@ -25,7 +25,7 @@
  *
  * <<Broadcom-WL-IPTag/Open:>>
  *
- * $Id: 802.11ax.h 809225 2019-03-12 23:36:16Z $
+ * $Id: 802.11ax.h 814166 2019-04-10 06:14:49Z $
  */
 
 #ifndef _802_11ax_h_
@@ -103,11 +103,10 @@
 #define HE_BSR_ACI_MAP_VI		2u
 #define HE_BSR_ACI_MAP_VO		3u
 
-/* GI And LTF Type subfield encoding (Table 9-25d) */
-#define HE_LTF_1_GI_1_6us	(0)
-#define HE_LTF_2_GI_0_8us	(1)
-#define HE_LTF_2_GI_1_6us	(2)
-#define HE_LTF_4_GI_3_2us	(3)
+/* GI And LTF Type subfield encoding (Table 9-31d) */
+#define HE_LTF_1_GI_1_6us	(0u)
+#define HE_LTF_2_GI_1_6us	(1u)
+#define HE_LTF_4_GI_3_2us	(2u)
 
 /* special STA-IDs (Section 27.11.1) */
 #define HE_STAID_BSS_BCAST		0
@@ -588,18 +587,20 @@ typedef struct multi_BSSID_ie multi_BSSID_ie_t;
 typedef uint8 he_op_parms_t[HE_OP_PARAMS_SIZE];
 
 /* bit position and field width */
-#define HE_OP_DEF_PE_DUR_IDX		0	/* Default PE Duration */
-#define HE_OP_DEF_PE_DUR_FSZ		3
-#define HE_OP_TWT_REQD_IDX		3	/* TWT Required */
-#define HE_OP_TWT_REQD_FSZ		1
-#define HE_OP_TXOP_DUR_RTS_THRESH_IDX	4	/* TXOP Duration Based RTS Threshold */
-#define HE_OP_TXOP_DUR_RTS_THRESH_FSZ	10
-#define HE_OP_VHT_OP_PRESENT_IDX	14	/* VHT Oper Info Present */
-#define HE_OP_VHT_OP_PRESENT_FSZ	1
-#define HE_OP_COL_LOC_BSS_IDX		15
-#define HE_OP_COL_LOC_BSS_FSZ		1
-#define HE_OP_ER_SU_DISABLE_IDX		16
-#define HE_OP_ER_SU_DISABLE_FSZ		1
+#define HE_OP_DEF_PE_DUR_IDX		0u	/* Default PE Duration */
+#define HE_OP_DEF_PE_DUR_FSZ		3u
+#define HE_OP_TWT_REQD_IDX		3u	/* TWT Required */
+#define HE_OP_TWT_REQD_FSZ		1u
+#define HE_OP_TXOP_DUR_RTS_THRESH_IDX	4u	/* TXOP Duration Based RTS Threshold */
+#define HE_OP_TXOP_DUR_RTS_THRESH_FSZ	10u
+#define HE_OP_VHT_OP_PRESENT_IDX	14u	/* VHT Oper Info Present */
+#define HE_OP_VHT_OP_PRESENT_FSZ	1u
+#define HE_OP_COL_LOC_BSS_IDX		15u
+#define HE_OP_COL_LOC_BSS_FSZ		1u
+#define HE_OP_ER_SU_DISABLE_IDX		16u
+#define HE_OP_ER_SU_DISABLE_FSZ		1u
+#define HE_OP_6G_OP_INFO_PRESENT_IDX  17u
+#define HE_OP_6G_OP_INFO_PRESENT_FSZ  1u
 
 /* BSS Color Information field (figure 9-589cs) */
 #define HE_OP_BSS_COLOR_IDX		0	/* BSS Color */
@@ -616,7 +617,7 @@ typedef uint8 he_op_parms_t[HE_OP_PARAMS_SIZE];
 typedef uint8 he_basic_mcs_nss_set_t[HE_BASIC_MCS_NSS_SIZE];
 
 #define HE_OP_MAX_BSSID_IND_LEN		1u
-
+#define HE_OP_6G_OPER_INFO_LEN		5u
 /* HE Operation element */
 BWL_PRE_PACKED_STRUCT struct he_op_ie {
 	uint8 id;
@@ -631,10 +632,29 @@ typedef struct he_op_ie he_op_ie_t;
 
 #define HE_OP_IE_MIN_LEN	(sizeof(he_op_ie_t) - TLV_HDR_LEN)
 #define HE_OP_IE_MAX_LEN (sizeof(he_op_ie_t) - TLV_HDR_LEN + VHT_OP_INFO_LEN +\
-	HE_OP_MAX_BSSID_IND_LEN)
+	HE_OP_MAX_BSSID_IND_LEN + HE_OP_6G_OPER_INFO_LEN)
 
 /**
- * MU EDCA parameter set element (sec 9.4.2.240)
+ * UORA parameter set element (sec 9.4.2.244)
+ */
+BWL_PRE_PACKED_STRUCT struct he_uora_ie {
+	uint8 id;
+	uint8 len;
+	uint8 id_ext;
+	uint8 ocw_range;
+} BWL_POST_PACKED_STRUCT;
+
+typedef struct he_uora_ie he_uora_ie_t;
+
+/* Bit field Masks */
+#define HE_UORA_EOCW_MIN_IDX		0u
+#define HE_UORA_EOCW_MIN_FSZ		3u
+#define HE_UORA_EOCW_MAX_IDX		3u
+#define HE_UORA_EOCW_MAX_FSZ		3u
+/* Reserved -bit6 -7 */
+
+/**
+ * MU EDCA parameter set element (sec 9.4.2.245)
  */
 BWL_PRE_PACKED_STRUCT struct he_mu_ac_param_record {
 	uint8 aci_aifsn;

@@ -219,4 +219,16 @@ void set_up_interpolation(struct samsung_display_driver_data *vdd,
 
 void debug_interpolation_log(struct samsung_display_driver_data *vdd);
 
+static inline uint GET_BITS(uint data, int from, int to) {
+	int i, j;
+	uint ret = 0;
+
+	for (i = from, j = 0; i <= to; i++, j++)
+		ret |= (data & BIT(i)) ? (1 << j) : 0;
+
+	return ret;
+}
+
+uint gamma_interpolation(int upper_g, int lower_g, int upper_cd, int lower_cd, int target_cd);
+
 #endif

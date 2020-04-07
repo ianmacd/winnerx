@@ -106,10 +106,10 @@
 		qcom,mdss-dsi-mdp-trigger = "none";
 		qcom,mdss-dsi-dma-trigger = "trigger_sw";
 		qcom,mdss-dsi-panel-framerate = <60>;
-		//qcom,mdss-dsi-panel-clockrate = <898000000>;
+		qcom,mdss-dsi-panel-clockrate = <897600000>;
 
-		qcom,mdss-pan-physical-width-dimension = <70>; /* 69.984mm, round-off */
-		qcom,mdss-pan-physical-height-dimension = <148>; /* 147.744mm, round-off */
+		qcom,mdss-pan-physical-width-dimension = <73>; /* 73.44mm, round-off */
+		qcom,mdss-pan-physical-height-dimension = <155>; /* 155.04mm, round-off */
 
 		qcom,mdss-dsi-panel-mode-gpio-state = "invalid";
 
@@ -149,6 +149,20 @@
 		/*qcom,mdss-dsi-panel-status-irq-trigger1 = "rising";*/
 		qcom,mdss-dsi-panel-status-irq-trigger1 = "falling";
 
+		samsung,dia_on_tx_cmds_revA = [
+			29 01 00 00 00 00 03 F0 5A 5A
+			29 01 00 00 00 00 02 91 E2
+			29 01 00 00 00 00 03 F0 A5 5A
+		];
+
+		samsung,dia_off_tx_cmds_revA = [
+			29 01 00 00 00 00 03 F0 5A 5A
+			29 01 00 00 00 00 02 91 E1
+			29 01 00 00 00 00 03 F0 A5 5A
+		];
+
+		samsung,support_partial_disp;
+		
 		samsung,partial_display_on_tx_cmds_revA = [
 			29 01 00 00 00 00 03 F0 5A 5A
 			29 01 00 00 00 00 03 B0 3C CB
@@ -303,11 +317,12 @@
 		samsung,elvss_interpolation_temperature = <(-15)>;
 		samsung,support_factory_panel_swap;
 		samsung,support_gct;
-		/* samsung,support_poc_driver; */
 		samsung,support_pac;
 		samsung,support_dynamic_mipi_clk;
 		samsung,esc-clk-128M;
 		/* samsung,support_gpara; */
+		samsung,pll_ssc_disabled;
+		samsung,support_ddi_spi;
 
 		/* *************************************************************
 		 *  SELF DISPLAY
@@ -475,6 +490,47 @@
 			29 01 00 00 00 00 03 F0 A5 A5
 		];
 
+		/*
+		 * Winbond Flash SPI cmds
+		 *
+		 * TX ) [tx_bpw tx_size(1) tx_size(2) tx_buf(1) ... tx_buf(tx_size)]
+		 *      Max tx data of page proglem is 256bytes. (0x0100).
+		 *		1byte is for instruction, 3bytes are for address.
+		 *		Total 260bytes are needed for page program cmds.
+		 *
+		 * RX ) [tx_bpw tx_size(1) tx_size(2) tx_buf(1) ... tx_buf(tx_size) rx_bpw rx_size(1) rx_size(2)]
+		 *		Entire memory can be accessed with a single instruction as long as the clock continues.
+		 *      We restrict rx size as 4096bytes (0x1000).
+		 */
+
+		/* WRITE */
+		
+		samsung,winbond_spi_wr_enable = [08 00 01 06];
+		samsung,winbond_spi_wr_page_program = [08 01 04 02 00 00 00
+			 01 02 03 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+			 04 05 06 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+			 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+			 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+			 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+			 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+			 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+			 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 1e 5f
+		];
+
+		samsung,winbond_spi_wr_status_reg1 = [08 00 02 01 00];
+		samsung,winbond_spi_wr_status_reg2 = [08 00 02 31 00];
+
+		samsung,winbond_spi_wr_status_reg1_end = [08 00 02 01 5E];
+		samsung,winbond_spi_wr_status_reg2_end = [08 00 02 31 02];
+
+		/* ERASE */		
+		samsung,winbond_spi_er = [08 00 04 00 00 00 00];
+
+		/* READ */
+		samsung,winbond_spi_rd_data = [08 00 04 03 00 00 00 08 10 00];
+		samsung,winbond_spi_rd_status_reg1 = [08 00 01 05 08 00 01];
+		samsung,winbond_spi_rd_manufacture_id = [08 00 01 9F 08 00 01];
+
 		/* *************************************************************
 		 *  Tx
 		 * *************************************************************
@@ -604,7 +660,15 @@
 		samsung,ldi_debug_pps2_rx_cmds_revA		= [06 01 00 00 00 00 01 A2 2c 2d];
 
 		samsung,mtp_read_sysfs_rx_cmds_revA	= [06 01 00 00 00 00 01 00 00 00];
-		samsung,mtp_write_sysfs_tx_cmds_revA	= [29 01 00 00 00 00 01 00 00 00];
+		samsung,mtp_write_sysfs_tx_cmds_revA	= [
+			29 01 00 00 00 00 3D 00
+						00 00 00 00 00 00 00 00 00 00
+						00 00 00 00 00 00 00 00 00 00
+						00 00 00 00 00 00 00 00 00 00
+						00 00 00 00 00 00 00 00 00 00
+						00 00 00 00 00 00 00 00 00 00
+						00 00 00 00 00 00 00 00 00 00
+		];
 
 		samsung,smart_dimming_mtp_rx_cmds_revA	= [06 01 00 00 00 00 01 c8 22 00];
 //		samsung,mdnie_read_rx_cmds_revA		= [06 01 00 00 00 00 01 A1 04 00];
@@ -673,6 +737,14 @@
 			29 01 00 00 00 00 02 BB 01		/* Seamless Control For HLPM */
 			29 01 00 00 00 00 06 F4 EB 23 0B 17 CA	/* AVC2 ON */
 			29 01 00 00 00 00 02 53 00		/* ALPM/HLPM off */
+
+			/* partial disp off - prevent abnormal partial disp on */
+			29 01 00 00 00 00 03 B0 3C CB
+			29 01 00 00 00 00 02 CB AF
+			29 01 00 00 00 00 03 B0 48 CB
+			29 01 00 00 00 00 02 CB 0F
+			29 01 00 00 00 00 02 F7 03
+			
 			29 01 00 00 00 00 03 F0 A5 A5	/* TEST KEY Disable */
 		];
 
@@ -683,21 +755,29 @@
 		samsung,lpm_60nit_tx_cmds_revA = [29 01 00 00 00 00 02 53 02];
 
 		/* HLPM / ALPM Control Commands */
+		
+		// temp use hlpm cmds..
+#if 0
 		samsung,lpm_ctrl_alpm_2nit_tx_cmds_revA		= [29 01 00 00 00 00 07 BB 07 0C BB 9E 9E 80];
-		samsung,lpm_ctrl_alpm_10nit_tx_cmds_revA	= [29 01 00 00 00 00 07 BB 07 0C AB 21 9E 80];
-		samsung,lpm_ctrl_alpm_30nit_tx_cmds_revA	= [29 01 00 00 00 00 07 BB 07 0C 6B 3F 9E 80];
+		samsung,lpm_ctrl_alpm_10nit_tx_cmds_revA	= [29 01 00 00 00 00 07 BB 07 0C AB 10 9E 80];
+		samsung,lpm_ctrl_alpm_30nit_tx_cmds_revA	= [29 01 00 00 00 00 07 BB 07 0C 6B 42 9E 80];
 		samsung,lpm_ctrl_alpm_60nit_tx_cmds_revA	= [29 01 00 00 00 00 07 BB 07 0C 0B 14 9E 00];
-
+#else
+		samsung,lpm_ctrl_alpm_2nit_tx_cmds_revA		= [29 01 00 00 00 00 07 BB 05 0C BB 9E 9E 80];
+		samsung,lpm_ctrl_alpm_10nit_tx_cmds_revA	= [29 01 00 00 00 00 07 BB 05 0C AB 10 9E 80];
+		samsung,lpm_ctrl_alpm_30nit_tx_cmds_revA	= [29 01 00 00 00 00 07 BB 05 0C 6B 42 9E 80];
+		samsung,lpm_ctrl_alpm_60nit_tx_cmds_revA	= [29 01 00 00 00 00 07 BB 05 0C 0B 14 9E 00];
+#endif
 		samsung,lpm_ctrl_hlpm_2nit_tx_cmds_revA		= [29 01 00 00 00 00 07 BB 05 0C BB 9E 9E 80];
-		samsung,lpm_ctrl_hlpm_10nit_tx_cmds_revA	= [29 01 00 00 00 00 07 BB 05 0C AB 21 9E 80];
-		samsung,lpm_ctrl_hlpm_30nit_tx_cmds_revA	= [29 01 00 00 00 00 07 BB 05 0C 6B 3F 9E 80];
+		samsung,lpm_ctrl_hlpm_10nit_tx_cmds_revA	= [29 01 00 00 00 00 07 BB 05 0C AB 10 9E 80];
+		samsung,lpm_ctrl_hlpm_30nit_tx_cmds_revA	= [29 01 00 00 00 00 07 BB 05 0C 6B 42 9E 80];
 		samsung,lpm_ctrl_hlpm_60nit_tx_cmds_revA	= [29 01 00 00 00 00 07 BB 05 0C 0B 14 9E 00];
 
 		/* HLPM / ALPM brightness Commands: default alpm 2nit */
 		samsung,lpm_brightnes_tx_cmds_revA		= [
 			29 01 00 00 00 00 03 F0 5A 5A	/* TEST KEY Enable */
 			29 01 00 00 00 00 02 53 03
-			29 01 00 00 00 00 07 BB 07 0C BB 4F 4F 84
+			29 01 00 00 00 00 07 BB 07 0C BB 9E 9E 80
 			29 01 00 00 00 00 02 F7 03		/* Gamma, LTPS(AID) update */
 			29 01 00 00 00 00 03 F0 A5 A5
 		];
@@ -802,12 +882,16 @@
 		 *  Below is only for flash
 		 */
 		samsung,support_flash_gamma;
+
+		/* dsi / spi - default is dsi */
+		samsung,flash_read_intf = "spi"; 
+		
 		samsung,flash_gamma_data_read_addr = <8 9 10>;
 
 		/* FLASH WRITE CHECK */
 		samsung,flash_gamma_write_check_addr = <0x0A1AFE>;
 
-		/* Here is bank base address */
+		/* Here is bank base address - total 6908 bytes */
 		samsung,flash_gamma_start_bank = <0x0A0000>;
 		samsung,flash_gamma_end_bank = <0x0A1AFB>;
 
@@ -1151,16 +1235,16 @@
 
 		samsung,ffc_tx_cmds_revA = [
 			29 00 00 00 00 00 03 FC 5A 5A			/* TEST KEY3 Enable*/
-			29 00 00 00 00 00 06 C5 09 10 B4 1F 01	/* default: 897.6 Mbps */
+			29 00 00 00 00 00 14 C5 0D 08 50 1B 8F 09 00 1A FC 24 D2 7A 00 10 00 33 00 FF 3C	/* default: 897.6 Mbps */
 			29 00 00 00 00 00 03 FC A5 A5			/* TEST KEY3 Disable*/
 		];
 
 		samsung,dyn_mipi_clk_ffc_cmds_revA = [
-			29 00 00 00 00 00 06 C5 09 10 B4 1F 01	/* 0 Default: 897.6 Mbps */
-			29 00 00 00 00 00 06 C5 09 10 B4 1F 01	/* 1 897.6Mbps */
-			29 00 00 00 00 00 06 C5 09 10 B4 1E D1	/* 2 903Mbps */
-			29 00 00 00 00 00 06 C5 09 10 B4 1E 95 	/* 3 910Mbps */
-			29 00 00 00 00 00 06 C5 09 10 B4 1D EC	/* 4 930Mbps */
+			29 00 00 00 00 00 14 C5 0D 08 50 1B 8F 09 00 1A FC 24 D2 7A 00 10 00 33 00 FF 3C	/* 0 Default: 897.6 Mbps */
+			29 00 00 00 00 00 14 C5 0D 08 50 1B 8F 09 00 1A FC 24 D2 7A 00 10 00 33 00 FF 3C	/* 1 897.6Mbps */
+			29 00 00 00 00 00 14 C5 0D 08 50 1B 65 09 00 1A FC 24 D2 7A 00 10 00 33 00 FF 3C	/* 2 903Mbps */
+			29 00 00 00 00 00 14 C5 0D 08 50 1B 2F 09 00 1A FC 24 D2 7A 00 10 00 33 00 FF 3C 	/* 3 910Mbps */
+			29 00 00 00 00 00 14 C5 0D 08 50 1A 99 09 00 1A FC 24 D2 7A 00 10 00 33 00 FF 3C	/* 4 930Mbps */
 		];
 
 		samsung,dynamic_mipi_clk_timing_table = <
@@ -1173,21 +1257,11 @@
 		>;
 
 		samsung,dynamic_mipi_clk_sel_table = <
-			/*<RAT><BAND><from><end><clk index>*/
-			1	1	128	232	1
-			1	1	233	251	2
-			1	2	0	27	3
-			1	2	28	124	4
-			1	2	975	1023	3
-			1	3	512	611	1
-			1	3	612	666	2
-			1	3	667	748	4
-			1	3	749	854	2
-			1	3	855	885	3
-			1	4	512	605	2
-			1	4	606	704	4
-			1	4	705	794	2
-			1	4	795	810	3
+		/*<RAT><BAND><from><end><clk index>*/
+			1	1	0	0	1
+			1	2	0	0	3
+			1	3	0	0	1
+			1	4	0	0	1
 			2	11	10562	10618	4
 			2	11	10619	10685	2
 			2	11	10686	10768	3
@@ -1318,16 +1392,15 @@
 			3	161	68586	68786	3
 			3	161	68787	68928	4
 			3	161	68929	68935	1
-			5	61	1	667	1
-			5	61	668	799	2
-			5	61	991	1424	4
-			5	62	0	378	2
-			5	62	379	774	4
-			5	62	775	1132	2
-			5	62	1133	1199	3
-			5	71	0	540	3
-			5	71	541	719	4
-			5	71	720	919	3
+			4	51	0	0	3
+			4	52	0	0	2
+			4	53	0	0	4
+			4	54	0	0	4
+			4	55	0	0	1
+			4	56	0	0	3
+			5	61	0	0	2
+			5	62	0	0	1
+			5	71	0	0	3
 		>;
 
 		/* *************************************************************
@@ -2302,6 +2375,75 @@
 		];
 
 		/*
+		*************************************************************************************************************************
+		* Self mask check debug (SELF MASK CHECK)
+		*************************************************************************************************************************
+		*/
+
+		samsung,mask_crc_pass_data = [76 C3];
+
+		samsung,self_mask_check_tx_pre1 = [
+			29 01 00 00 00 00 03 9F A5 A5	/* TEST KEY Enable */
+			29 01 00 00 00 00 03 F0 5A 5A	/* TEST KEY Enable */
+			29 01 00 00 00 00 03 FC 5A 5A	/* TEST KEY Enable */
+
+			/* CRC ON */
+			29 01 00 00 00 00 03 B0 27 D8
+			29 01 00 00 00 00 02 D8 10
+			29 01 00 00 00 00 03 B0 28 FE
+			29 01 00 00 00 00 02 FE 08
+
+			/* DBIST ON */
+			29 01 00 00 00 00 0A BF 01 07 00 00 00 10 00 00 00
+			
+			29 01 00 00 14 00 02 7A 00		/* self mask off */
+
+			/* delay 1frame */
+
+			/* side memory write */			
+			29 01 00 00 00 00 02 75 10
+
+			/* write self mask data (4C, 5C) */
+		
+			29 01 00 00 00 00 03 FC A5 A5	/* TEST KEY Disable */
+			29 01 00 00 00 00 03 F0 A5 A5	/* TEST KEY Disable */
+			29 01 00 00 00 00 03 9F 5A 5A	/* TEST KEY Enable */
+		];
+
+		samsung,self_mask_check_tx_pre2 = [
+			29 01 00 00 00 00 03 9F A5 A5	/* TEST KEY Enable */
+			29 01 00 00 00 00 03 F0 5A 5A	/* TEST KEY Enable */
+			29 01 00 00 00 00 03 FC 5A 5A	/* TEST KEY Enable */
+
+			29 01 00 00 00 00 02 75 01
+			29 01 00 00 22 00 10 7A			/* self mask on */
+								21 00 00 00 95 
+								01 F4 02 89 08 
+								10 FF FF FF FF
+			/* delay 2frame */
+			29 01 00 00 00 00 03 FC A5 A5	/* TEST KEY Disable */
+			29 01 00 00 00 00 03 F0 A5 A5	/* TEST KEY Disable */
+			29 01 00 00 00 00 03 9F 5A 5A	/* TEST KEY Enable */
+		];
+		
+		samsung,self_mask_check_rx_cmds = [ 06 01 00 00 00 00 01 14 02 00];	/* read FB 1st ~ 2nd */
+
+		samsung,self_mask_check_tx_post = [
+			29 01 00 00 00 00 03 9F A5 A5	/* TEST KEY Enable */
+			29 01 00 00 00 00 03 F0 5A 5A	/* TEST KEY Enable */
+			29 01 00 00 00 00 03 FC 5A 5A	/* TEST KEY Enable */
+			29 01 00 00 00 00 10 7A				/* self mask & grid restore */
+								21 0B E0 0C 75 
+								0C 26 0C BB 09 
+								0F 00 00 00 00
+			29 01 00 00 00 00 0A BF 00 07 FF 00 00 10 00 00 00	/* Exit DBIST */						
+			29 01 00 00 00 00 03 FC A5 A5	/* TEST KEY Disable */
+			29 01 00 00 00 00 03 F0 A5 A5	/* TEST KEY Disable */
+			29 01 00 00 00 00 03 9F 5A 5A	/* TEST KEY Enable */
+		];
+
+
+		/*
 		* ************************************************************************************************************************
 		*  DMS (Dynamic Mode Switch)
 		* ************************************************************************************************************************
@@ -2322,6 +2464,7 @@
 				qcom,mdss-dsi-v-back-porch = <124>;
 				qcom,mdss-dsi-v-front-porch = <124>;
 				qcom,mdss-dsi-panel-framerate = <60>;
+				qcom,mdss-dsi-panel-clockrate = <897600000>;
 				//qcom,mdss-dsi-panel-phy-timings = [00 21 09 09 24 23 08 08 08 03 04 00];
 				qcom,mdss-dsi-panel-phy-timings = [00 1E 08 08 24 22 08 08 05 03 04 00 19 18];
 				qcom,mdss-dsi-timing-switch-command = [
@@ -2372,11 +2515,6 @@
 					29 00 00 00 00 00 03 F0 5A 5A
 					29 00 00 00 00 00 03 ED 04 4C		/* ERR_FG */
 					29 00 00 00 00 00 03 F0 A5 A5
-
-					/* FFC Setting (897.6 Mbps) */
-					29 00 00 00 00 00 03 FC 5A 5A		/* TEST KEY3 Enable*/
-					29 00 00 00 00 00 06 C5 0D 10 B4 3E 01
-					29 00 00 00 00 00 03 FC A5 A5		/* TEST KEY3 Disable*/
 
 					/* TSP HSYNC */
 					29 01 00 00 00 00 03 F0 5A 5A
@@ -2491,6 +2629,8 @@
 				qcom,mdss-dsi-v-back-porch = <124>;
 				qcom,mdss-dsi-v-front-porch = <796>;
 				qcom,mdss-dsi-panel-framerate = <60>;
+				qcom,mdss-mdp-transfer-time-us = <10000>;
+				qcom,mdss-dsi-panel-clockrate = <897600000>;
 //				qcom,mdss-dsi-panel-phy-timings = [00 21 09 09 24 23 08 08 08 03 04 00];
 				qcom,mdss-dsi-panel-phy-timings = [00 1E 08 08 24 22 08 08 05 03 04 00 19 18];
 				qcom,mdss-dsi-timing-switch-command = [
@@ -2540,11 +2680,6 @@
 					29 00 00 00 00 00 03 F0 5A 5A
 					29 00 00 00 00 00 03 ED 04 4C		/* ERR_FG */
 					29 00 00 00 00 00 03 F0 A5 A5
-
-					/* FFC Setting (898.5 Mbps) */
-					29 00 00 00 00 00 03 FC 5A 5A		/* TEST KEY3 Enable*/
-					29 00 00 00 00 00 06 C5 0D 10 B4 3E 01
-					29 00 00 00 00 00 03 FC A5 A5		/* TEST KEY3 Disable*/
 
 					/* TSP HSYNC */
 					29 01 00 00 00 00 03 F0 5A 5A
@@ -2659,6 +2794,7 @@
 				qcom,mdss-dsi-v-back-porch = <124>;
 				qcom,mdss-dsi-v-front-porch = <1556>;
 				qcom,mdss-dsi-panel-framerate = <60>;
+				qcom,mdss-dsi-panel-clockrate = <897600000>;
 //				qcom,mdss-dsi-panel-phy-timings = [00 21 09 09 24 23 08 08 08 03 04 00];
 				qcom,mdss-dsi-panel-phy-timings = [00 1E 08 08 24 22 08 08 05 03 04 00 19 18];
 
@@ -2710,11 +2846,6 @@
 					29 00 00 00 00 00 03 F0 5A 5A
 					29 00 00 00 00 00 03 ED 04 4C		/* ERR_FG */
 					29 00 00 00 00 00 03 F0 A5 A5
-
-					/* FFC Setting (898.5 Mbps) */
-					29 00 00 00 00 00 03 FC 5A 5A		/* TEST KEY3 Enable*/
-					29 00 00 00 00 00 06 C5 0D 10 B4 3E 01
-					29 00 00 00 00 00 03 FC A5 A5		/* TEST KEY3 Disable*/
 
 					/* TSP HSYNC */
 					29 01 00 00 00 00 03 F0 5A 5A

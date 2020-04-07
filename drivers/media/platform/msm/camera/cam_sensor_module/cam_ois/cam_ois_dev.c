@@ -18,12 +18,17 @@
 #if defined(CONFIG_SAMSUNG_OIS_MCU_STM32)
 #include "cam_ois_mcu_stm32g.h"
 #endif
+#if defined(CONFIG_SAMSUNG_OIS_RUMBA_S4)
+#include "cam_ois_rumba_s4.h"
+#endif
 
-#if defined(CONFIG_SAMSUNG_OIS_MCU_STM32)
+#if defined(CONFIG_SAMSUNG_OIS_MCU_STM32) || defined(CONFIG_SAMSUNG_OIS_RUMBA_S4)
 struct cam_ois_ctrl_t *g_o_ctrl;
-
-static struct ois_sensor_interface ois_reset;
 extern int ois_reset_register(struct ois_sensor_interface *ois);
+#endif
+
+#if defined(CONFIG_SAMSUNG_OIS_MCU_STM32) || defined(CONFIG_SAMSUNG_OIS_RUMBA_S4)
+static struct ois_sensor_interface ois_reset;
 #endif
 
 static long cam_ois_subdev_ioctl(struct v4l2_subdev *sd,
@@ -169,8 +174,16 @@ static int cam_ois_i2c_driver_probe(struct i2c_client *client,
 	int                          rc = 0;
 	struct cam_ois_ctrl_t       *o_ctrl = NULL;
 	struct cam_ois_soc_private  *soc_private = NULL;
-#if defined(CONFIG_SAMSUNG_OIS_MCU_STM32)
+#if defined(CONFIG_SAMSUNG_OIS_MCU_STM32) || defined(CONFIG_SAMSUNG_OIS_RUMBA_S4)
 	int i = 0;
+#endif
+
+#if defined(CONFIG_SAMSUNG_OIS_RUMBA_S4)
+	if (client == NULL || id == NULL) {
+		CAM_ERR(CAM_OIS, "Invalid Args client: %pK id: %pK",
+			client, id);
+		return -EINVAL;
+	}
 #endif
 
 	if (!i2c_check_functionality(client->adapter, I2C_FUNC_I2C)) {
@@ -217,7 +230,7 @@ static int cam_ois_i2c_driver_probe(struct i2c_client *client,
 
 	o_ctrl->cam_ois_state = CAM_OIS_INIT;
 
-#if defined(CONFIG_SAMSUNG_OIS_MCU_STM32)
+#if defined(CONFIG_SAMSUNG_OIS_MCU_STM32) || defined(CONFIG_SAMSUNG_OIS_RUMBA_S4)
 	for (i = 0; i < MAX_BRIDGE_COUNT; i++)
 		o_ctrl->bridge_intf[i].device_hdl = -1;
 	o_ctrl->bridge_cnt = 0;
@@ -238,9 +251,18 @@ static int cam_ois_i2c_driver_probe(struct i2c_client *client,
 
 	g_o_ctrl = o_ctrl;
 
+#if defined(CONFIG_SAMSUNG_OIS_MCU_STM32)
 	ois_reset.core = o_ctrl;
 	ois_reset.ois_func = &cam_ois_reset_mcu;
 	ois_reset_register(&ois_reset);
+#endif
+
+#if defined(CONFIG_SAMSUNG_OIS_RUMBA_S4)
+	ois_reset.core = o_ctrl;
+	ois_reset.ois_func = &cam_ois_reset_rumba;
+	ois_reset_register(&ois_reset);
+#endif
+
 #endif
 
 	return rc;
@@ -291,7 +313,7 @@ static int32_t cam_ois_platform_driver_probe(
 	int32_t                         rc = 0;
 	struct cam_ois_ctrl_t          *o_ctrl = NULL;
 	struct cam_ois_soc_private     *soc_private = NULL;
-#if defined(CONFIG_SAMSUNG_OIS_MCU_STM32)
+#if defined(CONFIG_SAMSUNG_OIS_MCU_STM32) || defined(CONFIG_SAMSUNG_OIS_RUMBA_S4)
 	int i = 0;
 #endif
 
@@ -340,7 +362,7 @@ static int32_t cam_ois_platform_driver_probe(
 		CAM_ERR(CAM_OIS, "failed: to update i2c info rc %d", rc);
 		goto unreg_subdev;
 	}
-#if !defined(CONFIG_SAMSUNG_OIS_MCU_STM32)
+#if !defined(CONFIG_SAMSUNG_OIS_MCU_STM32) && !defined(CONFIG_SAMSUNG_OIS_RUMBA_S4)
 	o_ctrl->bridge_intf.device_hdl = -1;
 #endif
 
@@ -349,7 +371,7 @@ static int32_t cam_ois_platform_driver_probe(
 
 	o_ctrl->cam_ois_state = CAM_OIS_INIT;
 
-#if defined(CONFIG_SAMSUNG_OIS_MCU_STM32)
+#if defined(CONFIG_SAMSUNG_OIS_MCU_STM32) || defined(CONFIG_SAMSUNG_OIS_RUMBA_S4)
 	for (i = 0; i < MAX_BRIDGE_COUNT; i++)
 		o_ctrl->bridge_intf[i].device_hdl = -1;
 	o_ctrl->bridge_cnt = 0;
@@ -369,9 +391,18 @@ static int32_t cam_ois_platform_driver_probe(
 
 	g_o_ctrl = o_ctrl;
 
+#if defined(CONFIG_SAMSUNG_OIS_MCU_STM32)
 	ois_reset.core = o_ctrl;
 	ois_reset.ois_func = &cam_ois_reset_mcu;
 	ois_reset_register(&ois_reset);
+#endif
+
+#if defined(CONFIG_SAMSUNG_OIS_RUMBA_S4)
+	ois_reset.core = o_ctrl;
+	ois_reset.ois_func = &cam_ois_reset_rumba;
+	ois_reset_register(&ois_reset);
+#endif
+
 #endif
 
 	return rc;

@@ -68,6 +68,7 @@ static const struct drm_prop_enum_list e_power_mode[] = {
 static const struct drm_prop_enum_list e_qsync_mode[] = {
 	{SDE_RM_QSYNC_DISABLED,	"none"},
 	{SDE_RM_QSYNC_CONTINUOUS_MODE,	"continuous"},
+	{SDE_RM_QSYNC_ONE_SHOT_MODE,	"one_shot"},
 };
 
 static int sde_backlight_device_update_status(struct backlight_device *bd)
@@ -78,6 +79,9 @@ static int sde_backlight_device_update_status(struct backlight_device *bd)
 	int bl_lvl;
 	struct drm_event event;
 	int rc = 0;
+#if defined(CONFIG_DISPLAY_SAMSUNG)
+	struct samsung_display_driver_data *vdd;
+#endif
 
 	brightness = bd->props.brightness;
 
@@ -97,7 +101,14 @@ static int sde_backlight_device_update_status(struct backlight_device *bd)
 
 	if (!bl_lvl && brightness)
 		bl_lvl = 1;
-
+#if defined(CONFIG_DISPLAY_SAMSUNG)
+	vdd = display->panel->panel_private;
+	if((bd->props.power == FB_BLANK_POWERDOWN) && (vdd->dtsi_data.num_of_data_lanes == 1)) {	
+		c_conn->unset_bl_level = bl_lvl;
+		SDE_ERROR("SKIP set_backlight at FB_BLANK_POWERDOWN state\n");
+		return -EINVAL;
+	}
+#endif
 	if (display->panel->bl_config.bl_update ==
 		BL_UPDATE_DELAY_UNTIL_FIRST_FRAME && !c_conn->allow_bl_update) {
 		c_conn->unset_bl_level = bl_lvl;
@@ -139,7 +150,7 @@ static int sde_backlight_setup(struct sde_connector *c_conn,
 	if (!c_conn || !dev || !dev->dev) {
 		SDE_ERROR("invalid param\n");
 		return -EINVAL;
-	} else if (c_conn->connector_type != DRM_MODE_CONNECTOR_DSI) {
+	} else if (!c_conn->ops.set_backlight) {
 		return 0;
 	}
 
@@ -150,10 +161,10 @@ static int sde_backlight_setup(struct sde_connector *c_conn,
 	display = (struct dsi_display *) c_conn->display;
 	bl_config = &display->panel->bl_config;
 	props.max_brightness = bl_config->brightness_max_level;
-#if defined(CONFIG_DISPLAY_SAMSUNG)
+#if defined(CONFIG_DISPLAY_SAMSUNG)//JSJEONG need to check
 	props.brightness = bl_config->bl_level;
 #else
-	props.brightness = bl_config->brightness_max_level;
+	props.brightness = bl_config->brightness_default_level;
 #endif
 	snprintf(bl_node_name, BL_NODE_NAME_SIZE, "panel%u-backlight",
 							display_count);
@@ -580,21 +591,30 @@ static int _sde_connector_update_bl_scale(struct sde_connector *c_conn)
 
 void sde_connector_set_qsync_params(struct drm_connector *connector)
 {
-	struct sde_connector *c_conn = to_sde_connector(connector);
-	u32 qsync_propval;
+	struct sde_connector *c_conn;
+	struct sde_connector_state *c_state;
+	u32 qsync_propval = 0;
+	bool prop_dirty;
 
 	if (!connector)
 		return;
 
+	c_conn = to_sde_connector(connector);
+	c_state = to_sde_connector_state(connector->state);
 	c_conn->qsync_updated = false;
-	qsync_propval = sde_connector_get_property(c_conn->base.state,
-			CONNECTOR_PROP_QSYNC_MODE);
 
-	if (qsync_propval != c_conn->qsync_mode) {
-		SDE_DEBUG("updated qsync mode %d -> %d\n", c_conn->qsync_mode,
-				qsync_propval);
-		c_conn->qsync_updated = true;
-		c_conn->qsync_mode = qsync_propval;
+	prop_dirty = msm_property_is_dirty(&c_conn->property_info,
+					&c_state->property_state,
+					CONNECTOR_PROP_QSYNC_MODE);
+	if (prop_dirty) {
+		qsync_propval = sde_connector_get_property(c_conn->base.state,
+						CONNECTOR_PROP_QSYNC_MODE);
+		if (qsync_propval != c_conn->qsync_mode) {
+			SDE_DEBUG("updated qsync mode %d -> %d\n",
+				  c_conn->qsync_mode, qsync_propval);
+			c_conn->qsync_updated = true;
+			c_conn->qsync_mode = qsync_propval;
+		}
 	}
 }
 
@@ -651,6 +671,11 @@ int sde_connector_pre_kickoff(struct drm_connector *connector)
 	struct sde_connector_state *c_state;
 	struct msm_display_kickoff_params params;
 	int rc;
+#if defined(CONFIG_DISPLAY_SAMSUNG)
+	struct dsi_display *display;
+	struct samsung_display_driver_data *vdd;
+	u32 finger_mask_state;
+#endif
 
 	if (!connector) {
 		SDE_ERROR("invalid argument\n");
@@ -675,13 +700,20 @@ int sde_connector_pre_kickoff(struct drm_connector *connector)
 
 	params.rois = &c_state->rois;
 	params.hdr_meta = &c_state->hdr_meta;
-	params.qsync_update = false;
 
-	if (c_conn->qsync_updated) {
-		params.qsync_mode = c_conn->qsync_mode;
-		params.qsync_update = true;
-		SDE_EVT32(connector->base.id, params.qsync_mode);
+#if defined(CONFIG_DISPLAY_SAMSUNG)
+	/* SAMSUNG_FINGERPRINT */
+	display = c_conn->display;
+	vdd = display->panel->panel_private;
+	finger_mask_state = sde_connector_get_property(c_conn->base.state,
+			CONNECTOR_PROP_FINGERPRINT_MASK);
+	vdd->finger_mask_updated = false;
+	if (finger_mask_state != vdd->finger_mask) {
+		SDE_ERROR("[FINGER MASK]updated finger mask mode %d\n", finger_mask_state);
+		vdd->finger_mask_updated = true;
+		vdd->finger_mask = finger_mask_state;
 	}
+#endif
 
 	SDE_EVT32_VERBOSE(connector->base.id);
 
@@ -690,6 +722,44 @@ int sde_connector_pre_kickoff(struct drm_connector *connector)
 end:
 	return rc;
 }
+
+int sde_connector_prepare_commit(struct drm_connector *connector)
+{
+	struct sde_connector *c_conn;
+	struct sde_connector_state *c_state;
+	struct msm_display_conn_params params;
+	int rc;
+
+	if (!connector) {
+		SDE_ERROR("invalid argument\n");
+		return -EINVAL;
+	}
+
+	c_conn = to_sde_connector(connector);
+	c_state = to_sde_connector_state(connector->state);
+	if (!c_conn->display) {
+		SDE_ERROR("invalid connector display\n");
+		return -EINVAL;
+	}
+
+	if (!c_conn->ops.prepare_commit)
+		return 0;
+
+	memset(&params, 0, sizeof(params));
+
+	if (c_conn->qsync_updated) {
+		params.qsync_mode = c_conn->qsync_mode;
+		params.qsync_update = true;
+	}
+
+	rc = c_conn->ops.prepare_commit(c_conn->display, &params);
+
+	SDE_EVT32(connector->base.id, params.qsync_mode,
+		  params.qsync_update, rc);
+
+	return rc;
+}
+
 
 void sde_connector_helper_bridge_disable(struct drm_connector *connector)
 {
@@ -924,13 +994,10 @@ sde_connector_atomic_duplicate_state(struct drm_connector *connector)
 		return NULL;
 	}
 
-	mutex_lock(&c_conn->mode_info_lock);
 	/* duplicate value helper */
 	msm_property_duplicate_state(&c_conn->property_info,
 			c_oldstate, c_state,
 			&c_state->property_state, c_state->property_values);
-
-	mutex_unlock(&c_conn->mode_info_lock);
 
 	__drm_atomic_helper_connector_duplicate_state(connector,
 			&c_state->base);
@@ -1174,7 +1241,7 @@ static int sde_connector_atomic_set_property(struct drm_connector *connector,
 
 		/* convert fb val to drm framebuffer and prepare it */
 		c_state->out_fb =
-			drm_framebuffer_lookup(connector->dev, val);
+			drm_framebuffer_lookup(connector->dev, NULL, val);
 		if (!c_state->out_fb && val) {
 			SDE_ERROR("failed to look up fb %lld\n", val);
 			rc = -EFAULT;
@@ -1227,6 +1294,10 @@ static int sde_connector_atomic_set_property(struct drm_connector *connector,
 	case CONNECTOR_PROP_AD_BL_SCALE:
 		c_conn->bl_scale_ad = val;
 		c_conn->bl_scale_dirty = true;
+		break;
+	case CONNECTOR_PROP_QSYNC_MODE:
+		msm_property_set_dirty(&c_conn->property_info,
+				&c_state->property_state, idx);
 		break;
 	default:
 		break;
@@ -1541,6 +1612,7 @@ static ssize_t _sde_debugfs_conn_cmd_tx_sts_read(struct file *file,
 		return 0;
 	}
 
+	blen = min_t(size_t, MAX_CMD_PAYLOAD_SIZE, count);
 	if (copy_to_user(buf, buffer, blen)) {
 		SDE_ERROR("copy to user buffer failed\n");
 		return -EFAULT;
@@ -1823,13 +1895,34 @@ static int sde_connector_atomic_check(struct drm_connector *connector,
 		struct drm_connector_state *new_conn_state)
 {
 	struct sde_connector *c_conn;
+	struct drm_crtc_state *crtc_state;
+	struct sde_connector_state *c_state;
+	bool qsync_dirty;
 
 	if (!connector) {
 		SDE_ERROR("invalid connector\n");
-		return 0;
+		return -EINVAL;
+	}
+
+	if (!new_conn_state) {
+		SDE_ERROR("invalid connector state\n");
+		return -EINVAL;
 	}
 
 	c_conn = to_sde_connector(connector);
+	c_state = to_sde_connector_state(new_conn_state);
+
+	crtc_state = drm_atomic_get_new_crtc_state(new_conn_state->state,
+						   new_conn_state->crtc);
+
+	qsync_dirty = msm_property_is_dirty(&c_conn->property_info,
+					&c_state->property_state,
+					CONNECTOR_PROP_QSYNC_MODE);
+
+	if (drm_atomic_crtc_needs_modeset(crtc_state) && qsync_dirty) {
+		SDE_ERROR("invalid qsync update during modeset\n");
+		return -EINVAL;
+	}
 
 	if (c_conn->ops.atomic_check)
 		return c_conn->ops.atomic_check(connector,
@@ -1838,7 +1931,8 @@ static int sde_connector_atomic_check(struct drm_connector *connector,
 	return 0;
 }
 
-static void _sde_connector_report_panel_dead(struct sde_connector *conn)
+static void _sde_connector_report_panel_dead(struct sde_connector *conn,
+	bool skip_pre_kickoff)
 {
 	struct drm_event event;
 
@@ -1858,7 +1952,8 @@ static void _sde_connector_report_panel_dead(struct sde_connector *conn)
 	event.length = sizeof(bool);
 	msm_mode_object_event_notify(&conn->base.base,
 		conn->base.dev, &event, (u8 *)&conn->panel_dead);
-	sde_encoder_display_failure_notification(conn->encoder);
+	sde_encoder_display_failure_notification(conn->encoder,
+		skip_pre_kickoff);
 	SDE_EVT32(SDE_EVTLOG_ERROR);
 	SDE_ERROR("esd check failed report PANEL_DEAD conn_id: %d enc_id: %d\n",
 			conn->base.base.id, conn->encoder->base.id);
@@ -1906,7 +2001,7 @@ int sde_connector_esd_status(struct drm_connector *conn)
 	if (ret <= 0) {
 		/* cancel if any pending esd work */
 		sde_connector_schedule_status_work(conn, false);
-		_sde_connector_report_panel_dead(sde_conn);
+		_sde_connector_report_panel_dead(sde_conn, true);
 		ret = -ETIMEDOUT;
 	} else {
 		SDE_DEBUG("Successfully received TE from panel\n");
@@ -1956,7 +2051,7 @@ static void sde_connector_check_status_work(struct work_struct *work)
 		return;
 	}
 
-	_sde_connector_report_panel_dead(conn);
+	_sde_connector_report_panel_dead(conn, false);
 }
 
 static const struct drm_connector_helper_funcs sde_connector_helper_ops = {
@@ -2001,7 +2096,7 @@ static int sde_connector_populate_mode_info(struct drm_connector *conn,
 		int topology_idx = 0;
 
 		memset(&mode_info, 0, sizeof(mode_info));
-
+		SDE_EVT32(conn, ((unsigned long long)conn) >> 32, 0x9999);
 		rc = c_conn->ops.get_mode_info(&c_conn->base, mode, &mode_info,
 			sde_kms->catalog->max_mixer_width,
 			c_conn->display);
@@ -2226,7 +2321,6 @@ struct drm_connector *sde_connector_init(struct drm_device *dev,
 	}
 
 	mutex_init(&c_conn->lock);
-	mutex_init(&c_conn->mode_info_lock);
 
 	rc = drm_mode_connector_attach_encoder(&c_conn->base, encoder);
 	if (rc) {
@@ -2343,7 +2437,12 @@ struct drm_connector *sde_connector_init(struct drm_device *dev,
 	msm_property_install_range(&c_conn->property_info, "bl_scale",
 		0x0, 0, MAX_BL_SCALE_LEVEL, MAX_BL_SCALE_LEVEL,
 		CONNECTOR_PROP_BL_SCALE);
-
+#if defined(CONFIG_DISPLAY_SAMSUNG)
+		/* SAMSUNG_FINGERPRINT */
+	msm_property_install_range(&c_conn->property_info, "fingerprint_mask",
+		0x0, 0, 100, 0,
+		CONNECTOR_PROP_FINGERPRINT_MASK);
+#endif
 	msm_property_install_range(&c_conn->property_info, "ad_bl_scale",
 		0x0, 0, MAX_AD_BL_SCALE_LEVEL, MAX_AD_BL_SCALE_LEVEL,
 		CONNECTOR_PROP_AD_BL_SCALE);

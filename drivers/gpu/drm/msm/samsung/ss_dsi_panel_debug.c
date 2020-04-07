@@ -205,6 +205,7 @@ void ss_store_xlog_panic_dbg(void)
 	char err_buf[SS_XLOG_PANIC_DBG_LENGTH] = {0,};
 	struct ss_tlog *log;
 	struct ss_dbg_xlog *xlog = &ss_dbg_xlog;
+	struct samsung_display_driver_data *vdd = ss_get_vdd(PRIMARY_DISPLAY_NDX);
 
 	last = xlog->last;
 	if (last)
@@ -227,6 +228,10 @@ void ss_store_xlog_panic_dbg(void)
 	}
 end:
 	pr_info("%s:%s\n", __func__, err_buf);
+
+	if (gpio_is_valid(vdd->ub_con_det.gpio))
+		LCD_ERR("ub con gpio = %d\n", gpio_get_value(vdd->ub_con_det.gpio));
+
 /*
  * #ifdef CONFIG_SEC_DEBUG
  *	sec_debug_store_additional_dbg(DBG_2_DISPLAY_ERR, 0, "%s", err_buf);
@@ -638,6 +643,7 @@ static int dpci_notifier_callback(struct notifier_block *self,
 	if (lcd_debug.ftout.count) {
 		len += snprintf((tbuf + len), (SS_XLOG_DPCI_LENGTH - len),
 			"FTOUT CNT=%d ", lcd_debug.ftout.count);
+		lcd_debug.ftout.name[sizeof(lcd_debug.ftout.name) - 1] = '\0';
 		len += snprintf((tbuf + len), (SS_XLOG_DPCI_LENGTH - len),
 			"NAME=%s ", lcd_debug.ftout.name);
 	}
@@ -815,7 +821,7 @@ init_fail:
 	return -EPERM;
 }
 
-void ss_smmu_debug_map(enum ss_smmu_type type, int domain, struct file *file, struct sg_table *table)
+void ss_smmu_debug_map(enum ss_smmu_type type, struct sg_table *table)
 {
 	struct samsung_display_driver_data *vdd = ss_get_vdd(PRIMARY_DISPLAY_NDX);
 
@@ -841,18 +847,17 @@ void ss_smmu_debug_map(enum ss_smmu_type type, int domain, struct file *file, st
 	smmu_lock = &vdd->ss_debug_smmu[type].lock;
 	smmu_list = &vdd->ss_debug_smmu[type].list;
 
-	smmu_debug = kmem_cache_alloc(vdd->ss_debug_smmu_cache, GFP_KERNEL);
+	smmu_debug = kmem_cache_alloc(vdd->ss_debug_smmu_cache, GFP_KERNEL | __GFP_ZERO);
 
 	spin_lock(smmu_lock);
 
 	if (!IS_ERR_OR_NULL(smmu_debug)) {
 		smmu_debug->time = ktime_get();
-		smmu_debug->file = file;
 		smmu_debug->table = table;
 		INIT_LIST_HEAD(&smmu_debug->list);
 		list_add(&smmu_debug->list, smmu_list);
 
-		LCD_DEBUG("type : %d smmu_debug : 0x%zx \n", type, (size_t)smmu_debug);
+		LCD_DEBUG("addr : 0x%x size : 0x%x \n", table->sgl->dma_address, table->sgl->dma_length);
 	}
 
 	spin_unlock(smmu_lock);
@@ -884,8 +889,7 @@ void ss_smmu_debug_unmap(enum ss_smmu_type type, struct sg_table *table)
 
 	list_for_each_entry(smmu_debug, smmu_list, list) {
 		if (smmu_debug->table == table) {
-			LCD_DEBUG("type : %d smmu_debug : 0x%zx\n", type, (size_t)smmu_debug);
-
+			LCD_DEBUG("addr : 0x%x size : 0x%x \n", table->sgl->dma_address, table->sgl->dma_length);
 			list_del(&smmu_debug->list);
 			kmem_cache_free(vdd->ss_debug_smmu_cache, smmu_debug);
 			break;
@@ -942,3 +946,27 @@ void ss_smmu_debug_log(void)
 	}
 }
 #endif
+
+static DEFINE_SPINLOCK(image_logging_lock);
+#define MAX_IMAGE_LOGGING 256
+struct ss_image_logging image_logging[MAX_IMAGE_LOGGING];
+static int image_logging_index = 0;
+
+void ss_image_logging_update(uint32_t plane_addr, int width, int height, int src_format)
+{
+	if (!sec_debug_is_enabled()) {
+		return;
+	}
+
+	spin_lock(&image_logging_lock);
+
+	image_logging[image_logging_index].dma_address = plane_addr;
+	image_logging[image_logging_index].src_width = width;
+	image_logging[image_logging_index].src_height = height;
+	image_logging[image_logging_index].src_format = src_format;
+
+	image_logging_index++;
+	image_logging_index %= MAX_IMAGE_LOGGING;
+
+	spin_unlock(&image_logging_lock);
+}

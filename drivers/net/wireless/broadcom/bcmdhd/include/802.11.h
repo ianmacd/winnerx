@@ -24,7 +24,7 @@
  *
  * <<Broadcom-WL-IPTag/Open:>>
  *
- * $Id: 802.11.h 810457 2019-03-19 23:45:43Z $
+ * $Id: 802.11.h 814166 2019-04-10 06:14:49Z $
  */
 
 #ifndef _802_11_H_
@@ -1536,8 +1536,8 @@ typedef struct ccx_qfl_ie ccx_qfl_ie_t;
 #define DOT11_MNG_HE_CAP_ID			(DOT11_MNG_ID_EXT_ID + EXT_MNG_HE_CAP_ID)
 #define EXT_MNG_HE_OP_ID			36u	/* HE Operation IE, 11ax */
 #define DOT11_MNG_HE_OP_ID			(DOT11_MNG_ID_EXT_ID + EXT_MNG_HE_OP_ID)
-#define EXT_MNG_RAPS_ID				37u	/* OFDMA Random Access Parameter Set */
-#define DOT11_MNG_RAPS_ID			(DOT11_MNG_ID_EXT_ID + EXT_MNG_RAPS_ID)
+#define EXT_MNG_UORA_ID				37u	/* UORA Parameter Set */
+#define DOT11_MNG_UORA_ID			(DOT11_MNG_ID_EXT_ID + EXT_MNG_UORA_ID)
 #define EXT_MNG_MU_EDCA_ID			38u	/* MU EDCA Parameter Set */
 #define DOT11_MNG_MU_EDCA_ID			(DOT11_MNG_ID_EXT_ID + EXT_MNG_MU_EDCA_ID)
 #define EXT_MNG_SRPS_ID				39u	/* Spatial Reuse Parameter Set */
@@ -1571,6 +1571,8 @@ typedef struct ccx_qfl_ie ccx_qfl_ie_t;
 #define FILS_HLP_CONTAINER_EXT_ID	FILS_EXTID_MNG_HLP_CONTAINER_ID
 #define DOT11_ESP_EXT_ID		OCE_EXTID_MNG_ESP_ID
 #define FILS_REQ_PARAMS_EXT_ID		FILS_EXTID_MNG_REQ_PARAMS
+#define EXT_MNG_RAPS_ID				37u	/* OFDMA Random Access Parameter Set */
+#define DOT11_MNG_RAPS_ID			(DOT11_MNG_ID_EXT_ID + EXT_MNG_RAPS_ID)
 /* End of deprecated definitions */
 
 #define DOT11_MNG_IE_ID_EXT_MATCH(_ie, _id) (\
@@ -4433,30 +4435,43 @@ typedef struct vht_features_ie_hdr vht_features_ie_hdr_t;
 	VHT_MCS_SS_SUPPORTED(2, mcsMap) ? 2 : \
 	VHT_MCS_SS_SUPPORTED(1, mcsMap) ? 1 : 0
 
+#ifdef IBSS_RMC
+/* customer's OUI */
+#define RMC_PROP_OUI		"\x00\x16\x32"
+#endif // endif
+
 /* ************* WPA definitions. ************* */
 #define WPA_OUI			"\x00\x50\xF2"	/* WPA OUI */
 #define WPA_OUI_LEN		3		/* WPA OUI length */
 #define WPA_OUI_TYPE		1
 #define WPA_VERSION		1		/* WPA version */
 #define WPA_VERSION_LEN 2 /* WPA version length */
+
+/* ************* WPA2 definitions. ************* */
 #define WPA2_OUI		"\x00\x0F\xAC"	/* WPA2 OUI */
 #define WPA2_OUI_LEN		3		/* WPA2 OUI length */
 #define WPA2_VERSION		1		/* WPA2 version */
 #define WPA2_VERSION_LEN	2		/* WAP2 version length */
-#define MAX_RSNE_SUPPORTED_VERSION  WPA2_VERSION	/* Max supported version */
+#define MAX_RSNE_SUPPORTED_VERSION  WPA2_VERSION /* Max supported version */
 
 /* ************* WPS definitions. ************* */
 #define WPS_OUI			"\x00\x50\xF2"	/* WPS OUI */
 #define WPS_OUI_LEN		3		/* WPS OUI length */
 #define WPS_OUI_TYPE		4
 
+/* ************* TPC definitions. ************* */
+#define TPC_OUI			"\x00\x50\xF2"	/* TPC OUI */
+#define TPC_OUI_LEN		3		/* TPC OUI length */
+#define TPC_OUI_TYPE		8
+#define WFA_OUI_TYPE_TPC	8		/* deprecated */
+
 /* ************* WFA definitions. ************* */
 #define WFA_OUI			"\x50\x6F\x9A"  /* WFA OUI */
-#define WFA_OUI_LEN		3   /* WFA OUI length */
+#define WFA_OUI_LEN		3		/* WFA OUI length */
 #define WFA_OUI_TYPE_P2P	9
 
 #ifdef WL_LEGACY_P2P
-#define APPLE_OUI           "\x00\x17\xF2"	/* MACOSX OUI */
+#define APPLE_OUI		"\x00\x17\xF2"	/* MACOSX OUI */
 #define APPLE_OUI_LEN		3
 #define APPLE_OUI_TYPE_P2P	5
 #endif /* WL_LEGACY_P2P */
@@ -4471,7 +4486,6 @@ typedef struct vht_features_ie_hdr vht_features_ie_hdr_t;
 #define P2P_OUI_TYPE    APPLE_OUI_TYPE_P2P
 #endif /* !WL_LEGACY_P2P */
 
-#define WFA_OUI_TYPE_TPC	8
 #ifdef WLTDLS
 #define WFA_OUI_TYPE_TPQ	4	/* WFD Tunneled Probe ReQuest */
 #define WFA_OUI_TYPE_TPS	5	/* WFD Tunneled Probe ReSponse */

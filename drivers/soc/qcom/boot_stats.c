@@ -1,4 +1,4 @@
-/* Copyright (c) 2013-2017 The Linux Foundation. All rights reserved.
+/* Copyright (c) 2013-2017, 2019 The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -27,7 +27,7 @@
 #include <linux/types.h>
 #include <soc/qcom/boot_stats.h>
 
-#ifdef CONFIG_SEC_BSP
+#ifdef CONFIG_SEC_BOOTSTAT
 uint32_t bs_linuxloader_start;
 uint32_t bs_linux_start;
 uint32_t bs_uefi_start;
@@ -35,6 +35,7 @@ uint32_t bs_bootloader_load_kernel;
 #endif
 
 static void __iomem *mpm_counter_base;
+static phys_addr_t mpm_counter_pa;
 static uint32_t mpm_counter_freq;
 struct boot_stats __iomem *boot_stats;
 
@@ -78,7 +79,7 @@ static int mpm_parse_dt(void)
 
 static void print_boot_stats(void)
 {
-#ifdef CONFIG_SEC_BSP
+#ifdef CONFIG_SEC_BOOTSTAT
 	bs_linuxloader_start = readl_relaxed(&boot_stats->linuxloader_start);
 	bs_linux_start = readl_relaxed(&boot_stats->linux_start);
 	bs_uefi_start = readl_relaxed(&boot_stats->uefi_start);
@@ -92,13 +93,14 @@ static void print_boot_stats(void)
 		readl_relaxed(&boot_stats->linux_start));
 	pr_info("KPI: Bootloader load kernel count = %u\n",
 		readl_relaxed(&boot_stats->bootloader_load_kernel));
-	pr_info("KPI: Kernel MPM timestamp = %u\n",
-		readl_relaxed(mpm_counter_base));
-	pr_info("KPI: Kernel MPM Clock frequency = %u\n",
-		mpm_counter_freq);
 }
 
-#ifdef CONFIG_SEC_BSP
+phys_addr_t msm_timer_get_pa(void)
+{
+	return mpm_counter_pa;
+}
+
+#ifdef CONFIG_SEC_BOOTSTAT
 unsigned int get_boot_stat_time(void)
 {
 	return readl_relaxed(mpm_counter_base);
@@ -163,7 +165,7 @@ int boot_stats_init(void)
 int boot_stats_exit(void)
 {
 	iounmap(boot_stats);
-#ifndef CONFIG_SEC_BSP
+#ifndef CONFIG_SEC_BOOTSTAT
 	iounmap(mpm_counter_base);
 #endif
 	return 0;

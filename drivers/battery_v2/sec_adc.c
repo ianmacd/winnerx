@@ -36,6 +36,7 @@ static struct adc_list batt_adc_list[SEC_BAT_ADC_CHANNEL_NUM] = {
 	{.name = "adc-slave-chg-temp"},
 	{.name = "adc-usb-temp"},
 	{.name = "adc-sub-bat"},
+	{.name = "adc-blkt-temp"},
 };
 
 #ifdef CONFIG_SEC_EXT_THERMAL_MONITOR
@@ -270,8 +271,13 @@ bool sec_bat_get_value_by_adc(
 	const sec_bat_adc_table_data_t *temp_adc_table = {0 , };
 	unsigned int temp_adc_table_size = 0;
 
+	if (check_type == SEC_BATTERY_TEMP_CHECK_FAKE) {
+		value->intval = 300;
+		return true;
+	}
+
 	temp_adc = sec_bat_get_adc_data(battery, channel, battery->pdata->adc_check_count);
-	if ((temp_adc < 0) || (check_type == SEC_BATTERY_TEMP_CHECK_NONE))
+	if (temp_adc < 0)
 		return false;
 
 	switch (channel) {
@@ -317,6 +323,12 @@ bool sec_bat_get_value_by_adc(
 			battery->pdata->sub_bat_temp_adc_table_size;
 		battery->sub_bat_temp_adc = temp_adc;
 		break;		
+	case SEC_BAT_ADC_CHANNEL_BLKT_TEMP:
+		temp_adc_table = battery->pdata->blkt_temp_adc_table;
+		temp_adc_table_size =
+			battery->pdata->blkt_temp_adc_table_size;
+		battery->blkt_temp_adc = temp_adc;
+		break;
 	default:
 		dev_err(battery->dev,
 			"%s: Invalid Property\n", __func__);
@@ -351,10 +363,7 @@ bool sec_bat_get_value_by_adc(
 		(temp_adc_table[low].adc - temp_adc_table[high].adc);
 
 temp_by_adc_goto:
-	if (check_type == SEC_BATTERY_TEMP_CHECK_FAKE)	
-		value->intval = 300;
-	else
-		value->intval = temp;
+	value->intval = temp;
 
 	dev_dbg(battery->dev,
 		"%s:[%d] Temp(%d), Temp-ADC(%d)\n",

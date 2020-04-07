@@ -15,25 +15,33 @@ fw-external-y := $(subst $(quote),,$(CONFIG_EXTRA_FIRMWARE))
 # TSP FW
 fw-external-$(CONFIG_TOUCHSCREEN_SEC_TS_Y771) += tsp_sec/y761_beyond0_phole.bin tsp_sec/y771_beyond1_phole.bin \
 						tsp_sec/y771_beyond2_phole.bin tsp_sec/y771_beyondx_phole.bin
-fw-external-$(CONFIG_TOUCHSCREEN_SEC_TS_Y771_D) += tsp_sec/y771_davinci_bringup.bin tsp_sec/y771_davinci_bringup2nd.bin \
-						tsp_sec/y771_d1_bringup.bin tsp_sec/y771_d2.bin 
+fw-external-$(CONFIG_TOUCHSCREEN_SEC_TS_Y771_D) += tsp_sec/y771_d1.bin tsp_sec/y771_d2.bin \
+						tsp_sec/y771_d1_bringup.bin tsp_sec/y771_davinci_bringup.bin tsp_sec/y771_davinci_bringup2nd.bin
 fw-external-$(CONFIG_TOUCHSCREEN_SEC_TS_Y761_SUB) += tsp_sec/y761_winner.bin
+fw-external-$(CONFIG_TOUCHSCREEN_SEC_TS_Y771_R5) += tsp_sec/y771_r5.bin tsp_sec/y771_r5_1l.bin
+
 fw-external-$(CONFIG_TOUCHSCREEN_FTS9)	+= tsp_stm/fts9cu80f_winner.fw
+fw-external-$(CONFIG_TOUCHSCREEN_FTS9CU80F_B)	+= tsp_stm/fts9cu80f_bloom.fw
 fw-external-$(CONFIG_TOUCHSCREEN_FTS1BA90A)	+= tsp_stm/fts1ba90a_gts5.fw
+fw-external-$(CONFIG_TOUCHSCREEN_ZINITIX_ZTW522)	+= tsp_zinitix/ztw522_bloom.bin
 
-fw-external-$(CONFIG_INPUT_NDT)		+= key_ndt/csa37f61_davincixq.fw
-fw-external-$(CONFIG_KEYBOARD_STM_FSR) 	+= key_stm/fsr1ad04_davinci.fw
+fw-external-$(CONFIG_KEYBOARD_STM_FSR)	+= key_stm/fsr1ad04_davinci.fw key_stm/fsr1ad04_davinci_dv1.fw \
+					key_stm/fsr1ad04_d1.fw key_stm/fsr1ad04_d2.fw
 
-fw-shipped-$(CONFIG_EPEN_WACOM_W9020) += epen/w9020_d.fw
-fw-shipped-$(CONFIG_EPEN_WACOM_W9021) += epen/w9021_gts5l.fw
+fw-shipped-$(CONFIG_EPEN_WACOM_W9020) += epen/w9020_d2.fw epen/w9020_d1.fw
 ifdef CONFIG_SEC_FACTORY
-fw-shipped-$(CONFIG_EPEN_WACOM_W9020) += epen/w9020_d_garage.fw
+fw-shipped-$(CONFIG_EPEN_WACOM_W9020) += epen/w9020_d2_unit.fw epen/w9020_d1_unit.fw
 endif
+fw-shipped-$(CONFIG_EPEN_WACOM_W9021) += epen/w9021_gts5l.fw epen/w9021_gts6x.fw
 
-ifdef CONFIG_WIRELESS_CHARGER_MFC_S2MIW04
-fw-external-$(CONFIG_WIRELESS_FIRMWARE_UPDATE) += mfc/mfc_fw_flash_s2miw04_lsi.bin
-else
+fw-external-$(CONFIG_TOUCHSCREEN_IST40XX) += tsp_imagis/ist40xx_a905g.bin tsp_imagis/ist40xx_a905g_cmcs.bin
+fw-shipped-$(CONFIG_TOUCHSCREEN_MELFAS_MSS100) += tsp_melfas/mss100_r3.fw
+# FPGA
+fw-shipped-$(CONFIG_POGO_FPGA)	+= fpga/pogo_gts5l.fw
+
 fw-external-$(CONFIG_WIRELESS_FIRMWARE_UPDATE) += mfc/mfc_fw_flash.bin
+ifdef CONFIG_WIRELESS_FIRMWARE_UPDATE
+fw-external-$(CONFIG_WIRELESS_CHARGER_MFC_S2MIW04) += mfc/mfc_fw_flash_s2miw04.bin
 endif
 
 ifdef CONFIG_SEC_BEYOND0QLTE_PROJECT
@@ -42,6 +50,15 @@ else ifdef CONFIG_SEC_BEYOND1QLTE_PROJECT
 fw-external-$(CONFIG_SENSORS_A96T3X6) += abov/a96t356_beyond1qlte.bin
 else ifdef CONFIG_SEC_BEYOND2QLTE_PROJECT
 fw-external-$(CONFIG_SENSORS_A96T3X6) += abov/a96t356_beyond2qlte.bin
+else ifdef CONFIG_SEC_GTS6L_PROJECT
+fw-external-$(CONFIG_SENSORS_A96T3X6) += abov/a96t356_gts6llte.bin
+fw-external-$(CONFIG_SENSORS_A96T3X6_WIFI) += abov/a96t356_wifi_gts6llte.bin
+else ifdef CONFIG_SEC_GTS6LWIFI_PROJECT
+fw-external-$(CONFIG_SENSORS_A96T3X6) += abov/a96t356_gts6lwifi.bin
+fw-external-$(CONFIG_SENSORS_A96T3X6_WIFI) += abov/a96t356_wifi_gts6lwifi.bin
+else ifdef CONFIG_SEC_GTS6X_PROJECT
+fw-external-$(CONFIG_SENSORS_A96T3X6) += abov/a96t356_gts6x.bin
+fw-external-$(CONFIG_SENSORS_A96T3X6_WIFI) += abov/a96t356_wifi_gts6x.bin
 else
 fw-external-$(CONFIG_SENSORS_A96T3X6) += abov/a96t356_beyond1qlte.bin
 endif
@@ -121,3 +138,6 @@ targets := $(patsubst $(obj)/%,%, \
 # Without this, built-in.o won't be created when it's empty, and the
 # final vmlinux link will fail.
 obj- := dummy
+
+# SPU signature verify
+obj-y += spu_verify/

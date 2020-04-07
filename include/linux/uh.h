@@ -18,10 +18,15 @@
 /* For uH Memory */
 #define UH_NUM_MEM		0x00
 
-#define UH_LOG_START		0xB0201000
-#define UH_LOG_SIZE		0x4000
+#define UH_LOG_START		0xB0200000
+#define UH_LOG_SIZE		0x40000
 
 int uh_call(u64 app_id, u64 command, u64 arg0, u64 arg1, u64 arg2, u64 arg3);
+
+struct test_case_struct {
+	int (* fn)(void); //test case func
+	char * describe;
+};
 
 #endif //__ASSEMBLY__
 #endif //__UH_H__

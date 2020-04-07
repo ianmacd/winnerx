@@ -27,7 +27,7 @@
  *
  * <<Broadcom-WL-IPTag/Open:>>
  *
- * $Id: dhd_bus.h 808909 2019-03-11 10:41:35Z $
+ * $Id: dhd_bus.h 814378 2019-04-11 02:21:31Z $
  */
 
 #ifndef _dhd_bus_h_
@@ -330,12 +330,10 @@ extern void dhd_msgbuf_iovar_timeout_dump(dhd_pub_t *dhd);
 extern bool dhd_bus_force_bt_quiesce_enabled(struct dhd_bus *bus);
 
 #ifdef DHD_SSSR_DUMP
-extern int dhd_bus_sssr_dump(dhd_pub_t *dhd);
-
 extern int dhd_bus_fis_trigger(dhd_pub_t *dhd);
 extern int dhd_bus_fis_dump(dhd_pub_t *dhd);
-
 #endif /* DHD_SSSR_DUMP */
+
 #ifdef PCIE_FULL_DONGLE
 extern int dhdpcie_set_dma_ring_indices(dhd_pub_t *dhd, int32 int_val);
 #endif /* PCIE_FULL_DONGLE */

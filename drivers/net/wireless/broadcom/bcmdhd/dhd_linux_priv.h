@@ -24,7 +24,7 @@
  *
  * <<Broadcom-WL-IPTag/Open:>>
  *
- * $Id: dhd_linux_priv.h 805819 2019-02-20 10:49:35Z $
+ * $Id: dhd_linux_priv.h 815919 2019-04-22 09:06:50Z $
  */
 
 #ifndef __DHD_LINUX_PRIV_H__
@@ -91,7 +91,7 @@ typedef struct dhd_info {
 	timer_list_compat_t timer;
 	bool wd_timer_valid;
 #ifdef DHD_PCIE_RUNTIMEPM
-	struct timer_list rpm_timer;
+	timer_list_compat_t rpm_timer;
 	bool rpm_timer_valid;
 	tsk_ctl_t	  thr_rpm_ctl;
 #endif /* DHD_PCIE_RUNTIMEPM */
@@ -109,7 +109,7 @@ typedef struct dhd_info {
 	bool		rxthread_enabled;
 
 	/* Wakelocks */
-#if defined(CONFIG_HAS_WAKELOCK) && (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 27))
+#if defined(CONFIG_HAS_WAKELOCK)
 	struct wake_lock wl_wifi;   /* Wifi wakelock */
 	struct wake_lock wl_rxwake; /* Wifi rx wakelock */
 	struct wake_lock wl_ctrlwake; /* Wifi ctrl wakelock */
@@ -123,9 +123,8 @@ typedef struct dhd_info {
 #ifdef DHD_USE_SCAN_WAKELOCK
 	struct wake_lock wl_scanwake;  /* Wifi scan wakelock */
 #endif /* DHD_USE_SCAN_WAKELOCK */
-#endif /* CONFIG_HAS_WAKELOCK && LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 27) */
+#endif /* CONFIG_HAS_WAKELOCK */
 
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 25))
 	/* net_device interface lock, prevent race conditions among net_dev interface
 	 * calls and wifi_on or wifi_off
 	 */
@@ -134,7 +133,6 @@ typedef struct dhd_info {
 #if defined(PKT_FILTER_SUPPORT) && defined(APF)
 	struct mutex dhd_apf_mutex;
 #endif /* PKT_FILTER_SUPPORT && APF */
-#endif // endif
 	spinlock_t wakelock_spinlock;
 	spinlock_t wakelock_evt_spinlock;
 	uint32 wakelock_counter;
@@ -365,8 +363,6 @@ typedef struct dhd_info {
 	struct mutex logdump_lock;
 	/* indicates mem_dump was scheduled as work queue or called directly */
 	bool scheduled_memdump;
-	/* indicates sssrdump is called directly instead of scheduling work queue */
-	bool no_wq_sssrdump;
 	struct work_struct dhd_hang_process_work;
 #ifdef DHD_HP2P
 	spinlock_t	hp2p_lock;

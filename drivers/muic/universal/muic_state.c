@@ -71,6 +71,10 @@ extern int muic_GPIO_control(int gpio);
 extern unsigned int lpcharge;
 #endif
 
+#if defined(CONFIG_MUIC_SUPPORT_KEYBOARDDOCK)
+extern void muic_ADC_rescan(void);
+#endif
+
 extern void muic_send_dock_intent(int type);
 
 extern int muic_wakeup_noti;
@@ -274,7 +278,8 @@ static void muic_handle_attach(muic_data_t *pmuic,
 			pr_info("%s:%s AFC Disable(%d) by WATER!\n", MUIC_DEV_NAME,
 				    __func__, pmuic->afc_water_disable);
 #endif
-		muic_afc_delay_check_state(1);
+		if (!pmuic->pdata->afc_disable)
+			muic_afc_delay_check_state(1);
 #endif
         
 #ifdef CONFIG_MUIC_SM5705_AFC_18W_TA_SUPPORT
@@ -497,10 +502,13 @@ static void muic_handle_detach(muic_data_t *pmuic)
 #if defined(CONFIG_MUIC_SUPPORT_KEYBOARDDOCK)
 static void update_keyboard_state(muic_data_t *pmuic)
 {
-	if (pmuic->keyboard_state)
+	if (pmuic->keyboard_state) {
+		pmuic->adc_rescan_count = 0;
 		keyboard_notifier_attach();
-	else
+	}
+	else {
 		keyboard_notifier_detach();
+	}
 }
 #endif
 
@@ -512,6 +520,10 @@ void muic_detect_dev(muic_data_t *pmuic)
 	struct vendor_ops *pvendor = pmuic->regmapdesc->vendorops;
 	bool dcd;
 #endif
+#if defined(CONFIG_MUIC_SUPPORT_KEYBOARDDOCK)
+	struct i2c_client *i2c = pmuic->i2c;
+	int adc_status = 0;
+#endif
 
 	get_vps_data(pmuic, &pmuic->vps);
 
@@ -520,6 +532,23 @@ void muic_detect_dev(muic_data_t *pmuic)
 		pmuic->vps.s.val3, pmuic->vps.s.adc, pmuic->vps.s.vbvolt);
 	pr_info("%s:%s intr[1:0x%x, 2:0x%x, 3:0x%x]\n", pmuic->chip_name, __func__,
 			pmuic->intr.intr1, pmuic->intr.intr2, pmuic->intr.intr3);
+
+#if defined(CONFIG_MUIC_SUPPORT_KEYBOARDDOCK)
+    	/* ADC scan fail */
+	if( (pmuic->intr.intr1==0x01) && (pmuic->intr.intr2==0x00) && (pmuic->intr.intr3==0x00) )
+	{
+		adc_status = muic_i2c_read_byte(i2c, 0x3B);  /* ADC Hit/Fail STATUS[1:0] : 01:Hit, 10:Fail*/
+		pr_info("%s: ADC STATUS(0x3B):0x%x\n", __func__, adc_status);
+		if ( (pmuic->adc_rescan_count < 5) && ((adc_status & 0x02) == 0x02) && (pmuic->vps.s.adc==0x1F) )
+		{
+			pr_info("%s:Scan Fail :  ADC recan \n", __func__);
+           		 /* ADC rescan */
+			pmuic->adc_rescan_count++;
+			muic_ADC_rescan();
+			return;
+		}
+	}
+#endif
 
 	if (vps_resolve_dev(pmuic, &new_dev, &intr) < 0) {
 		pr_info("%s:%s: discarded.\n",MUIC_DEV_NAME,__func__);

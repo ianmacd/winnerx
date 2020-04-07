@@ -1,4 +1,4 @@
-/* Copyright (c) 2017-2018, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2017-2019, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -47,6 +47,7 @@ enum master_smem_id {
 	SLPI,
 	GPU,
 	DISPLAY,
+	SLPI_ISLAND = 613,
 };
 
 enum master_pid {
@@ -76,8 +77,10 @@ struct msm_rpmh_master_data {
 static const struct msm_rpmh_master_data rpmh_masters[] = {
 	{"MPSS", MPSS, PID_MPSS},
 	{"ADSP", ADSP, PID_ADSP},
+	{"ADSP_ISLAND", SLPI_ISLAND, PID_ADSP},
 	{"CDSP", CDSP, PID_CDSP},
 	{"SLPI", SLPI, PID_SLPI},
+	{"SLPI_ISLAND", SLPI_ISLAND, PID_SLPI},
 	{"GPU", GPU, PID_GPU},
 	{"DISPLAY", DISPLAY, PID_DISPLAY},
 };
@@ -125,25 +128,28 @@ void debug_masterstats_show(char *annotation)
 					rpmh_masters[i].pid,
 					rpmh_masters[i].smem_id, &size);
 
-		if ((!IS_ERR_OR_NULL(record)) && (i > 0))
-			buf_ptr += sprintf(buf_ptr, ", ");
-
 		if (!IS_ERR_OR_NULL(record)) {
 			accumulated_duration = record->accumulated_duration;
 			if (record->last_entered > record->last_exited)
-				accumulated_duration += (arch_counter_get_cntvct() - record->last_entered);
+				accumulated_duration +=
+					(arch_counter_get_cntvct() -
+						record->last_entered);
 
 			duration_sec = GET_SEC(accumulated_duration);
 			duration_msec = GET_MSEC(accumulated_duration);
 
-			buf_ptr += sprintf(buf_ptr, "%s(%d, %u.%u)", rpmh_masters[i].master_name, record->counts,
-				duration_sec, duration_msec);
-		}
-		else {
-			buf_ptr += sprintf(buf_ptr, "\n");
-			break;
+			buf_ptr += sprintf(buf_ptr, "%s(%d, %u.%u), ",
+					rpmh_masters[i].master_name,
+					record->counts,
+					duration_sec, duration_msec);
+		} else {
+			continue;
 		}
 	}
+
+	buf_ptr--;
+	buf_ptr--;
+	buf_ptr += sprintf(buf_ptr, "\n");
 	mutex_unlock(&rpmh_stats_mutex);
 
 	printk(KERN_INFO "%s", buf);

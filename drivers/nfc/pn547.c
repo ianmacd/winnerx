@@ -424,7 +424,7 @@ static void p61_update_access_state(struct pn547_dev *pn547_dev,
 						= P61_STATE_INVALID;
 			pn547_dev->p61_current_state |= current_state;
 		} else {
-			pn547_dev->p61_current_state ^= current_state;
+			pn547_dev->p61_current_state &= (unsigned int)(~current_state);
 			if (!pn547_dev->p61_current_state)
 				pn547_dev->p61_current_state = P61_STATE_IDLE;
 		}
@@ -1507,6 +1507,15 @@ static ssize_t test_store(struct class *class,
 static CLASS_ATTR_RW(test);
 #endif
 
+static ssize_t nfc_support_show(struct class *class,
+		struct class_attribute *attr, char *buf)
+{
+	NFC_LOG_INFO("\n");
+	return 0;
+}
+
+static CLASS_ATTR_RO(nfc_support);
+
 static int pn547_probe(struct i2c_client *client, const struct i2c_device_id *id)
 {
 	int ret;
@@ -1732,13 +1741,22 @@ static int pn547_probe(struct i2c_client *client, const struct i2c_device_id *id
 #ifdef FEATURE_NFC_TEST
 	nfc_class = class_create(THIS_MODULE, "nfc_test");
 	if (IS_ERR(&nfc_class)) {
-		NFC_LOG_ERR("failed to create nfc class\n");
+		NFC_LOG_ERR("failed to create nfc_test class\n");
 	} else {
 		ret = class_create_file(nfc_class, &class_attr_test);
 		if (ret)
-			NFC_LOG_ERR("failed to create file\n");
+			NFC_LOG_ERR("failed to create attr_test file\n");
 	}
 #endif
+	nfc_class = class_create(THIS_MODULE, "nfc");
+	if (IS_ERR(&nfc_class)) {
+		NFC_LOG_ERR("failed to create nfc class\n");
+	} else {
+		ret = class_create_file(nfc_class, &class_attr_nfc_support);
+		if (ret)
+			NFC_LOG_ERR("failed to create nfc_support file\n");
+	}
+
 	pn547_dev->r_buf = kzalloc(sizeof(char) * MAX_BUFFER_SIZE, GFP_KERNEL);
 	if (pn547_dev->r_buf == NULL) {
 		NFC_LOG_ERR("failed to allocate for i2c r_buffer\n");

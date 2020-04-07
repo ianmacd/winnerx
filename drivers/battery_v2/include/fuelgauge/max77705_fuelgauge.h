@@ -137,6 +137,7 @@ struct battery_data_t {
 	u32 ichgterm_2nd;
 	u32 misccfg_2nd;
 	u32 fullsocthr_2nd;
+	u32 rcomp0_offset;
 };
 
 /* FullCap learning setting */
@@ -226,6 +227,7 @@ struct max77705_fuelgauge_data {
 #if defined(CONFIG_BATTERY_CISD)
 	bool valert_count_flag;
 #endif
+	u8 reg_b2[2];
 };
 
 #endif /* __MAX77705_FUELGAUGE_H */

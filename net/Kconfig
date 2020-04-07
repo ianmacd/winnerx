@@ -12,7 +12,7 @@ menuconfig NET
 	  The reason is that some programs need kernel networking support even
 	  when running on a stand-alone machine that isn't connected to any
 	  other computer.
-	  
+
 	  If you are upgrading from an older kernel, you
 	  should consider updating your networking tools too because changes
 	  in the kernel and the tools often go hand in hand. The tools are
@@ -92,13 +92,11 @@ source "net/netlabel/Kconfig"
 	source "net/mptcp/Kconfig"
 #endif
 
-endif # if INET
-
-config ANDROID_PARANOID_NETWORK
-	bool "Only allow certain groups to create sockets"
+config NET_ANALYTICS
+	bool
 	default y
-	help
-		none
+
+endif # if INET
 
 config NETWORK_SECMARK
 	bool "Security Marking"
@@ -244,6 +242,7 @@ source "net/l3mdev/Kconfig"
 source "net/qrtr/Kconfig"
 source "net/ncsi/Kconfig"
 source "net/rmnet_data/Kconfig"
+source "net/rmnet_usb/Kconfig"
 # KNOX NPA - START
 source "net/ncm/Kconfig"
 # KNOX NPA - END
@@ -370,7 +369,7 @@ config NET_TCPPROBE
 
 	Documentation on how to use TCP connection probing can be found
 	at:
-	
+
 	  http://www.linuxfoundation.org/collaborate/workgroups/networking/tcpprobe
 
 	To compile this code as a module, choose M here: the

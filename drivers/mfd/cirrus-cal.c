@@ -62,7 +62,7 @@ struct cirrus_cal_t {
 	unsigned int dsp_input1_cache[CIRRUS_MAX_AMPS];
 	unsigned int dsp_input2_cache[CIRRUS_MAX_AMPS];
 #if defined(CONFIG_SEC_FACTORY) &&  (defined(CONFIG_SEC_WINNERLTE_PROJECT) || \
-	defined(CONFIG_SEC_WINNERX_PROJECT))
+	defined(CONFIG_SEC_WINNERX_PROJECT)|| defined(CONFIG_SEC_ZODIAC_PROJECT))
 	struct snd_soc_codec *codecs[CIRRUS_MAX_AMPS];
 #endif
 };
@@ -97,7 +97,7 @@ struct cirrus_mfd_amp *cirrus_cal_get_amp_from_suffix(const char *suffix)
 }
 
 #if defined(CONFIG_SEC_FACTORY) &&  (defined(CONFIG_SEC_WINNERLTE_PROJECT) || \
-	defined(CONFIG_SEC_WINNERX_PROJECT))
+	defined(CONFIG_SEC_WINNERX_PROJECT)|| defined(CONFIG_SEC_ZODIAC_PROJECT))
 int cirrus_cal_codec_add(struct snd_soc_codec *codec, const char *mfd_suffix)
 {
 	struct cirrus_mfd_amp *amp = cirrus_cal_get_amp_from_suffix(mfd_suffix);
@@ -1009,7 +1009,7 @@ static ssize_t cirrus_cal_v_status_store(struct device *dev,
 }
 
 #if defined(CONFIG_SEC_FACTORY) &&  (defined(CONFIG_SEC_WINNERLTE_PROJECT) || \
-	defined(CONFIG_SEC_WINNERX_PROJECT))
+	defined(CONFIG_SEC_WINNERX_PROJECT)|| defined(CONFIG_SEC_ZODIAC_PROJECT))
 static ssize_t cirrus_cal_reinit_show(struct device *dev,
 					struct device_attribute *attr,
 					char *buf)
@@ -1233,7 +1233,7 @@ static DEVICE_ATTR(v_status, 0664, cirrus_cal_v_status_show,
 static DEVICE_ATTR(temp_stored, 0444, cirrus_cal_temp_stored_show,
 				cirrus_cal_temp_stored_store);
 #if defined(CONFIG_SEC_FACTORY) &&  (defined(CONFIG_SEC_WINNERLTE_PROJECT) || \
-	defined(CONFIG_SEC_WINNERX_PROJECT))
+	defined(CONFIG_SEC_WINNERX_PROJECT)|| defined(CONFIG_SEC_ZODIAC_PROJECT))
 static DEVICE_ATTR(reinit, 0664, cirrus_cal_reinit_show,
 				cirrus_cal_reinit_store);
 #endif
@@ -1286,7 +1286,7 @@ static struct attribute *cirrus_cal_attr_base[] = {
 	&dev_attr_v_status.attr,
 	&dev_attr_temp_stored.attr,
 #if defined(CONFIG_SEC_FACTORY) &&  (defined(CONFIG_SEC_WINNERLTE_PROJECT) || \
-	defined(CONFIG_SEC_WINNERX_PROJECT))
+	defined(CONFIG_SEC_WINNERX_PROJECT)|| defined(CONFIG_SEC_ZODIAC_PROJECT))
 	&dev_attr_reinit.attr,
 #endif
 	NULL,

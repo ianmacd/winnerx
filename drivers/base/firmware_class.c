@@ -37,14 +37,6 @@
 
 #include "base.h"
 
-#ifdef dev_dbg
-#undef dev_dbg
-#define dev_dbg(dev, format, ...)		     \
-do {						     \
-	dev_info(dev, format, ##__VA_ARGS__); \
-} while (0)
-#endif
-
 MODULE_AUTHOR("Manuel Estrada Sainz");
 MODULE_DESCRIPTION("Multi purpose firmware loading support");
 MODULE_LICENSE("GPL");
@@ -396,6 +388,9 @@ static const char * const fw_path[] = {
 	"/lib/firmware",
 	"/firmware/image",
 	"/vendor/firmware-modem/image"
+#ifdef CONFIG_SUPPORT_SSC_SPU
+        ,"/spu/sensorhub"
+#endif
 };
 
 /*

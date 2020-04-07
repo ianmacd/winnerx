@@ -27,7 +27,7 @@
  *
  * <<Broadcom-WL-IPTag/Open:>>
  *
- * $Id: bcmmsgbuf.h 798337 2019-01-08 06:14:13Z $
+ * $Id: bcmmsgbuf.h 814986 2019-04-15 21:18:21Z $
  */
 #ifndef _bcmmsgbuf_h_
 #define	_bcmmsgbuf_h_
@@ -985,7 +985,7 @@ typedef struct host_txbuf_post {
 		struct {
 			/** extended transmit flags */
 			uint8 ext_flags;
-			uint8 rsvd1;
+			uint8 scale_factor;
 
 			/** user defined rate */
 			uint8 rate;
@@ -1006,6 +1006,9 @@ typedef struct host_txbuf_post {
 
 #define BCMPCIE_PKT_FLAGS_FRAME_EXEMPT_MASK	0x03	/* Exempt uses 2 bits */
 #define BCMPCIE_PKT_FLAGS_FRAME_EXEMPT_SHIFT	0x02	/* needs to be shifted past other bits */
+
+#define BCMPCIE_PKT_FLAGS_EPOCH_SHIFT           3u
+#define BCMPCIE_PKT_FLAGS_EPOCH_MASK            (1u << BCMPCIE_PKT_FLAGS_EPOCH_SHIFT)
 
 #define BCMPCIE_PKT_FLAGS_PRIO_SHIFT		5
 #define BCMPCIE_PKT_FLAGS_PRIO_MASK		(7 << BCMPCIE_PKT_FLAGS_PRIO_SHIFT)

@@ -38,6 +38,9 @@
 #include <linux/of_device.h>
 #include <linux/platform_device.h>
 #include <linux/platform_data/cs40l2x.h>
+#if defined(CONFIG_VIB_NOTIFIER)
+#include <linux/vib_notifier.h>
+#endif
 
 #include "cs40l2x-private.h"
 
@@ -91,7 +94,6 @@ struct cs40l2x_private {
 	unsigned int q_measured;
 #ifdef CONFIG_CS40L2X_SAMSUNG_FEATURE
 	unsigned int intensity;
-	unsigned int force_touch_intensity;
 	EVENT_STATUS save_vib_event;
 #endif
 	struct cs40l2x_pbq_pair pbq_pairs[CS40L2X_PBQ_DEPTH_MAX];
@@ -121,6 +123,7 @@ struct cs40l2x_private {
 	bool comp_enable_redc;
 	bool comp_enable_f0;
 	bool amp_gnd_stby;
+	bool regdump_done;
 	struct cs40l2x_wseq_pair dsp_cache[CS40L2X_DSP_CACHE_MAX];
 	unsigned int dsp_cache_depth;
 #ifdef CONFIG_ANDROID_TIMED_OUTPUT
@@ -179,7 +182,7 @@ static int cs40l2x_basic_mode_exit(struct cs40l2x_private *cs40l2x);
 
 static int cs40l2x_firmware_swap(struct cs40l2x_private *cs40l2x,
 			unsigned int fw_id);
-			
+
 static int cs40l2x_wavetable_swap(struct cs40l2x_private *cs40l2x,
 			const char *wt_file);
 static int cs40l2x_wavetable_sync(struct cs40l2x_private *cs40l2x);
@@ -200,13 +203,14 @@ static const int FOLDER_TYPE = 1;
 #else
 static const int FOLDER_TYPE = 0;
 #endif
+static bool vib_disable = 0;
 #endif
 
 #ifdef CONFIG_MOTOR_DRV_CS40L2X_PMIC_RESET
 static int regulator_vldo_control(struct cs40l2x_private *cs40l2x, int on) {
 	struct regulator *vldo = cs40l2x->reset_vldo;
 	int ret = 0, voltage = 0;
-	
+
 	if (IS_ERR(vldo)) {
 		pr_err("%s: can't request VLDO power supply: %ld\n",
 			__func__, PTR_ERR(vldo));
@@ -221,7 +225,7 @@ static int regulator_vldo_control(struct cs40l2x_private *cs40l2x, int on) {
 		else {
 			ret = regulator_enable(vldo);
 		}
-			
+
 	}
 	else {
 		if (regulator_is_enabled(vldo))
@@ -323,7 +327,7 @@ static int cs40l2x_dig_scale_set(struct cs40l2x_private *cs40l2x,
 static int set_current_dig_scale(struct cs40l2x_private *cs40l2x) {
 	EVENT_STATUS *status;
 	int scale = 0;
-	
+
 	if(cs40l2x == NULL) {
 		pr_err("%s: device is null\n", __func__);
 		return -EINVAL;
@@ -413,15 +417,16 @@ static void set_cp_trigger_index_for_dig_scale(struct cs40l2x_private *cs40l2x)
 			__func__, trigger_idx);
 		return;
 	}
-	
+
 	switch (trigger_idx) {
 	case 10:
 	case 11:
 	case 15:
+	case 17:
 	case 23:
 	case 24:
 	case 25:
-	case 31 ... 50:
+	case 31 ... 70:
 		short_duration = 1;
 		break;
 	default:
@@ -431,7 +436,7 @@ static void set_cp_trigger_index_for_dig_scale(struct cs40l2x_private *cs40l2x)
 
 	if(short_duration != status->EVENTS.SHORT_DURATION) {
 		status->EVENTS.SHORT_DURATION = short_duration;
-		set_current_dig_scale(cs40l2x);	
+		set_current_dig_scale(cs40l2x);
 	}
 }
 
@@ -846,7 +851,6 @@ static int cs40l2x_dsp_cache(struct cs40l2x_private *cs40l2x,
 	return 0;
 }
 
-
 static int cs40l2x_wseq_add_reg(struct cs40l2x_private *cs40l2x,
 			unsigned int reg, unsigned int val)
 {
@@ -945,11 +949,10 @@ static int cs40l2x_user_ctrl_exec(struct cs40l2x_private *cs40l2x,
 {
 	struct regmap *regmap = cs40l2x->regmap;
 	struct device *dev = cs40l2x->dev;
-	unsigned int val;
 	unsigned int user_ctrl_reg = cs40l2x_dsp_reg(cs40l2x,
 			"USER_CONTROL_IPDATA",
 			CS40L2X_XM_UNPACKED_TYPE, cs40l2x->fw_desc->id);
-	int ret, i;
+	int ret;
 
 	if (!user_ctrl_reg)
 		return -EPERM;
@@ -960,59 +963,19 @@ static int cs40l2x_user_ctrl_exec(struct cs40l2x_private *cs40l2x,
 		return ret;
 	}
 
-	ret = regmap_write(regmap, CS40L2X_MBOX_USER_CONTROL, user_ctrl_cmd);
-	if (ret) {
-		dev_err(dev, "Failed to write user-control command\n");
+	ret = cs40l2x_ack_write(cs40l2x, CS40L2X_MBOX_USER_CONTROL,
+			user_ctrl_cmd, CS40L2X_USER_CTRL_SUCCESS);
+	if (ret)
 		return ret;
-	}
-
-	for (i = 0; i < CS40L2X_UCTRL_TIMEOUT_COUNT; i++) {
-		ret = regmap_read(regmap, CS40L2X_MBOX_USER_CONTROL, &val);
-		if (ret) {
-			dev_err(dev, "Failed to read user-control command\n");
-			return ret;
-		}
-
-		if (val != user_ctrl_cmd)
-			break;
-
-		usleep_range(1000, 1100);
-	}
-
-	if (i == CS40L2X_UCTRL_TIMEOUT_COUNT) {
-		dev_err(dev, "Timed out waiting for user-control response\n");
-		return -ETIME;
-	}
-
-	switch (val) {
-	case CS40L2X_USER_CTRL_SUCCESS:
-		break;
-	case CS40L2X_USER_CTRL_ERR_MIN ... CS40L2X_USER_CTRL_ERR_MAX:
-		dev_err(dev, "Unexpected user-control response: %d\n",
-				val - (CS40L2X_USER_CTRL_ERR_MAX + 1));
-		return -EIO;
-	default:
-		dev_err(dev, "Unrecognized user-control response: 0x%06X\n",
-				val);
-		return -EINVAL;
-	}
 
 	if (!user_ctrl_resp)
 		return 0;
 
-	ret = regmap_read(regmap,
+	return regmap_read(regmap,
 			cs40l2x_dsp_reg(cs40l2x, "USER_CONTROL_RESPONSE",
 					CS40L2X_XM_UNPACKED_TYPE,
 					cs40l2x->fw_desc->id),
-			&val);
-	if (ret) {
-		dev_err(dev, "Failed to read user-control response\n");
-		return ret;
-	}
-
-	*user_ctrl_resp = val;
-
-	return 0;
+			user_ctrl_resp);
 }
 
 static ssize_t cs40l2x_cp_trigger_duration_show(struct device *dev,
@@ -1102,15 +1065,24 @@ err_mutex:
 static int cs40l2x_hiber_cmd_send(struct cs40l2x_private *cs40l2x,
 			unsigned int hiber_cmd)
 {
-	int ret, i;
+	struct regmap *regmap = cs40l2x->regmap;
 	unsigned int val;
+	int ret, i, j;
 
 	switch (hiber_cmd) {
 	case CS40L2X_POWERCONTROL_NONE:
+	case CS40L2X_POWERCONTROL_FRC_STDBY:
+		return cs40l2x_ack_write(cs40l2x,
+				CS40L2X_MBOX_POWERCONTROL, hiber_cmd,
+				CS40L2X_POWERCONTROL_NONE);
+
 	case CS40L2X_POWERCONTROL_HIBERNATE:
-		return regmap_write(cs40l2x->regmap,
-				CS40L2X_MBOX_POWERCONTROL,
-				hiber_cmd);
+		/*
+		 * control port is unavailable immediately after
+		 * this write, so don't poll for acknowledgment
+		 */
+		return regmap_write(regmap,
+				CS40L2X_MBOX_POWERCONTROL, hiber_cmd);
 
 	case CS40L2X_POWERCONTROL_WAKEUP:
 		for (i = 0; i < CS40L2X_WAKEUP_RETRIES; i++) {
@@ -1118,21 +1090,51 @@ static int cs40l2x_hiber_cmd_send(struct cs40l2x_private *cs40l2x,
 			 * the first several transactions are expected to be
 			 * NAK'd, so retry multiple times in rapid succession
 			 */
-			ret = regmap_write(cs40l2x->regmap,
-					CS40L2X_MBOX_POWERCONTROL,
-					hiber_cmd);
-			if (!ret)
+			ret = regmap_write(regmap,
+					CS40L2X_MBOX_POWERCONTROL, hiber_cmd);
+			if (ret) {
+				usleep_range(1000, 1100);
+				continue;
+			}
+
+			/*
+			 * verify the previous firmware ID remains intact and
+			 * brute-force a dummy hibernation cycle if otherwise
+			 */
+			for (j = 0; j < CS40L2X_STATUS_RETRIES; j++) {
+				usleep_range(5000, 5100);
+
+				ret = regmap_read(regmap,
+						CS40L2X_XM_FW_ID, &val);
+				if (ret)
+					return ret;
+
+				if (val == cs40l2x->fw_desc->id)
+					break;
+			}
+			if (j < CS40L2X_STATUS_RETRIES)
 				break;
+
+			dev_warn(cs40l2x->dev,
+					"Unexpected firmware ID: 0x%06X\n",
+					val);
+
+			/*
+			 * this write may force the device into hibernation
+			 * before the ACK is returned, so ignore the return
+			 * value
+			 */
+			regmap_write(regmap, CS40L2X_PWRMGT_CTL,
+					(1 << CS40L2X_MEM_RDY_SHIFT) |
+					(1 << CS40L2X_TRIG_HIBER_SHIFT));
 
 			usleep_range(1000, 1100);
 		}
 		if (i == CS40L2X_WAKEUP_RETRIES)
 			return -EIO;
 
-		for (i = 0; i < CS40L2X_WAKEUP_RETRIES; i++) {
-			usleep_range(5000, 5100);
-
-			ret = regmap_read(cs40l2x->regmap,
+		for (i = 0; i < CS40L2X_STATUS_RETRIES; i++) {
+			ret = regmap_read(regmap,
 					cs40l2x_dsp_reg(cs40l2x, "POWERSTATE",
 						CS40L2X_XM_UNPACKED_TYPE,
 						cs40l2x->fw_desc->id),
@@ -1140,29 +1142,17 @@ static int cs40l2x_hiber_cmd_send(struct cs40l2x_private *cs40l2x,
 			if (ret)
 				return ret;
 
-			if (val != CS40L2X_POWERSTATE_HIBERNATE)
+			switch (val) {
+			case CS40L2X_POWERSTATE_ACTIVE:
+			case CS40L2X_POWERSTATE_STANDBY:
 				return 0;
-		}
-		return -ETIME;
+			case CS40L2X_POWERSTATE_HIBERNATE:
+				break;
+			default:
+				return -EINVAL;
+			}
 
-	case CS40L2X_POWERCONTROL_FRC_STDBY:
-		ret = regmap_write(cs40l2x->regmap,
-				CS40L2X_MBOX_POWERCONTROL,
-				hiber_cmd);
-		if (ret)
-			return ret;
-
-		for (i = 0; i < CS40L2X_WAKEUP_RETRIES; i++) {
-			ret = regmap_read(cs40l2x->regmap,
-					CS40L2X_MBOX_POWERCONTROL,
-					&val);
-			if (ret)
-				return ret;
-
-			if (val == CS40L2X_POWERCONTROL_NONE)
-				return 0;
-
-			usleep_range(1000, 1100);
+			usleep_range(5000, 5100);
 		}
 		return -ETIME;
 
@@ -1341,31 +1331,69 @@ err_mutex:
 	return ret;
 }
 
+static int cs40l2x_gpio_edge_index_get(struct cs40l2x_private *cs40l2x,
+			unsigned int *index,
+			unsigned int gpio_offs, bool gpio_rise)
+{
+	bool gpio_pol = cs40l2x->pdata.gpio_indv_pol & (1 << (gpio_offs >> 2));
+	unsigned int reg = cs40l2x_dsp_reg(cs40l2x,
+			gpio_pol ^ gpio_rise ? "INDEXBUTTONPRESS" :
+				"INDEXBUTTONRELEASE",
+			CS40L2X_XM_UNPACKED_TYPE, cs40l2x->fw_desc->id);
+
+	if (!reg)
+		return -EPERM;
+	reg += gpio_offs;
+
+	if (!(cs40l2x->gpio_mask & (1 << (gpio_offs >> 2))))
+		return -EPERM;
+
+	return regmap_read(cs40l2x->regmap, reg, index);
+}
+
+static int cs40l2x_gpio_edge_index_set(struct cs40l2x_private *cs40l2x,
+			unsigned int index,
+			unsigned int gpio_offs, bool gpio_rise)
+{
+	bool gpio_pol = cs40l2x->pdata.gpio_indv_pol & (1 << (gpio_offs >> 2));
+	unsigned int reg = cs40l2x_dsp_reg(cs40l2x,
+			gpio_pol ^ gpio_rise ? "INDEXBUTTONPRESS" :
+				"INDEXBUTTONRELEASE",
+			CS40L2X_XM_UNPACKED_TYPE, cs40l2x->fw_desc->id);
+	int ret;
+
+	if (!reg)
+		return -EPERM;
+	reg += gpio_offs;
+
+	if (!(cs40l2x->gpio_mask & (1 << (gpio_offs >> 2))))
+		return -EPERM;
+
+	if (index > (cs40l2x->num_waves - 1))
+		return -EINVAL;
+
+	ret = regmap_write(cs40l2x->regmap, reg, index);
+	if (ret)
+		return ret;
+
+	return cs40l2x_dsp_cache(cs40l2x, reg, index);
+}
+
 static ssize_t cs40l2x_gpio1_rise_index_show(struct device *dev,
 			struct device_attribute *attr, char *buf)
 {
 	struct cs40l2x_private *cs40l2x = cs40l2x_get_private(dev);
 	int ret;
-	unsigned int reg, index;
-
-	if (!(cs40l2x->gpio_mask & CS40L2X_GPIO_BTNDETECT_GPIO1))
-		return -EPERM;
+	unsigned int index;
 
 	mutex_lock(&cs40l2x->lock);
 
-	reg = cs40l2x_dsp_reg(cs40l2x, "INDEXBUTTONPRESS",
-			CS40L2X_XM_UNPACKED_TYPE, cs40l2x->fw_desc->id);
-	if (!reg) {
-		ret = -EPERM;
-		goto err_mutex;
-	}
-
-	ret = regmap_read(cs40l2x->regmap,
-			reg + CS40L2X_INDEXBUTTONPRESS1, &index);
+	ret = cs40l2x_gpio_edge_index_get(cs40l2x, &index,
+			CS40L2X_INDEXBUTTONPRESS1, CS40L2X_GPIO_RISE);
 	if (ret)
 		goto err_mutex;
 
-	ret = snprintf(buf, PAGE_SIZE, "%d\n", index);
+	ret = snprintf(buf, PAGE_SIZE, "%u\n", index);
 
 err_mutex:
 	mutex_unlock(&cs40l2x->lock);
@@ -1379,10 +1407,7 @@ static ssize_t cs40l2x_gpio1_rise_index_store(struct device *dev,
 {
 	struct cs40l2x_private *cs40l2x = cs40l2x_get_private(dev);
 	int ret;
-	unsigned int reg, index;
-
-	if (!(cs40l2x->gpio_mask & CS40L2X_GPIO_BTNDETECT_GPIO1))
-		return -EPERM;
+	unsigned int index;
 
 	ret = kstrtou32(buf, 10, &index);
 	if (ret)
@@ -1394,25 +1419,8 @@ static ssize_t cs40l2x_gpio1_rise_index_store(struct device *dev,
 
 	mutex_lock(&cs40l2x->lock);
 
-	if (index > (cs40l2x->num_waves - 1)) {
-		ret = -EINVAL;
-		goto err_mutex;
-	}
-
-	reg = cs40l2x_dsp_reg(cs40l2x, "INDEXBUTTONPRESS",
-			CS40L2X_XM_UNPACKED_TYPE, cs40l2x->fw_desc->id);
-	if (!reg) {
-		ret = -EPERM;
-		goto err_mutex;
-	}
-
-	ret = regmap_write(cs40l2x->regmap,
-			reg + CS40L2X_INDEXBUTTONPRESS1, index);
-	if (ret)
-		goto err_mutex;
-
-	ret = cs40l2x_dsp_cache(cs40l2x,
-			reg + CS40L2X_INDEXBUTTONPRESS1, index);
+	ret = cs40l2x_gpio_edge_index_set(cs40l2x, index,
+			CS40L2X_INDEXBUTTONPRESS1, CS40L2X_GPIO_RISE);
 	if (ret)
 		goto err_mutex;
 
@@ -1429,26 +1437,16 @@ static ssize_t cs40l2x_gpio1_fall_index_show(struct device *dev,
 {
 	struct cs40l2x_private *cs40l2x = cs40l2x_get_private(dev);
 	int ret;
-	unsigned int reg, index;
-
-	if (!(cs40l2x->gpio_mask & CS40L2X_GPIO_BTNDETECT_GPIO1))
-		return -EPERM;
+	unsigned int index;
 
 	mutex_lock(&cs40l2x->lock);
 
-	reg = cs40l2x_dsp_reg(cs40l2x, "INDEXBUTTONRELEASE",
-			CS40L2X_XM_UNPACKED_TYPE, cs40l2x->fw_desc->id);
-	if (!reg) {
-		ret = -EPERM;
-		goto err_mutex;
-	}
-
-	ret = regmap_read(cs40l2x->regmap,
-			reg + CS40L2X_INDEXBUTTONRELEASE1, &index);
+	ret = cs40l2x_gpio_edge_index_get(cs40l2x, &index,
+			CS40L2X_INDEXBUTTONRELEASE1, CS40L2X_GPIO_FALL);
 	if (ret)
 		goto err_mutex;
 
-	ret = snprintf(buf, PAGE_SIZE, "%d\n", index);
+	ret = snprintf(buf, PAGE_SIZE, "%u\n", index);
 
 err_mutex:
 	mutex_unlock(&cs40l2x->lock);
@@ -1462,10 +1460,7 @@ static ssize_t cs40l2x_gpio1_fall_index_store(struct device *dev,
 {
 	struct cs40l2x_private *cs40l2x = cs40l2x_get_private(dev);
 	int ret;
-	unsigned int reg, index;
-
-	if (!(cs40l2x->gpio_mask & CS40L2X_GPIO_BTNDETECT_GPIO1))
-		return -EPERM;
+	unsigned int index;
 
 	ret = kstrtou32(buf, 10, &index);
 	if (ret)
@@ -1477,25 +1472,8 @@ static ssize_t cs40l2x_gpio1_fall_index_store(struct device *dev,
 
 	mutex_lock(&cs40l2x->lock);
 
-	if (index > (cs40l2x->num_waves - 1)) {
-		ret = -EINVAL;
-		goto err_mutex;
-	}
-
-	reg = cs40l2x_dsp_reg(cs40l2x, "INDEXBUTTONRELEASE",
-			CS40L2X_XM_UNPACKED_TYPE, cs40l2x->fw_desc->id);
-	if (!reg) {
-		ret = -EPERM;
-		goto err_mutex;
-	}
-
-	ret = regmap_write(cs40l2x->regmap,
-			reg + CS40L2X_INDEXBUTTONRELEASE1, index);
-	if (ret)
-		goto err_mutex;
-
-	ret = cs40l2x_dsp_cache(cs40l2x,
-			reg + CS40L2X_INDEXBUTTONRELEASE1, index);
+	ret = cs40l2x_gpio_edge_index_set(cs40l2x, index,
+			CS40L2X_INDEXBUTTONRELEASE1, CS40L2X_GPIO_FALL);
 	if (ret)
 		goto err_mutex;
 
@@ -1580,26 +1558,16 @@ static ssize_t cs40l2x_gpio2_rise_index_show(struct device *dev,
 {
 	struct cs40l2x_private *cs40l2x = cs40l2x_get_private(dev);
 	int ret;
-	unsigned int reg, index;
-
-	if (!(cs40l2x->gpio_mask & CS40L2X_GPIO_BTNDETECT_GPIO2))
-		return -EPERM;
+	unsigned int index;
 
 	mutex_lock(&cs40l2x->lock);
 
-	reg = cs40l2x_dsp_reg(cs40l2x, "INDEXBUTTONPRESS",
-			CS40L2X_XM_UNPACKED_TYPE, cs40l2x->fw_desc->id);
-	if (!reg) {
-		ret = -EPERM;
-		goto err_mutex;
-	}
-
-	ret = regmap_read(cs40l2x->regmap,
-			reg + CS40L2X_INDEXBUTTONPRESS2, &index);
+	ret = cs40l2x_gpio_edge_index_get(cs40l2x, &index,
+			CS40L2X_INDEXBUTTONPRESS2, CS40L2X_GPIO_RISE);
 	if (ret)
 		goto err_mutex;
 
-	ret = snprintf(buf, PAGE_SIZE, "%d\n", index);
+	ret = snprintf(buf, PAGE_SIZE, "%u\n", index);
 
 err_mutex:
 	mutex_unlock(&cs40l2x->lock);
@@ -1613,10 +1581,7 @@ static ssize_t cs40l2x_gpio2_rise_index_store(struct device *dev,
 {
 	struct cs40l2x_private *cs40l2x = cs40l2x_get_private(dev);
 	int ret;
-	unsigned int reg, index;
-
-	if (!(cs40l2x->gpio_mask & CS40L2X_GPIO_BTNDETECT_GPIO2))
-		return -EPERM;
+	unsigned int index;
 
 	ret = kstrtou32(buf, 10, &index);
 	if (ret)
@@ -1624,25 +1589,8 @@ static ssize_t cs40l2x_gpio2_rise_index_store(struct device *dev,
 
 	mutex_lock(&cs40l2x->lock);
 
-	if (index > (cs40l2x->num_waves - 1)) {
-		ret = -EINVAL;
-		goto err_mutex;
-	}
-
-	reg = cs40l2x_dsp_reg(cs40l2x, "INDEXBUTTONPRESS",
-			CS40L2X_XM_UNPACKED_TYPE, cs40l2x->fw_desc->id);
-	if (!reg) {
-		ret = -EPERM;
-		goto err_mutex;
-	}
-
-	ret = regmap_write(cs40l2x->regmap,
-			reg + CS40L2X_INDEXBUTTONPRESS2, index);
-	if (ret)
-		goto err_mutex;
-
-	ret = cs40l2x_dsp_cache(cs40l2x,
-			reg + CS40L2X_INDEXBUTTONPRESS2, index);
+	ret = cs40l2x_gpio_edge_index_set(cs40l2x, index,
+			CS40L2X_INDEXBUTTONPRESS2, CS40L2X_GPIO_RISE);
 	if (ret)
 		goto err_mutex;
 
@@ -1659,26 +1607,16 @@ static ssize_t cs40l2x_gpio2_fall_index_show(struct device *dev,
 {
 	struct cs40l2x_private *cs40l2x = cs40l2x_get_private(dev);
 	int ret;
-	unsigned int reg, index;
-
-	if (!(cs40l2x->gpio_mask & CS40L2X_GPIO_BTNDETECT_GPIO2))
-		return -EPERM;
+	unsigned int index;
 
 	mutex_lock(&cs40l2x->lock);
 
-	reg = cs40l2x_dsp_reg(cs40l2x, "INDEXBUTTONRELEASE",
-			CS40L2X_XM_UNPACKED_TYPE, cs40l2x->fw_desc->id);
-	if (!reg) {
-		ret = -EPERM;
-		goto err_mutex;
-	}
-
-	ret = regmap_read(cs40l2x->regmap,
-			reg + CS40L2X_INDEXBUTTONRELEASE2, &index);
+	ret = cs40l2x_gpio_edge_index_get(cs40l2x, &index,
+			CS40L2X_INDEXBUTTONRELEASE2, CS40L2X_GPIO_FALL);
 	if (ret)
 		goto err_mutex;
 
-	ret = snprintf(buf, PAGE_SIZE, "%d\n", index);
+	ret = snprintf(buf, PAGE_SIZE, "%u\n", index);
 
 err_mutex:
 	mutex_unlock(&cs40l2x->lock);
@@ -1692,10 +1630,7 @@ static ssize_t cs40l2x_gpio2_fall_index_store(struct device *dev,
 {
 	struct cs40l2x_private *cs40l2x = cs40l2x_get_private(dev);
 	int ret;
-	unsigned int reg, index;
-
-	if (!(cs40l2x->gpio_mask & CS40L2X_GPIO_BTNDETECT_GPIO2))
-		return -EPERM;
+	unsigned int index;
 
 	ret = kstrtou32(buf, 10, &index);
 	if (ret)
@@ -1703,25 +1638,8 @@ static ssize_t cs40l2x_gpio2_fall_index_store(struct device *dev,
 
 	mutex_lock(&cs40l2x->lock);
 
-	if (index > (cs40l2x->num_waves - 1)) {
-		ret = -EINVAL;
-		goto err_mutex;
-	}
-
-	reg = cs40l2x_dsp_reg(cs40l2x, "INDEXBUTTONRELEASE",
-			CS40L2X_XM_UNPACKED_TYPE, cs40l2x->fw_desc->id);
-	if (!reg) {
-		ret = -EPERM;
-		goto err_mutex;
-	}
-
-	ret = regmap_write(cs40l2x->regmap,
-			reg + CS40L2X_INDEXBUTTONRELEASE2, index);
-	if (ret)
-		goto err_mutex;
-
-	ret = cs40l2x_dsp_cache(cs40l2x,
-			reg + CS40L2X_INDEXBUTTONRELEASE2, index);
+	ret = cs40l2x_gpio_edge_index_set(cs40l2x, index,
+			CS40L2X_INDEXBUTTONRELEASE2, CS40L2X_GPIO_FALL);
 	if (ret)
 		goto err_mutex;
 
@@ -1738,26 +1656,16 @@ static ssize_t cs40l2x_gpio3_rise_index_show(struct device *dev,
 {
 	struct cs40l2x_private *cs40l2x = cs40l2x_get_private(dev);
 	int ret;
-	unsigned int reg, index;
-
-	if (!(cs40l2x->gpio_mask & CS40L2X_GPIO_BTNDETECT_GPIO3))
-		return -EPERM;
+	unsigned int index;
 
 	mutex_lock(&cs40l2x->lock);
 
-	reg = cs40l2x_dsp_reg(cs40l2x, "INDEXBUTTONPRESS",
-			CS40L2X_XM_UNPACKED_TYPE, cs40l2x->fw_desc->id);
-	if (!reg) {
-		ret = -EPERM;
-		goto err_mutex;
-	}
-
-	ret = regmap_read(cs40l2x->regmap,
-			reg + CS40L2X_INDEXBUTTONPRESS3, &index);
+	ret = cs40l2x_gpio_edge_index_get(cs40l2x, &index,
+			CS40L2X_INDEXBUTTONPRESS3, CS40L2X_GPIO_RISE);
 	if (ret)
 		goto err_mutex;
 
-	ret = snprintf(buf, PAGE_SIZE, "%d\n", index);
+	ret = snprintf(buf, PAGE_SIZE, "%u\n", index);
 
 err_mutex:
 	mutex_unlock(&cs40l2x->lock);
@@ -1771,10 +1679,7 @@ static ssize_t cs40l2x_gpio3_rise_index_store(struct device *dev,
 {
 	struct cs40l2x_private *cs40l2x = cs40l2x_get_private(dev);
 	int ret;
-	unsigned int reg, index;
-
-	if (!(cs40l2x->gpio_mask & CS40L2X_GPIO_BTNDETECT_GPIO3))
-		return -EPERM;
+	unsigned int index;
 
 	ret = kstrtou32(buf, 10, &index);
 	if (ret)
@@ -1782,25 +1687,8 @@ static ssize_t cs40l2x_gpio3_rise_index_store(struct device *dev,
 
 	mutex_lock(&cs40l2x->lock);
 
-	if (index > (cs40l2x->num_waves - 1)) {
-		ret = -EINVAL;
-		goto err_mutex;
-	}
-
-	reg = cs40l2x_dsp_reg(cs40l2x, "INDEXBUTTONPRESS",
-			CS40L2X_XM_UNPACKED_TYPE, cs40l2x->fw_desc->id);
-	if (!reg) {
-		ret = -EPERM;
-		goto err_mutex;
-	}
-
-	ret = regmap_write(cs40l2x->regmap,
-			reg + CS40L2X_INDEXBUTTONPRESS3, index);
-	if (ret)
-		goto err_mutex;
-
-	ret = cs40l2x_dsp_cache(cs40l2x,
-			reg + CS40L2X_INDEXBUTTONPRESS3, index);
+	ret = cs40l2x_gpio_edge_index_set(cs40l2x, index,
+			CS40L2X_INDEXBUTTONPRESS3, CS40L2X_GPIO_RISE);
 	if (ret)
 		goto err_mutex;
 
@@ -1817,26 +1705,16 @@ static ssize_t cs40l2x_gpio3_fall_index_show(struct device *dev,
 {
 	struct cs40l2x_private *cs40l2x = cs40l2x_get_private(dev);
 	int ret;
-	unsigned int reg, index;
-
-	if (!(cs40l2x->gpio_mask & CS40L2X_GPIO_BTNDETECT_GPIO3))
-		return -EPERM;
+	unsigned int index;
 
 	mutex_lock(&cs40l2x->lock);
 
-	reg = cs40l2x_dsp_reg(cs40l2x, "INDEXBUTTONRELEASE",
-			CS40L2X_XM_UNPACKED_TYPE, cs40l2x->fw_desc->id);
-	if (!reg) {
-		ret = -EPERM;
-		goto err_mutex;
-	}
-
-	ret = regmap_read(cs40l2x->regmap,
-			reg + CS40L2X_INDEXBUTTONRELEASE3, &index);
+	ret = cs40l2x_gpio_edge_index_get(cs40l2x, &index,
+			CS40L2X_INDEXBUTTONRELEASE3, CS40L2X_GPIO_FALL);
 	if (ret)
 		goto err_mutex;
 
-	ret = snprintf(buf, PAGE_SIZE, "%d\n", index);
+	ret = snprintf(buf, PAGE_SIZE, "%u\n", index);
 
 err_mutex:
 	mutex_unlock(&cs40l2x->lock);
@@ -1850,10 +1728,7 @@ static ssize_t cs40l2x_gpio3_fall_index_store(struct device *dev,
 {
 	struct cs40l2x_private *cs40l2x = cs40l2x_get_private(dev);
 	int ret;
-	unsigned int reg, index;
-
-	if (!(cs40l2x->gpio_mask & CS40L2X_GPIO_BTNDETECT_GPIO3))
-		return -EPERM;
+	unsigned int index;
 
 	ret = kstrtou32(buf, 10, &index);
 	if (ret)
@@ -1861,25 +1736,8 @@ static ssize_t cs40l2x_gpio3_fall_index_store(struct device *dev,
 
 	mutex_lock(&cs40l2x->lock);
 
-	if (index > (cs40l2x->num_waves - 1)) {
-		ret = -EINVAL;
-		goto err_mutex;
-	}
-
-	reg = cs40l2x_dsp_reg(cs40l2x, "INDEXBUTTONRELEASE",
-			CS40L2X_XM_UNPACKED_TYPE, cs40l2x->fw_desc->id);
-	if (!reg) {
-		ret = -EPERM;
-		goto err_mutex;
-	}
-
-	ret = regmap_write(cs40l2x->regmap,
-			reg + CS40L2X_INDEXBUTTONRELEASE3, index);
-	if (ret)
-		goto err_mutex;
-
-	ret = cs40l2x_dsp_cache(cs40l2x,
-			reg + CS40L2X_INDEXBUTTONRELEASE3, index);
+	ret = cs40l2x_gpio_edge_index_set(cs40l2x, index,
+			CS40L2X_INDEXBUTTONRELEASE3, CS40L2X_GPIO_FALL);
 	if (ret)
 		goto err_mutex;
 
@@ -1896,26 +1754,16 @@ static ssize_t cs40l2x_gpio4_rise_index_show(struct device *dev,
 {
 	struct cs40l2x_private *cs40l2x = cs40l2x_get_private(dev);
 	int ret;
-	unsigned int reg, index;
-
-	if (!(cs40l2x->gpio_mask & CS40L2X_GPIO_BTNDETECT_GPIO4))
-		return -EPERM;
+	unsigned int index;
 
 	mutex_lock(&cs40l2x->lock);
 
-	reg = cs40l2x_dsp_reg(cs40l2x, "INDEXBUTTONPRESS",
-			CS40L2X_XM_UNPACKED_TYPE, cs40l2x->fw_desc->id);
-	if (!reg) {
-		ret = -EPERM;
-		goto err_mutex;
-	}
-
-	ret = regmap_read(cs40l2x->regmap,
-			reg + CS40L2X_INDEXBUTTONPRESS4, &index);
+	ret = cs40l2x_gpio_edge_index_get(cs40l2x, &index,
+			CS40L2X_INDEXBUTTONPRESS4, CS40L2X_GPIO_RISE);
 	if (ret)
 		goto err_mutex;
 
-	ret = snprintf(buf, PAGE_SIZE, "%d\n", index);
+	ret = snprintf(buf, PAGE_SIZE, "%u\n", index);
 
 err_mutex:
 	mutex_unlock(&cs40l2x->lock);
@@ -1929,10 +1777,7 @@ static ssize_t cs40l2x_gpio4_rise_index_store(struct device *dev,
 {
 	struct cs40l2x_private *cs40l2x = cs40l2x_get_private(dev);
 	int ret;
-	unsigned int reg, index;
-
-	if (!(cs40l2x->gpio_mask & CS40L2X_GPIO_BTNDETECT_GPIO4))
-		return -EPERM;
+	unsigned int index;
 
 	ret = kstrtou32(buf, 10, &index);
 	if (ret)
@@ -1940,25 +1785,8 @@ static ssize_t cs40l2x_gpio4_rise_index_store(struct device *dev,
 
 	mutex_lock(&cs40l2x->lock);
 
-	if (index > (cs40l2x->num_waves - 1)) {
-		ret = -EINVAL;
-		goto err_mutex;
-	}
-
-	reg = cs40l2x_dsp_reg(cs40l2x, "INDEXBUTTONPRESS",
-			CS40L2X_XM_UNPACKED_TYPE, cs40l2x->fw_desc->id);
-	if (!reg) {
-		ret = -EPERM;
-		goto err_mutex;
-	}
-
-	ret = regmap_write(cs40l2x->regmap,
-			reg + CS40L2X_INDEXBUTTONPRESS4, index);
-	if (ret)
-		goto err_mutex;
-
-	ret = cs40l2x_dsp_cache(cs40l2x,
-			reg + CS40L2X_INDEXBUTTONPRESS4, index);
+	ret = cs40l2x_gpio_edge_index_set(cs40l2x, index,
+			CS40L2X_INDEXBUTTONPRESS4, CS40L2X_GPIO_RISE);
 	if (ret)
 		goto err_mutex;
 
@@ -1975,26 +1803,16 @@ static ssize_t cs40l2x_gpio4_fall_index_show(struct device *dev,
 {
 	struct cs40l2x_private *cs40l2x = cs40l2x_get_private(dev);
 	int ret;
-	unsigned int reg, index;
-
-	if (!(cs40l2x->gpio_mask & CS40L2X_GPIO_BTNDETECT_GPIO4))
-		return -EPERM;
+	unsigned int index;
 
 	mutex_lock(&cs40l2x->lock);
 
-	reg = cs40l2x_dsp_reg(cs40l2x, "INDEXBUTTONRELEASE",
-			CS40L2X_XM_UNPACKED_TYPE, cs40l2x->fw_desc->id);
-	if (!reg) {
-		ret = -EPERM;
-		goto err_mutex;
-	}
-
-	ret = regmap_read(cs40l2x->regmap,
-			reg + CS40L2X_INDEXBUTTONRELEASE4, &index);
+	ret = cs40l2x_gpio_edge_index_get(cs40l2x, &index,
+			CS40L2X_INDEXBUTTONRELEASE4, CS40L2X_GPIO_FALL);
 	if (ret)
 		goto err_mutex;
 
-	ret = snprintf(buf, PAGE_SIZE, "%d\n", index);
+	ret = snprintf(buf, PAGE_SIZE, "%u\n", index);
 
 err_mutex:
 	mutex_unlock(&cs40l2x->lock);
@@ -2008,10 +1826,7 @@ static ssize_t cs40l2x_gpio4_fall_index_store(struct device *dev,
 {
 	struct cs40l2x_private *cs40l2x = cs40l2x_get_private(dev);
 	int ret;
-	unsigned int reg, index;
-
-	if (!(cs40l2x->gpio_mask & CS40L2X_GPIO_BTNDETECT_GPIO4))
-		return -EPERM;
+	unsigned int index;
 
 	ret = kstrtou32(buf, 10, &index);
 	if (ret)
@@ -2019,25 +1834,8 @@ static ssize_t cs40l2x_gpio4_fall_index_store(struct device *dev,
 
 	mutex_lock(&cs40l2x->lock);
 
-	if (index > (cs40l2x->num_waves - 1)) {
-		ret = -EINVAL;
-		goto err_mutex;
-	}
-
-	reg = cs40l2x_dsp_reg(cs40l2x, "INDEXBUTTONRELEASE",
-			CS40L2X_XM_UNPACKED_TYPE, cs40l2x->fw_desc->id);
-	if (!reg) {
-		ret = -EPERM;
-		goto err_mutex;
-	}
-
-	ret = regmap_write(cs40l2x->regmap,
-			reg + CS40L2X_INDEXBUTTONRELEASE4, index);
-	if (ret)
-		goto err_mutex;
-
-	ret = cs40l2x_dsp_cache(cs40l2x,
-			reg + CS40L2X_INDEXBUTTONRELEASE4, index);
+	ret = cs40l2x_gpio_edge_index_set(cs40l2x, index,
+			CS40L2X_INDEXBUTTONRELEASE4, CS40L2X_GPIO_FALL);
 	if (ret)
 		goto err_mutex;
 
@@ -2755,7 +2553,7 @@ static int cs40l2x_gpio1_dig_scale_get(struct cs40l2x_private *cs40l2x,
 	return 0;
 }
 #endif
-#if defined(CONFIG_CS40L2X_SAMSUNG_FEATURE) || defined(CIRRUS_VIB_DIG_SCALE_SUPPORT)
+#if defined(CIRRUS_VIB_DIG_SCALE_SUPPORT)
 static int cs40l2x_gpio1_dig_scale_set(struct cs40l2x_private *cs40l2x,
 			unsigned int dig_scale)
 {
@@ -2842,6 +2640,7 @@ static int cs40l2x_gpio_edge_dig_scale_get(struct cs40l2x_private *cs40l2x,
 			unsigned int *dig_scale,
 			unsigned int gpio_offs, bool gpio_rise)
 {
+	bool gpio_pol = cs40l2x->pdata.gpio_indv_pol & (1 << (gpio_offs >> 2));
 	unsigned int val;
 	unsigned int reg = cs40l2x_dsp_reg(cs40l2x, "GPIO_GAIN",
 			CS40L2X_XM_UNPACKED_TYPE, cs40l2x->fw_desc->id);
@@ -2858,10 +2657,12 @@ static int cs40l2x_gpio_edge_dig_scale_get(struct cs40l2x_private *cs40l2x,
 	if (ret)
 		return ret;
 
-	*dig_scale = (val & (gpio_rise ? CS40L2X_GPIO_GAIN_RISE_MASK :
-			CS40L2X_GPIO_GAIN_FALL_MASK))
-				>> (gpio_rise ? CS40L2X_GPIO_GAIN_RISE_SHIFT :
-						CS40L2X_GPIO_GAIN_FALL_SHIFT);
+	*dig_scale = (val & (gpio_pol ^ gpio_rise ?
+			CS40L2X_GPIO_GAIN_RISE_MASK :
+			CS40L2X_GPIO_GAIN_FALL_MASK)) >>
+				(gpio_pol ^ gpio_rise ?
+					CS40L2X_GPIO_GAIN_RISE_SHIFT :
+					CS40L2X_GPIO_GAIN_FALL_SHIFT);
 
 	return 0;
 }
@@ -2870,6 +2671,7 @@ static int cs40l2x_gpio_edge_dig_scale_set(struct cs40l2x_private *cs40l2x,
 			unsigned int dig_scale,
 			unsigned int gpio_offs, bool gpio_rise)
 {
+	bool gpio_pol = cs40l2x->pdata.gpio_indv_pol & (1 << (gpio_offs >> 2));
 	unsigned int val;
 	unsigned int reg = cs40l2x_dsp_reg(cs40l2x, "GPIO_GAIN",
 			CS40L2X_XM_UNPACKED_TYPE, cs40l2x->fw_desc->id);
@@ -2890,13 +2692,16 @@ static int cs40l2x_gpio_edge_dig_scale_set(struct cs40l2x_private *cs40l2x,
 	if (ret)
 		return ret;
 
-	val &= ~(gpio_rise ? CS40L2X_GPIO_GAIN_RISE_MASK :
+	val &= ~(gpio_pol ^ gpio_rise ?
+			CS40L2X_GPIO_GAIN_RISE_MASK :
 			CS40L2X_GPIO_GAIN_FALL_MASK);
 
-	val |= (gpio_rise ? CS40L2X_GPIO_GAIN_RISE_MASK :
-			CS40L2X_GPIO_GAIN_FALL_MASK) & (dig_scale
-				<< (gpio_rise ? CS40L2X_GPIO_GAIN_RISE_SHIFT :
-						CS40L2X_GPIO_GAIN_FALL_SHIFT));
+	val |= (gpio_pol ^ gpio_rise ?
+			CS40L2X_GPIO_GAIN_RISE_MASK :
+			CS40L2X_GPIO_GAIN_FALL_MASK) &
+				(dig_scale << (gpio_pol ^ gpio_rise ?
+					CS40L2X_GPIO_GAIN_RISE_SHIFT :
+					CS40L2X_GPIO_GAIN_FALL_SHIFT));
 
 	ret = regmap_write(cs40l2x->regmap, reg, val);
 	if (ret)
@@ -3486,6 +3291,7 @@ static ssize_t cs40l2x_intensity_store(struct device *dev,
 	return count;
 }
 
+#if !defined (CONFIG_1030LRA_MOTOR)
 static ssize_t cs40l2x_haptic_engine_show(struct device *dev,
 			struct device_attribute *attr, char *buf)
 {
@@ -3504,45 +3310,7 @@ static ssize_t cs40l2x_haptic_engine_store(struct device *dev,
 
 	return count;
 }
-
-static ssize_t cs40l2x_force_touch_intensity_store(struct device *dev,
-		struct device_attribute *devattr, const char *buf, size_t count)
-{
-	struct cs40l2x_private *cs40l2x = cs40l2x_get_private(dev);
-	int ret = 0;
-	unsigned int intensity, dig_scale;
-
-	ret = kstrtou32(buf, 10, &intensity);
-	if (ret) {
-		pr_err("fail to get intensity\n");
-		return -EINVAL;
-	}
-
-	if(intensity > CS40L2X_INTENSITY_SCALE_MAX)
-		return -EINVAL;
-
- 	dig_scale = cs40l2x_pbq_dig_scale[intensity/100];
-	pr_info("%s: %u (gpio1 dig scale: %u)\n", __func__, intensity, dig_scale);
-
-	mutex_lock(&cs40l2x->lock);
-	ret = cs40l2x_gpio1_dig_scale_set(cs40l2x, dig_scale);
-	mutex_unlock(&cs40l2x->lock);
-
-	if (ret) {
-		pr_err("Failed to write digital scale\n");
-		return ret;
-	}
-
-	cs40l2x->force_touch_intensity = intensity;
-	return count;
-}
-
-static ssize_t cs40l2x_force_touch_intensity_show(struct device *dev,
-		struct device_attribute *attr, char *buf)
-{
-	struct cs40l2x_private *cs40l2x = cs40l2x_get_private(dev);
-	return snprintf(buf, 30, "force_touch_intensity: %u\n", cs40l2x->force_touch_intensity);
-}
+#endif
 
 static ssize_t cs40l2x_motor_type_show(struct device *dev, 
 		struct device_attribute *attr, char *buf)
@@ -3582,7 +3350,7 @@ static ssize_t cs40l2x_event_cmd_store(struct device *dev,
 	idx = get_event_index_by_command(cmd);
 	set_event_for_dig_scale(cs40l2x, idx);
 	pr_info("%s: event_idx:%d\n", __func__, idx);
-	
+
 	ret = sscanf(cmd, "%s", sec_prev_event_cmd);
 	if (ret != 1)
 		goto error1;
@@ -3790,7 +3558,10 @@ static int cs40l2x_refclk_switch(struct cs40l2x_private *cs40l2x,
 			((refclk_sel << CS40L2X_PLL_REFCLK_SEL_SHIFT)
 				& CS40L2X_PLL_REFCLK_SEL_MASK);
 
-	ret = cs40l2x_hiber_cmd_send(cs40l2x, CS40L2X_POWERCONTROL_FRC_STDBY);
+	ret = cs40l2x_ack_write(cs40l2x,
+			CS40L2X_MBOX_POWERCONTROL,
+			CS40L2X_POWERCONTROL_FRC_STDBY,
+			CS40L2X_POWERCONTROL_NONE);
 	if (ret)
 		return ret;
 
@@ -3802,8 +3573,10 @@ static int cs40l2x_refclk_switch(struct cs40l2x_private *cs40l2x,
 	if (ret)
 		return ret;
 
-	return regmap_write(cs40l2x->regmap, CS40L2X_MBOX_POWERCONTROL,
-			CS40L2X_POWERCONTROL_WAKEUP);
+	return cs40l2x_ack_write(cs40l2x,
+			CS40L2X_MBOX_POWERCONTROL,
+			CS40L2X_POWERCONTROL_WAKEUP,
+			CS40L2X_POWERCONTROL_NONE);
 }
 
 static int cs40l2x_asp_switch(struct cs40l2x_private *cs40l2x, bool enable)
@@ -3824,7 +3597,6 @@ static int cs40l2x_asp_switch(struct cs40l2x_private *cs40l2x, bool enable)
 			if (ret)
 				return ret;
 		}
-
 	}
 
 	ret = regmap_read(cs40l2x->regmap, CS40L2X_SP_ENABLES, &val);
@@ -4202,11 +3974,12 @@ static ssize_t cs40l2x_hw_reset_store(struct device *dev,
 			const char *buf, size_t count)
 {
 	struct cs40l2x_private *cs40l2x = cs40l2x_get_private(dev);
-	int ret;
+	struct i2c_client *i2c_client = to_i2c_client(cs40l2x->dev);
+	int ret, state;
 	unsigned int val, fw_id_restore;
-	
+
 #ifdef CONFIG_CS40L2X_SAMSUNG_FEATURE
-	pr_info("%s: enter revid:%d %d count:%d\n", __func__, 
+	pr_info("%s: enter revid:%d %d count:%d\n", __func__,
 			CS40L2X_REVID_B1, cs40l2x->revid, count);
 #endif
 
@@ -4220,9 +3993,25 @@ static ssize_t cs40l2x_hw_reset_store(struct device *dev,
 	if (cs40l2x->revid < CS40L2X_REVID_B1)
 		return -EPERM;
 
+	state = gpiod_get_value_cansleep(cs40l2x->reset_gpio);
+	if (state < 0)
+		return state;
+
+	/*
+	 * resetting the device prompts it to briefly assert the /ALERT pin,
+	 * so disable the interrupt line until the device has been restored
+	 */
+	disable_irq(i2c_client->irq);
+
 	mutex_lock(&cs40l2x->lock);
 
-	if (val) {
+	if (cs40l2x->vibe_mode == CS40L2X_VIBE_MODE_AUDIO
+			|| cs40l2x->vibe_state == CS40L2X_VIBE_STATE_RUNNING) {
+		ret = -EPERM;
+		goto err_mutex;
+	}
+
+	if (val && !state) {
 		// Reset pin needs to work low to high for Motor IC reset
 #ifdef CONFIG_CS40L2X_SAMSUNG_FEATURE
 #ifndef CONFIG_MOTOR_DRV_CS40L2X_PMIC_RESET
@@ -4232,7 +4021,7 @@ static ssize_t cs40l2x_hw_reset_store(struct device *dev,
 #endif
 		usleep_range(2000, 2100);
 #endif
-		
+
 #ifndef CONFIG_MOTOR_DRV_CS40L2X_PMIC_RESET
 		gpiod_set_value_cansleep(cs40l2x->reset_gpio, 1);
 #else
@@ -4248,7 +4037,7 @@ static ssize_t cs40l2x_hw_reset_store(struct device *dev,
 			goto err_mutex;
 
 		cs40l2x->dsp_cache_depth = 0;
-	} else {
+	} else if (!val && state) {
 #ifndef CONFIG_MOTOR_DRV_CS40L2X_PMIC_RESET
 		gpiod_set_value_cansleep(cs40l2x->reset_gpio, 0);
 #else
@@ -4264,7 +4053,9 @@ static ssize_t cs40l2x_hw_reset_store(struct device *dev,
 
 err_mutex:
 	mutex_unlock(&cs40l2x->lock);
-	
+
+	enable_irq(i2c_client->irq);
+
 	return ret;
 }
 #endif
@@ -4298,7 +4089,7 @@ static ssize_t cs40l2x_wt_file_store(struct device *dev,
 {
 	struct cs40l2x_private *cs40l2x = cs40l2x_get_private(dev);
 	char wt_file[CS40L2X_WT_FILE_NAME_LEN_MAX];
-	unsigned int len = count;
+	size_t len = count;
 	int ret;
 
 	if (!len)
@@ -4308,7 +4099,7 @@ static ssize_t cs40l2x_wt_file_store(struct device *dev,
 		len--;
 
 	if (len + 1 > CS40L2X_WT_FILE_NAME_LEN_MAX)
-		return -EINVAL;
+		return -ENAMETOOLONG;
 
 	memcpy(wt_file, buf, len);
 	wt_file[len] = '\0';
@@ -4462,6 +4253,75 @@ err_mutex:
 
 	return ret;
 }
+
+static ssize_t cs40l2x_clab_peak_show(struct device *dev,
+			struct device_attribute *attr, char *buf)
+{
+	struct cs40l2x_private *cs40l2x = cs40l2x_get_private(dev);
+	int ret;
+	unsigned int reg, val;
+
+	mutex_lock(&cs40l2x->lock);
+
+	reg = cs40l2x_dsp_reg(cs40l2x, "PEAK_AMPLITUDE_CONTROL",
+			CS40L2X_XM_UNPACKED_TYPE, CS40L2X_ALGO_ID_CLAB);
+	if (!reg) {
+		ret = -EPERM;
+		goto err_mutex;
+	}
+
+	ret = regmap_read(cs40l2x->regmap, reg, &val);
+	if (ret)
+		goto err_mutex;
+
+	ret = snprintf(buf, PAGE_SIZE, "%u\n", val);
+
+err_mutex:
+	mutex_unlock(&cs40l2x->lock);
+
+	return ret;
+}
+
+static ssize_t cs40l2x_clab_peak_store(struct device *dev,
+			struct device_attribute *attr,
+			const char *buf, size_t count)
+{
+	struct cs40l2x_private *cs40l2x = cs40l2x_get_private(dev);
+	int ret;
+	unsigned int reg, val;
+
+	ret = kstrtou32(buf, 10, &val);
+	if (ret)
+		return -EINVAL;
+
+	if (val > CS40L2X_CLAB_PEAK_MAX)
+		return -EINVAL;
+
+	mutex_lock(&cs40l2x->lock);
+
+	reg = cs40l2x_dsp_reg(cs40l2x, "PEAK_AMPLITUDE_CONTROL",
+			CS40L2X_XM_UNPACKED_TYPE, CS40L2X_ALGO_ID_CLAB);
+	if (!reg) {
+		ret = -EPERM;
+		goto err_mutex;
+	}
+
+	ret = regmap_write(cs40l2x->regmap, reg, val);
+	if (ret)
+		goto err_mutex;
+
+	ret = cs40l2x_dsp_cache(cs40l2x, reg, val);
+	if (ret)
+		goto err_mutex;
+
+	ret = count;
+
+err_mutex:
+	mutex_unlock(&cs40l2x->lock);
+
+	return ret;
+}
+
 static DEVICE_ATTR(cp_trigger_index, 0660, cs40l2x_cp_trigger_index_show,
 		cs40l2x_cp_trigger_index_store);
 static DEVICE_ATTR(cp_trigger_queue, 0660, cs40l2x_cp_trigger_queue_show,
@@ -4546,9 +4406,9 @@ static DEVICE_ATTR(heartbeat, 0660, cs40l2x_heartbeat_show, NULL);
 static DEVICE_ATTR(num_waves, 0660, cs40l2x_num_waves_show, NULL);
 #ifdef CONFIG_CS40L2X_SAMSUNG_FEATURE
 static DEVICE_ATTR(intensity, 0660, cs40l2x_intensity_show, cs40l2x_intensity_store);
+#if !defined (CONFIG_1030LRA_MOTOR)
 static DEVICE_ATTR(haptic_engine, 0660, cs40l2x_haptic_engine_show, cs40l2x_haptic_engine_store);
-static DEVICE_ATTR(force_touch_intensity, 0660, cs40l2x_force_touch_intensity_show,
-		cs40l2x_force_touch_intensity_store);
+#endif
 static DEVICE_ATTR(motor_type, 0660, cs40l2x_motor_type_show, NULL);
 static DEVICE_ATTR(event_cmd, 0660, cs40l2x_event_cmd_show, cs40l2x_event_cmd_store);
 #endif
@@ -4578,6 +4438,8 @@ static DEVICE_ATTR(wt_file, 0660, cs40l2x_wt_file_show, cs40l2x_wt_file_store);
 static DEVICE_ATTR(wt_date, 0660, cs40l2x_wt_date_show, NULL);
 static DEVICE_ATTR(clab_enable, 0660, cs40l2x_clab_enable_show,
 		cs40l2x_clab_enable_store);
+static DEVICE_ATTR(clab_peak, 0660, cs40l2x_clab_peak_show,
+		cs40l2x_clab_peak_store);
 
 static struct attribute *cs40l2x_dev_attrs[] = {
 	&dev_attr_cp_trigger_index.attr,
@@ -4623,8 +4485,9 @@ static struct attribute *cs40l2x_dev_attrs[] = {
 	&dev_attr_num_waves.attr,
 #ifdef CONFIG_CS40L2X_SAMSUNG_FEATURE
 	&dev_attr_intensity.attr,
+#if !defined (CONFIG_1030LRA_MOTOR)
 	&dev_attr_haptic_engine.attr,
-	&dev_attr_force_touch_intensity.attr,
+#endif
 	&dev_attr_motor_type.attr,
 	&dev_attr_event_cmd.attr,
 #endif
@@ -4645,6 +4508,7 @@ static struct attribute *cs40l2x_dev_attrs[] = {
 	&dev_attr_wt_file.attr,
 	&dev_attr_wt_date.attr,
 	&dev_attr_clab_enable.attr,
+	&dev_attr_clab_peak.attr,
 	NULL,
 };
 
@@ -4900,6 +4764,9 @@ static int cs40l2x_pbq_pair_launch(struct cs40l2x_private *cs40l2x)
 			}
 			break;
 		default:
+#if defined(CONFIG_VIB_NOTIFIER)
+			vib_notifier_notify();
+#endif
 			cp_dig_scale = cs40l2x_pbq_dig_scale[mag];
 			if (cp_dig_scale > CS40L2X_DIG_SCALE_MAX)
 				cp_dig_scale = CS40L2X_DIG_SCALE_MAX;
@@ -4979,7 +4846,6 @@ static void cs40l2x_vibe_pbq_worker(struct work_struct *work)
 		}
 
 		cs40l2x->vibe_state = CS40L2X_VIBE_STATE_STOPPED;
-
 		if (cs40l2x->vibe_mode != CS40L2X_VIBE_MODE_AUDIO)
 			cs40l2x_wl_relax(cs40l2x);
 		goto err_mutex;
@@ -5053,6 +4919,11 @@ static int cs40l2x_diag_enable(struct cs40l2x_private *cs40l2x,
 
 	switch (cs40l2x->fw_desc->id) {
 	case CS40L2X_FW_ID_ORIG:
+		/*
+		 * STIMULUS_MODE is not automatically returned to a reset
+		 * value as with other mailbox registers, therefore it is
+		 * written without polling for subsequent acknowledgment
+		 */
 		return regmap_write(regmap, CS40L2X_MBOX_STIMULUS_MODE, val);
 	case CS40L2X_FW_ID_CAL:
 		return regmap_write(regmap,
@@ -5177,26 +5048,22 @@ static int cs40l2x_peak_capture(struct cs40l2x_private *cs40l2x)
 	return 0;
 }
 
-static int cs40l2x_check_recovery(struct cs40l2x_private *cs40l2x)
+static int cs40l2x_reset_recovery(struct cs40l2x_private *cs40l2x)
 {
-	struct regmap *regmap = cs40l2x->regmap;
-	struct device *dev = cs40l2x->dev;
-	unsigned int val, fw_id_restore;
+	bool wl_pending = (cs40l2x->vibe_mode == CS40L2X_VIBE_MODE_AUDIO)
+			|| (cs40l2x->vibe_state == CS40L2X_VIBE_STATE_RUNNING);
+	unsigned int fw_id_restore;
 	int ret, i;
-
-	ret = regmap_read(regmap, CS40L2X_DSP1_RX2_SRC, &val);
-	if (ret) {
-		dev_err(dev, "Failed to read known register\n");
-		return ret;
-	}
-
-	if (val == CS40L2X_DSP1_RXn_SRC_VMON)
-		return 0;
-
-	dev_err(dev, "Failed to verify known register\n");
 
 	if (cs40l2x->revid < CS40L2X_REVID_B1)
 		return -EPERM;
+
+	cs40l2x->asp_enable = CS40L2X_ASP_DISABLED;
+
+	cs40l2x->vibe_mode = CS40L2X_VIBE_MODE_HAPTIC;
+	cs40l2x->vibe_state = CS40L2X_VIBE_STATE_STOPPED;
+
+	cs40l2x->cp_trailer_index = CS40L2X_INDEX_IDLE;
 
 	gpiod_set_value_cansleep(cs40l2x->reset_gpio, 0);
 	usleep_range(2000, 2100);
@@ -5212,18 +5079,60 @@ static int cs40l2x_check_recovery(struct cs40l2x_private *cs40l2x)
 		return ret;
 
 	for (i = 0; i < cs40l2x->dsp_cache_depth; i++) {
-		ret = regmap_write(regmap,
+		ret = regmap_write(cs40l2x->regmap,
 				cs40l2x->dsp_cache[i].reg,
 				cs40l2x->dsp_cache[i].val);
 		if (ret) {
-			dev_err(dev, "Failed to restore DSP cache\n");
+			dev_err(cs40l2x->dev, "Failed to restore DSP cache\n");
 			return ret;
 		}
 	}
 
-	dev_info(dev, "Successfully restored device state\n");
+	if (cs40l2x->pbq_state != CS40L2X_PBQ_STATE_IDLE) {
+		ret = cs40l2x_cp_dig_scale_set(cs40l2x,
+				cs40l2x->pbq_cp_dig_scale);
+		if (ret)
+			return ret;
+
+		cs40l2x->pbq_state = CS40L2X_PBQ_STATE_IDLE;
+	}
+
+	if (wl_pending)
+		cs40l2x_wl_relax(cs40l2x);
+
+	dev_info(cs40l2x->dev, "Successfully restored device state\n");
 
 	return 0;
+}
+
+static int cs40l2x_check_recovery(struct cs40l2x_private *cs40l2x)
+{
+	struct i2c_client *i2c_client = to_i2c_client(cs40l2x->dev);
+	unsigned int val;
+	int ret;
+
+	ret = regmap_read(cs40l2x->regmap, CS40L2X_DSP1_RX2_SRC, &val);
+	if (ret) {
+		dev_err(cs40l2x->dev, "Failed to read known register\n");
+		return ret;
+	}
+
+	if (val == CS40L2X_DSP1_RXn_SRC_VMON)
+		return 0;
+
+	dev_err(cs40l2x->dev, "Failed to verify known register\n");
+
+	/*
+	 * resetting the device prompts it to briefly assert the /ALERT pin,
+	 * so disable the interrupt line until the device has been restored
+	 */
+	disable_irq_nosync(i2c_client->irq);
+
+	ret = cs40l2x_reset_recovery(cs40l2x);
+
+	enable_irq(i2c_client->irq);
+
+	return ret;
 }
 
 static void cs40l2x_vibe_start_worker(struct work_struct *work)
@@ -5311,14 +5220,14 @@ static void cs40l2x_vibe_start_worker(struct work_struct *work)
 			__func__, cs40l2x->cp_trailer_index, cs40l2x->intensity);
 #endif
 	}
-	
+
 	if (cs40l2x->amp_gnd_stby
 			&& cs40l2x->cp_trailer_index != CS40L2X_INDEX_PBQ) {
 		ret = regmap_write(regmap, CS40L2X_SPK_FORCE_TST_1,
 				CS40L2X_FORCE_SPK_FREE);
 		if (ret) {
 			dev_err(dev, "Failed to free amplifier outputs\n");
-			goto err_mutex;
+			goto err_relax;
 		}
 	}
 
@@ -5334,7 +5243,7 @@ static void cs40l2x_vibe_start_worker(struct work_struct *work)
 				&cs40l2x->peak_gpio1_enable);
 		if (ret) {
 			dev_err(dev, "Failed to read GPIO1 configuration\n");
-			goto err_mutex;
+			break;
 		}
 
 		ret = regmap_write(regmap,
@@ -5344,13 +5253,13 @@ static void cs40l2x_vibe_start_worker(struct work_struct *work)
 				CS40L2X_GPIO1_DISABLED);
 		if (ret) {
 			dev_err(dev, "Failed to disable GPIO1\n");
-			goto err_mutex;
+			break;
 		}
 
 		ret = cs40l2x_ack_write(cs40l2x, CS40L2X_MBOX_TRIGGER_MS,
 				CS40L2X_INDEX_VIBE, CS40L2X_MBOX_TRIGGERRESET);
 		if (ret)
-			goto err_mutex;
+			break;
 
 		msleep(CS40L2X_PEAK_DELAY_MS);
 
@@ -5361,7 +5270,7 @@ static void cs40l2x_vibe_start_worker(struct work_struct *work)
 				CS40L2X_VMON_NEGFS);
 		if (ret) {
 			dev_err(dev, "Failed to reset maximum VMON\n");
-			goto err_mutex;
+			break;
 		}
 
 		ret = regmap_write(regmap,
@@ -5371,7 +5280,7 @@ static void cs40l2x_vibe_start_worker(struct work_struct *work)
 				CS40L2X_VMON_POSFS);
 		if (ret) {
 			dev_err(dev, "Failed to reset minimum VMON\n");
-			goto err_mutex;
+			break;
 		}
 
 		ret = regmap_write(regmap,
@@ -5381,7 +5290,7 @@ static void cs40l2x_vibe_start_worker(struct work_struct *work)
 				CS40L2X_IMON_NEGFS);
 		if (ret) {
 			dev_err(dev, "Failed to reset maximum IMON\n");
-			goto err_mutex;
+			break;
 		}
 
 		ret = regmap_write(regmap,
@@ -5395,13 +5304,19 @@ static void cs40l2x_vibe_start_worker(struct work_struct *work)
 
 	case CS40L2X_INDEX_VIBE:
 	case CS40L2X_INDEX_CONT_MIN ... CS40L2X_INDEX_CONT_MAX:
-		cs40l2x_ack_write(cs40l2x, CS40L2X_MBOX_TRIGGER_MS,
+#if defined(CONFIG_VIB_NOTIFIER)
+		vib_notifier_notify();
+#endif
+		ret = cs40l2x_ack_write(cs40l2x, CS40L2X_MBOX_TRIGGER_MS,
 				cs40l2x->cp_trailer_index & CS40L2X_INDEX_MASK,
 				CS40L2X_MBOX_TRIGGERRESET);
 		break;
 
 	case CS40L2X_INDEX_CLICK_MIN ... CS40L2X_INDEX_CLICK_MAX:
-		cs40l2x_ack_write(cs40l2x, CS40L2X_MBOX_TRIGGERINDEX,
+#if defined(CONFIG_VIB_NOTIFIER)
+		vib_notifier_notify();
+#endif
+		ret = cs40l2x_ack_write(cs40l2x, CS40L2X_MBOX_TRIGGERINDEX,
 				cs40l2x->cp_trailer_index,
 				CS40L2X_MBOX_TRIGGERRESET);
 		break;
@@ -5413,7 +5328,7 @@ static void cs40l2x_vibe_start_worker(struct work_struct *work)
 				&cs40l2x->pbq_cp_dig_scale);
 		if (ret) {
 			dev_err(dev, "Failed to read digital scale\n");
-			goto err_mutex;
+			break;
 		}
 
 		cs40l2x->pbq_index = 0;
@@ -5435,13 +5350,13 @@ static void cs40l2x_vibe_start_worker(struct work_struct *work)
 		ret = cs40l2x_dig_scale_get(cs40l2x, &cs40l2x->diag_dig_scale);
 		if (ret) {
 			dev_err(dev, "Failed to read digital scale\n");
-			goto err_mutex;
+			break;
 		}
 
 		ret = cs40l2x_dig_scale_set(cs40l2x, 0);
 		if (ret) {
 			dev_err(dev, "Failed to reset digital scale\n");
-			goto err_mutex;
+			break;
 		}
 
 		ret = regmap_write(regmap,
@@ -5451,13 +5366,13 @@ static void cs40l2x_vibe_start_worker(struct work_struct *work)
 				0);
 		if (ret) {
 			dev_err(dev, "Failed to disable closed-loop mode\n");
-			goto err_mutex;
+			break;
 		}
 
 		ret = cs40l2x_diag_enable(cs40l2x, CS40L2X_F0_TRACKING_DIAG);
 		if (ret) {
 			dev_err(dev, "Failed to enable diagnostics tone\n");
-			goto err_mutex;
+			break;
 		}
 
 		msleep(CS40L2X_DIAG_STATE_DELAY_MS);
@@ -5469,7 +5384,7 @@ static void cs40l2x_vibe_start_worker(struct work_struct *work)
 				1);
 		if (ret) {
 			dev_err(dev, "Failed to enable closed-loop mode\n");
-			goto err_mutex;
+			break;
 		}
 
 		cs40l2x->diag_state = CS40L2X_DIAG_STATE_RUN1;
@@ -5481,26 +5396,37 @@ static void cs40l2x_vibe_start_worker(struct work_struct *work)
 		ret = cs40l2x_dig_scale_get(cs40l2x, &cs40l2x->diag_dig_scale);
 		if (ret) {
 			dev_err(dev, "Failed to read digital scale\n");
-			goto err_mutex;
+			break;
 		}
 
 		ret = cs40l2x_dig_scale_set(cs40l2x, 0);
 		if (ret) {
 			dev_err(dev, "Failed to reset digital scale\n");
-			goto err_mutex;
+			break;
 		}
 
 		ret = cs40l2x_diag_enable(cs40l2x, CS40L2X_F0_TRACKING_QEST);
 		if (ret) {
 			dev_err(dev, "Failed to enable diagnostics tone\n");
-			goto err_mutex;
+			break;
 		}
 
 		cs40l2x->diag_state = CS40L2X_DIAG_STATE_RUN2;
 		break;
 
 	default:
+		ret = -EINVAL;
 		dev_err(dev, "Invalid wavetable index\n");
+	}
+
+err_relax:
+	if (cs40l2x->vibe_state == CS40L2X_VIBE_STATE_STOPPED)
+		goto err_mutex;
+
+	if (ret) {
+		cs40l2x->vibe_state = CS40L2X_VIBE_STATE_STOPPED;
+		if (cs40l2x->vibe_mode != CS40L2X_VIBE_MODE_AUDIO)
+			cs40l2x_wl_relax(cs40l2x);
 	}
 
 err_mutex:
@@ -5541,6 +5467,9 @@ static void cs40l2x_vibe_stop_worker(struct work_struct *work)
 		if (cs40l2x->event_control & CS40L2X_EVENT_END_ENABLED)
 			break;
 
+		if (cs40l2x->vibe_state == CS40L2X_VIBE_STATE_STOPPED)
+			break;
+
 		cs40l2x->vibe_state = CS40L2X_VIBE_STATE_STOPPED;
 		if (cs40l2x->vibe_mode != CS40L2X_VIBE_MODE_AUDIO)
 			cs40l2x_wl_relax(cs40l2x);
@@ -5573,6 +5502,9 @@ static void cs40l2x_vibe_stop_worker(struct work_struct *work)
 		if (ret)
 			dev_err(dev, "Failed to restore digital scale\n");
 
+		if (cs40l2x->vibe_state == CS40L2X_VIBE_STATE_STOPPED)
+			break;
+
 		cs40l2x->vibe_state = CS40L2X_VIBE_STATE_STOPPED;
 		cs40l2x_wl_relax(cs40l2x);
 		break;
@@ -5599,6 +5531,10 @@ static void cs40l2x_vibe_enable(struct timed_output_dev *sdev, int timeout)
 #ifdef CONFIG_CS40L2X_SAMSUNG_FEATURE
 	pr_info("%s: %dms\n", __func__, timeout);
 
+	if (vib_disable) {
+		pr_info("%s: disable vibrate mode\n", __func__);
+		return;
+	}
 #if 0
 	/* temp disable cp trigier index (31 ~ 50) */
 	if (cs40l2x->cp_trigger_index >= 31 && cs40l2x->cp_trigger_index <= 50 && timeout > 0) {
@@ -5652,7 +5588,7 @@ static enum hrtimer_restart cs40l2x_vibe_timer(struct hrtimer *timer)
 	return HRTIMER_NORESTART;
 }
 
-static void cs40l2x_create_timed_output(struct cs40l2x_private *cs40l2x)
+static int cs40l2x_create_timed_output(struct cs40l2x_private *cs40l2x)
 {
 	int ret;
 	struct timed_output_dev *timed_dev = &cs40l2x->timed_dev;
@@ -5667,7 +5603,7 @@ static void cs40l2x_create_timed_output(struct cs40l2x_private *cs40l2x)
 	if (ret) {
 		dev_err(dev, "Failed to register timed output device: %d\n",
 			ret);
-		return;
+		return ret;
 	}
 
 	hrtimer_init(vibe_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
@@ -5677,8 +5613,10 @@ static void cs40l2x_create_timed_output(struct cs40l2x_private *cs40l2x)
 			&cs40l2x_dev_attr_group);
 	if (ret) {
 		dev_err(dev, "Failed to create sysfs group: %d\n", ret);
-		return;
+		return ret;
 	}
+
+	return 0;
 }
 #else
 /* vibration callback for LED device */
@@ -5697,7 +5635,7 @@ static void cs40l2x_vibe_brightness_set(struct led_classdev *led_cdev,
 	}
 }
 
-static void cs40l2x_create_led(struct cs40l2x_private *cs40l2x)
+static int cs40l2x_create_led(struct cs40l2x_private *cs40l2x)
 {
 	int ret;
 	struct led_classdev *led_dev = &cs40l2x->led_dev;
@@ -5711,65 +5649,19 @@ static void cs40l2x_create_led(struct cs40l2x_private *cs40l2x)
 	ret = led_classdev_register(dev, led_dev);
 	if (ret) {
 		dev_err(dev, "Failed to register LED device: %d\n", ret);
-		return;
+		return ret;
 	}
 
 	ret = sysfs_create_group(&cs40l2x->dev->kobj, &cs40l2x_dev_attr_group);
 	if (ret) {
 		dev_err(dev, "Failed to create sysfs group: %d\n", ret);
-		return;
+		return ret;
 	}
+	
+	return 0;
 }
 #endif /* CONFIG_ANDROID_TIMED_OUTPUT */
 
-static void cs40l2x_vibe_init(struct cs40l2x_private *cs40l2x)
-{
-	struct hrtimer *pbq_timer = &cs40l2x->pbq_timer;
-	struct hrtimer *asp_timer = &cs40l2x->asp_timer;
-	int ret;
-#ifndef CONFIG_CS40L2X_SAMSUNG_FEATURE
-#ifdef CONFIG_ANDROID_TIMED_OUTPUT
-	cs40l2x_create_timed_output(cs40l2x);
-#else
-	cs40l2x_create_led(cs40l2x);
-#endif /* CONFIG_ANDROID_TIMED_OUTPUT */
-#endif
-	cs40l2x->vibe_workqueue =
-		alloc_ordered_workqueue("vibe_workqueue", WQ_HIGHPRI);
-	if (!cs40l2x->vibe_workqueue) {
-		dev_err(cs40l2x->dev, "Failed to allocate workqueue\n");
-		return;
-	}
-
-	INIT_WORK(&cs40l2x->vibe_start_work, cs40l2x_vibe_start_worker);
-	INIT_WORK(&cs40l2x->vibe_pbq_work, cs40l2x_vibe_pbq_worker);
-	INIT_WORK(&cs40l2x->vibe_stop_work, cs40l2x_vibe_stop_worker);
-	INIT_WORK(&cs40l2x->vibe_mode_work, cs40l2x_vibe_mode_worker);
-
-	hrtimer_init(pbq_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
-	pbq_timer->function = cs40l2x_pbq_timer;
-
-	hrtimer_init(asp_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
-	asp_timer->function = cs40l2x_asp_timer;
-
-	ret = device_init_wakeup(cs40l2x->dev, true);
-	if (ret) {
-		dev_err(cs40l2x->dev, "Failed to initialize wakeup source\n");
-		return;
-	}
-
-	cs40l2x->vibe_init_success = true;
-
-	dev_info(cs40l2x->dev, "Firmware revision %d.%d.%d\n",
-			(cs40l2x->algo_info[0].rev & 0xFF0000) >> 16,
-			(cs40l2x->algo_info[0].rev & 0xFF00) >> 8,
-			cs40l2x->algo_info[0].rev & 0xFF);
-
-	dev_info(cs40l2x->dev,
-			"Max. wavetable size: %d bytes (XM), %d bytes (YM)\n",
-			cs40l2x->wt_limit_xm / 4 * 3,
-			cs40l2x->wt_limit_ym / 4 * 3);
-}
 #ifdef CONFIG_CS40L2X_SAMSUNG_FEATURE
 static void cs40l2x_dev_node_init(struct cs40l2x_private *cs40l2x)
 {
@@ -5797,7 +5689,7 @@ static void cs40l2x_dev_node_remove(struct cs40l2x_private *cs40l2x)
 	if (cs40l2x->reset_vldo != NULL) {
 		regulator_put(cs40l2x->reset_vldo);
 	}
-	cs40l2x->reset_vldo == NULL;
+	cs40l2x->reset_vldo = NULL;
 #endif
 }
 #endif
@@ -6059,15 +5951,35 @@ static const struct reg_sequence cs40l2x_irq2_masks[] = {
 	{CS40L2X_IRQ2_MASK4,		0xFEFFFFFF},
 };
 
+static const struct reg_sequence cs40l2x_amp_gnd_setup[] = {
+	{CS40L2X_TEST_KEY_CTL,		CS40L2X_TEST_KEY_UNLOCK_CODE1},
+	{CS40L2X_TEST_KEY_CTL,		CS40L2X_TEST_KEY_UNLOCK_CODE2},
+	{CS40L2X_SPK_FORCE_TST_1,	CS40L2X_FORCE_SPK_GND},
+	/* leave test key unlocked to minimize overhead during playback */
+};
+
+static const struct reg_sequence cs40l2x_amp_free_setup[] = {
+	{CS40L2X_TEST_KEY_CTL,		CS40L2X_TEST_KEY_UNLOCK_CODE1},
+	{CS40L2X_TEST_KEY_CTL,		CS40L2X_TEST_KEY_UNLOCK_CODE2},
+	{CS40L2X_SPK_FORCE_TST_1,	CS40L2X_FORCE_SPK_FREE},
+	{CS40L2X_TEST_KEY_CTL,		CS40L2X_TEST_KEY_RELOCK_CODE1},
+	{CS40L2X_TEST_KEY_CTL,		CS40L2X_TEST_KEY_RELOCK_CODE2},
+};
+
 static int cs40l2x_dsp_pre_config(struct cs40l2x_private *cs40l2x)
 {
 	struct regmap *regmap = cs40l2x->regmap;
 	struct device *dev = cs40l2x->dev;
+	unsigned int gpio_pol = cs40l2x_dsp_reg(cs40l2x, "GPIO_POL",
+			CS40L2X_XM_UNPACKED_TYPE, cs40l2x->fw_desc->id);
+	unsigned int spk_auto = cs40l2x_dsp_reg(cs40l2x, "SPK_FORCE_TST_1_AUTO",
+			CS40L2X_XM_UNPACKED_TYPE, cs40l2x->fw_desc->id);
 	unsigned int val;
 	int ret, i;
 
 	if (cs40l2x->fw_desc->id == CS40L2X_FW_ID_CAL)
-		return 0;
+		return regmap_multi_reg_write(regmap, cs40l2x_amp_free_setup,
+				ARRAY_SIZE(cs40l2x_amp_free_setup));
 
 	ret = regmap_write(regmap,
 			cs40l2x_dsp_reg(cs40l2x, "GPIO_BUTTONDETECT",
@@ -6079,6 +5991,18 @@ static int cs40l2x_dsp_pre_config(struct cs40l2x_private *cs40l2x)
 		return ret;
 	}
 
+	if (gpio_pol) {
+		ret = regmap_write(regmap, gpio_pol,
+				cs40l2x->pdata.gpio_indv_pol);
+		if (ret) {
+			dev_err(dev, "Failed to configure GPIO polarity\n");
+			return ret;
+		}
+	} else if (cs40l2x->pdata.gpio_indv_pol) {
+		dev_err(dev, "Active-low GPIO not supported\n");
+		return -EPERM;
+	}
+
 	if (cs40l2x->pdata.gpio1_mode != CS40L2X_GPIO1_MODE_DEF_ON) {
 		ret = regmap_write(regmap,
 				cs40l2x_dsp_reg(cs40l2x, "GPIO_ENABLE",
@@ -6087,6 +6011,37 @@ static int cs40l2x_dsp_pre_config(struct cs40l2x_private *cs40l2x)
 				CS40L2X_GPIO1_DISABLED);
 		if (ret) {
 			dev_err(dev, "Failed to pre-configure GPIO1\n");
+			return ret;
+		}
+	}
+
+	if (spk_auto) {
+		ret = regmap_write(regmap, spk_auto,
+				cs40l2x->pdata.amp_gnd_stby ?
+					CS40L2X_FORCE_SPK_GND :
+					CS40L2X_FORCE_SPK_FREE);
+		if (ret) {
+			dev_err(dev, "Failed to configure amplifier clamp\n");
+			return ret;
+		}
+	} else if (cs40l2x->event_control != CS40L2X_EVENT_DISABLED) {
+		cs40l2x->amp_gnd_stby = cs40l2x->pdata.amp_gnd_stby;
+	}
+
+	if (cs40l2x->amp_gnd_stby) {
+		dev_warn(dev, "Enabling legacy amplifier clamp (no GPIO)\n");
+
+		ret = regmap_multi_reg_write(regmap, cs40l2x_amp_gnd_setup,
+				ARRAY_SIZE(cs40l2x_amp_gnd_setup));
+		if (ret) {
+			dev_err(dev, "Failed to ground amplifier outputs\n");
+			return ret;
+		}
+
+		ret = cs40l2x_wseq_add_seq(cs40l2x, cs40l2x_amp_gnd_setup,
+				ARRAY_SIZE(cs40l2x_amp_gnd_setup));
+		if (ret) {
+			dev_err(dev, "Failed to sequence amplifier outputs\n");
 			return ret;
 		}
 	}
@@ -6359,12 +6314,9 @@ static int cs40l2x_dsp_post_config(struct cs40l2x_private *cs40l2x)
 	if (cs40l2x->pdata.gpio1_rise_index > 0
 			&& cs40l2x->pdata.gpio1_rise_index < cs40l2x->num_waves
 			&& cs40l2x->gpio_mask & CS40L2X_GPIO_BTNDETECT_GPIO1) {
-		ret = regmap_write(regmap,
-				cs40l2x_dsp_reg(cs40l2x, "INDEXBUTTONPRESS",
-						CS40L2X_XM_UNPACKED_TYPE,
-						cs40l2x->fw_desc->id)
-						+ CS40L2X_INDEXBUTTONPRESS1,
-				cs40l2x->pdata.gpio1_rise_index);
+		ret = cs40l2x_gpio_edge_index_set(cs40l2x,
+				cs40l2x->pdata.gpio1_rise_index,
+				CS40L2X_INDEXBUTTONPRESS1, CS40L2X_GPIO_RISE);
 		if (ret) {
 			dev_err(dev,
 				"Failed to write default gpio1_rise_index\n");
@@ -6381,12 +6333,9 @@ static int cs40l2x_dsp_post_config(struct cs40l2x_private *cs40l2x)
 	if (cs40l2x->pdata.gpio1_fall_index > 0
 			&& cs40l2x->pdata.gpio1_fall_index < cs40l2x->num_waves
 			&& cs40l2x->gpio_mask & CS40L2X_GPIO_BTNDETECT_GPIO1) {
-		ret = regmap_write(regmap,
-				cs40l2x_dsp_reg(cs40l2x, "INDEXBUTTONRELEASE",
-						CS40L2X_XM_UNPACKED_TYPE,
-						cs40l2x->fw_desc->id)
-						+ CS40L2X_INDEXBUTTONRELEASE1,
-				cs40l2x->pdata.gpio1_fall_index);
+		ret = cs40l2x_gpio_edge_index_set(cs40l2x,
+				cs40l2x->pdata.gpio1_fall_index,
+				CS40L2X_INDEXBUTTONRELEASE1, CS40L2X_GPIO_FALL);
 		if (ret) {
 			dev_err(dev,
 				"Failed to write default gpio1_fall_index\n");
@@ -6424,12 +6373,9 @@ static int cs40l2x_dsp_post_config(struct cs40l2x_private *cs40l2x)
 	if (cs40l2x->pdata.gpio2_rise_index > 0
 			&& cs40l2x->pdata.gpio2_rise_index < cs40l2x->num_waves
 			&& cs40l2x->gpio_mask & CS40L2X_GPIO_BTNDETECT_GPIO2) {
-		ret = regmap_write(regmap,
-				cs40l2x_dsp_reg(cs40l2x, "INDEXBUTTONPRESS",
-						CS40L2X_XM_UNPACKED_TYPE,
-						cs40l2x->fw_desc->id)
-						+ CS40L2X_INDEXBUTTONPRESS2,
-				cs40l2x->pdata.gpio2_rise_index);
+		ret = cs40l2x_gpio_edge_index_set(cs40l2x,
+				cs40l2x->pdata.gpio2_rise_index,
+				CS40L2X_INDEXBUTTONPRESS2, CS40L2X_GPIO_RISE);
 		if (ret) {
 			dev_err(dev,
 				"Failed to write default gpio2_rise_index\n");
@@ -6446,12 +6392,9 @@ static int cs40l2x_dsp_post_config(struct cs40l2x_private *cs40l2x)
 	if (cs40l2x->pdata.gpio2_fall_index > 0
 			&& cs40l2x->pdata.gpio2_fall_index < cs40l2x->num_waves
 			&& cs40l2x->gpio_mask & CS40L2X_GPIO_BTNDETECT_GPIO2) {
-		ret = regmap_write(regmap,
-				cs40l2x_dsp_reg(cs40l2x, "INDEXBUTTONRELEASE",
-						CS40L2X_XM_UNPACKED_TYPE,
-						cs40l2x->fw_desc->id)
-						+ CS40L2X_INDEXBUTTONRELEASE2,
-				cs40l2x->pdata.gpio2_fall_index);
+		ret = cs40l2x_gpio_edge_index_set(cs40l2x,
+				cs40l2x->pdata.gpio2_fall_index,
+				CS40L2X_INDEXBUTTONRELEASE2, CS40L2X_GPIO_FALL);
 		if (ret) {
 			dev_err(dev,
 				"Failed to write default gpio2_fall_index\n");
@@ -6468,12 +6411,9 @@ static int cs40l2x_dsp_post_config(struct cs40l2x_private *cs40l2x)
 	if (cs40l2x->pdata.gpio3_rise_index > 0
 			&& cs40l2x->pdata.gpio3_rise_index < cs40l2x->num_waves
 			&& cs40l2x->gpio_mask & CS40L2X_GPIO_BTNDETECT_GPIO3) {
-		ret = regmap_write(regmap,
-				cs40l2x_dsp_reg(cs40l2x, "INDEXBUTTONPRESS",
-						CS40L2X_XM_UNPACKED_TYPE,
-						cs40l2x->fw_desc->id)
-						+ CS40L2X_INDEXBUTTONPRESS3,
-				cs40l2x->pdata.gpio3_rise_index);
+		ret = cs40l2x_gpio_edge_index_set(cs40l2x,
+				cs40l2x->pdata.gpio3_rise_index,
+				CS40L2X_INDEXBUTTONPRESS3, CS40L2X_GPIO_RISE);
 		if (ret) {
 			dev_err(dev,
 				"Failed to write default gpio3_rise_index\n");
@@ -6490,12 +6430,9 @@ static int cs40l2x_dsp_post_config(struct cs40l2x_private *cs40l2x)
 	if (cs40l2x->pdata.gpio3_fall_index > 0
 			&& cs40l2x->pdata.gpio3_fall_index < cs40l2x->num_waves
 			&& cs40l2x->gpio_mask & CS40L2X_GPIO_BTNDETECT_GPIO3) {
-		ret = regmap_write(regmap,
-				cs40l2x_dsp_reg(cs40l2x, "INDEXBUTTONRELEASE",
-						CS40L2X_XM_UNPACKED_TYPE,
-						cs40l2x->fw_desc->id)
-						+ CS40L2X_INDEXBUTTONRELEASE3,
-				cs40l2x->pdata.gpio3_fall_index);
+		ret = cs40l2x_gpio_edge_index_set(cs40l2x,
+				cs40l2x->pdata.gpio3_fall_index,
+				CS40L2X_INDEXBUTTONRELEASE3, CS40L2X_GPIO_FALL);
 		if (ret) {
 			dev_err(dev,
 				"Failed to write default gpio3_fall_index\n");
@@ -6512,12 +6449,9 @@ static int cs40l2x_dsp_post_config(struct cs40l2x_private *cs40l2x)
 	if (cs40l2x->pdata.gpio4_rise_index > 0
 			&& cs40l2x->pdata.gpio4_rise_index < cs40l2x->num_waves
 			&& cs40l2x->gpio_mask & CS40L2X_GPIO_BTNDETECT_GPIO4) {
-		ret = regmap_write(regmap,
-				cs40l2x_dsp_reg(cs40l2x, "INDEXBUTTONPRESS",
-						CS40L2X_XM_UNPACKED_TYPE,
-						cs40l2x->fw_desc->id)
-						+ CS40L2X_INDEXBUTTONPRESS4,
-				cs40l2x->pdata.gpio4_rise_index);
+		ret = cs40l2x_gpio_edge_index_set(cs40l2x,
+				cs40l2x->pdata.gpio4_rise_index,
+				CS40L2X_INDEXBUTTONPRESS4, CS40L2X_GPIO_RISE);
 		if (ret) {
 			dev_err(dev,
 				"Failed to write default gpio4_rise_index\n");
@@ -6534,12 +6468,9 @@ static int cs40l2x_dsp_post_config(struct cs40l2x_private *cs40l2x)
 	if (cs40l2x->pdata.gpio4_fall_index > 0
 			&& cs40l2x->pdata.gpio4_fall_index < cs40l2x->num_waves
 			&& cs40l2x->gpio_mask & CS40L2X_GPIO_BTNDETECT_GPIO4) {
-		ret = regmap_write(regmap,
-				cs40l2x_dsp_reg(cs40l2x, "INDEXBUTTONRELEASE",
-						CS40L2X_XM_UNPACKED_TYPE,
-						cs40l2x->fw_desc->id)
-						+ CS40L2X_INDEXBUTTONRELEASE4,
-				cs40l2x->pdata.gpio4_fall_index);
+		ret = cs40l2x_gpio_edge_index_set(cs40l2x,
+				cs40l2x->pdata.gpio4_fall_index,
+				CS40L2X_INDEXBUTTONRELEASE4, CS40L2X_GPIO_FALL);
 		if (ret) {
 			dev_err(dev,
 				"Failed to write default gpio4_fall_index\n");
@@ -6559,7 +6490,8 @@ static int cs40l2x_dsp_post_config(struct cs40l2x_private *cs40l2x)
 static int cs40l2x_raw_write(struct cs40l2x_private *cs40l2x, unsigned int reg,
 			const void *val, size_t val_len, size_t limit)
 {
-	int ret, i;
+	int ret = 0;
+	int i;
 
 	/* split "val" into smaller writes not to exceed "limit" in length */
 	for (i = 0; i < val_len; i += limit) {
@@ -6572,9 +6504,22 @@ static int cs40l2x_raw_write(struct cs40l2x_private *cs40l2x, unsigned int reg,
 	return ret;
 }
 
+static struct regmap_config cs40l2x_regmap = {
+	.reg_bits = 32,
+	.val_bits = 32,
+	.reg_stride = 4,
+	.reg_format_endian = REGMAP_ENDIAN_BIG,
+	.val_format_endian = REGMAP_ENDIAN_BIG,
+	.max_register = CS40L2X_LASTREG,
+	.precious_reg = cs40l2x_precious_reg,
+	.readable_reg = cs40l2x_readable_reg,
+	.cache_type = REGCACHE_NONE,
+};
+
 static int cs40l2x_ack_write(struct cs40l2x_private *cs40l2x, unsigned int reg,
 			unsigned int write_val, unsigned int reset_val)
 {
+	struct cs40l2x_coeff_desc *coeff_desc;
 	struct regmap *regmap = cs40l2x->regmap;
 	struct device *dev = cs40l2x->dev;
 	unsigned int val;
@@ -6601,6 +6546,60 @@ static int cs40l2x_ack_write(struct cs40l2x_private *cs40l2x, unsigned int reg,
 	}
 
 	dev_err(dev, "Timed out with register 0x%08X = 0x%08X\n", reg, val);
+
+	if (cs40l2x->regdump_done)
+		return -ETIME;
+
+	for (i = 0; i <= cs40l2x_regmap.max_register;
+		i += cs40l2x_regmap.reg_stride) {
+		if (!(cs40l2x_readable_reg(dev, i)))
+			continue;
+
+		if (cs40l2x_precious_reg(dev, i))
+			continue;
+
+		if (i >= CS40L2X_DSP1_XMEM_PACK_0
+			&& i <= CS40L2X_DSP1_XMEM_UNPACK32_2046)
+			continue;
+
+		if (i >= CS40L2X_DSP1_XMEM_UNPACK24_0
+			&& i <= CS40L2X_DSP1_XMEM_UNPACK24_4093)
+			continue;
+
+		if (i >= CS40L2X_DSP1_YMEM_PACK_0
+			&& i <= CS40L2X_DSP1_YMEM_UNPACK32_1022)
+			continue;
+
+		if (i >= CS40L2X_DSP1_YMEM_UNPACK24_0
+			&& i <= CS40L2X_DSP1_YMEM_UNPACK24_2045)
+			continue;
+
+		if (i >= CS40L2X_DSP1_PMEM_0
+			&& i <= CS40L2X_DSP1_PMEM_5114)
+			continue;
+
+		ret = regmap_read(regmap, i, &val);
+		if (ret) {
+			dev_err(dev, "Failed to read register 0x%08X: %d\n",
+			i, ret);
+			return ret;
+		}
+
+		dev_info(dev, "0x%08X = 0x%08X\n", i, val);
+	}
+
+	list_for_each_entry(coeff_desc, &cs40l2x->coeff_desc_head, list) {
+		ret = regmap_read(regmap, coeff_desc->reg, &val);
+		if (ret) {
+			dev_err(dev, "Failed to read %s: %d\n",
+			coeff_desc->name, ret);
+			return ret;
+		}
+
+		dev_info(dev, "%s = %u\n", coeff_desc->name, val);
+	}
+
+	cs40l2x->regdump_done = true;
 
 	return -ETIME;
 }
@@ -6860,23 +6859,44 @@ static void cs40l2x_coeff_file_load(const struct firmware *fw, void *context)
 	if (!ret)
 		num_coeff_files = ++(cs40l2x->num_coeff_files);
 
+	if (num_coeff_files != cs40l2x->fw_desc->num_coeff_files)
+		goto err_mutex;
+
+	ret = cs40l2x_dsp_pre_config(cs40l2x);
+	if (ret)
+		goto err_mutex;
+
+	ret = cs40l2x_dsp_start(cs40l2x);
+	if (ret)
+		goto err_mutex;
+
+	ret = cs40l2x_dsp_post_config(cs40l2x);
+	if (ret)
+		goto err_mutex;
+
+#ifndef CONFIG_CS40L2X_SAMSUNG_FEATURE
+#ifdef CONFIG_ANDROID_TIMED_OUTPUT
+	ret = cs40l2x_create_timed_output(cs40l2x);
+#else
+	ret = cs40l2x_create_led(cs40l2x);
+#endif /* CONFIG_ANDROID_TIMED_OUTPUT */
+	if (ret)
+		goto err_mutex;
+#endif
+	cs40l2x->vibe_init_success = true;
+
+	dev_info(cs40l2x->dev, "Firmware revision %d.%d.%d\n",
+			(cs40l2x->algo_info[0].rev & 0xFF0000) >> 16,
+			(cs40l2x->algo_info[0].rev & 0xFF00) >> 8,
+			cs40l2x->algo_info[0].rev & 0xFF);
+
+	dev_info(cs40l2x->dev,
+			"Max. wavetable size: %d bytes (XM), %d bytes (YM)\n",
+			cs40l2x->wt_limit_xm / 4 * 3,
+			cs40l2x->wt_limit_ym / 4 * 3);
+
+err_mutex:
 	mutex_unlock(&cs40l2x->lock);
-
-	if (num_coeff_files == cs40l2x->fw_desc->num_coeff_files) {
-		ret = cs40l2x_dsp_pre_config(cs40l2x);
-		if (ret)
-			return;
-
-		ret = cs40l2x_dsp_start(cs40l2x);
-		if (ret)
-			return;
-
-		ret = cs40l2x_dsp_post_config(cs40l2x);
-		if (ret)
-			return;
-
-		cs40l2x_vibe_init(cs40l2x);
-	}
 }
 
 static int cs40l2x_algo_parse(struct cs40l2x_private *cs40l2x,
@@ -7113,12 +7133,12 @@ static int cs40l2x_firmware_swap(struct cs40l2x_private *cs40l2x,
 		break;
 
 	default:
-		ret = cs40l2x_hiber_cmd_send(cs40l2x,
-				CS40L2X_POWERCONTROL_FRC_STDBY);
-		if (ret) {
-			dev_err(dev, "Failed to force standby\n");
+		ret = cs40l2x_ack_write(cs40l2x,
+				CS40L2X_MBOX_POWERCONTROL,
+				CS40L2X_POWERCONTROL_FRC_STDBY,
+				CS40L2X_POWERCONTROL_NONE);
+		if (ret)
 			return ret;
-		}
 	}
 
 	ret = regmap_update_bits(regmap, CS40L2X_DSP1_CCM_CORE_CTRL,
@@ -7200,11 +7220,12 @@ static int cs40l2x_wavetable_swap(struct cs40l2x_private *cs40l2x,
 	struct device *dev = cs40l2x->dev;
 	int ret1, ret2;
 
-	ret1 = cs40l2x_hiber_cmd_send(cs40l2x, CS40L2X_POWERCONTROL_FRC_STDBY);
-	if (ret1) {
-		dev_err(dev, "Failed to force standby\n");
+	ret1 = cs40l2x_ack_write(cs40l2x,
+			CS40L2X_MBOX_POWERCONTROL,
+			CS40L2X_POWERCONTROL_FRC_STDBY,
+			CS40L2X_POWERCONTROL_NONE);
+	if (ret1)
 		return ret1;
-	}
 
 	ret1 = request_firmware(&fw, wt_file, dev);
 	if (ret1) {
@@ -7229,11 +7250,12 @@ static int cs40l2x_wavetable_swap(struct cs40l2x_private *cs40l2x,
 	}
 
 err_wakeup:
-	ret2 = cs40l2x_hiber_cmd_send(cs40l2x, CS40L2X_POWERCONTROL_WAKEUP);
-	if (ret2) {
-		dev_err(dev, "Failed to wake device\n");
+	ret2 = cs40l2x_ack_write(cs40l2x,
+			CS40L2X_MBOX_POWERCONTROL,
+			CS40L2X_POWERCONTROL_WAKEUP,
+			CS40L2X_POWERCONTROL_NONE);
+	if (ret2)
 		return ret2;
-	}
 
 	ret2 = cs40l2x_ack_write(cs40l2x, CS40L2X_MBOX_TRIGGERINDEX,
 			CS40L2X_INDEX_CONT_MIN, CS40L2X_MBOX_TRIGGERRESET);
@@ -7291,23 +7313,15 @@ static int cs40l2x_wavetable_sync(struct cs40l2x_private *cs40l2x)
 		if (!(cs40l2x->gpio_mask & (1 << i)))
 			continue;
 
-		ret = regmap_read(regmap,
-				cs40l2x_dsp_reg(cs40l2x, "INDEXBUTTONPRESS",
-						CS40L2X_XM_UNPACKED_TYPE,
-						cs40l2x->fw_desc->id)
-						+ (i << 2),
-				&val);
+		ret = cs40l2x_gpio_edge_index_get(cs40l2x,
+				&val, i << 2, CS40L2X_GPIO_RISE);
 		if (ret)
 			return ret;
 		if (val >= cs40l2x->num_waves)
 			dev_warn(dev, "Invalid gpio%d_rise_index\n", i + 1);
 
-		ret = regmap_read(regmap,
-				cs40l2x_dsp_reg(cs40l2x, "INDEXBUTTONRELEASE",
-						CS40L2X_XM_UNPACKED_TYPE,
-						cs40l2x->fw_desc->id)
-						+ (i << 2),
-				&val);
+		ret = cs40l2x_gpio_edge_index_get(cs40l2x,
+				&val, i << 2, CS40L2X_GPIO_FALL);
 		if (ret)
 			return ret;
 		if (val >= cs40l2x->num_waves)
@@ -7315,6 +7329,62 @@ static int cs40l2x_wavetable_sync(struct cs40l2x_private *cs40l2x)
 	}
 
 	return 0;
+}
+
+static int cs40l2x_boost_short_test(struct cs40l2x_private *cs40l2x)
+{
+	struct regmap *regmap = cs40l2x->regmap;
+	struct device *dev = cs40l2x->dev;
+	unsigned int val;
+	int ret;
+
+	ret = regmap_update_bits(regmap, CS40L2X_BSTCVRT_VCTRL2,
+			CS40L2X_BST_CTL_SEL_MASK,
+			CS40L2X_BST_CTL_SEL_CP_VAL
+				<< CS40L2X_BST_CTL_SEL_SHIFT);
+	if (ret) {
+		dev_err(dev, "Failed to change VBST target selection\n");
+		return ret;
+	}
+
+	ret = regmap_update_bits(regmap, CS40L2X_PWR_CTRL1,
+			CS40L2X_GLOBAL_EN_MASK, 1 << CS40L2X_GLOBAL_EN_SHIFT);
+	if (ret) {
+		dev_err(dev, "Failed to enable device\n");
+		return ret;
+	}
+
+	usleep_range(10000, 10100);
+
+	ret = regmap_read(regmap, CS40L2X_IRQ1_STATUS1, &val);
+	if (ret) {
+		dev_err(dev, "Failed to read boost converter error status\n");
+		return ret;
+	}
+
+	if (val & CS40L2X_BST_SHORT_ERR) {
+		dev_err(dev, "Encountered fatal boost converter short error\n");
+		return -EIO;
+	}
+
+	ret = regmap_update_bits(regmap, CS40L2X_PWR_CTRL1,
+			CS40L2X_GLOBAL_EN_MASK, 0 << CS40L2X_GLOBAL_EN_SHIFT);
+	if (ret) {
+		dev_err(dev, "Failed to disable device\n");
+		return ret;
+	}
+
+	ret = regmap_update_bits(regmap, CS40L2X_BSTCVRT_VCTRL2,
+			CS40L2X_BST_CTL_SEL_MASK,
+			CS40L2X_BST_CTL_SEL_CLASSH
+				<< CS40L2X_BST_CTL_SEL_SHIFT);
+	if (ret) {
+		dev_err(dev, "Failed to restore VBST target selection\n");
+		return ret;
+	}
+
+	return cs40l2x_wseq_replace(cs40l2x,
+			CS40L2X_TEST_LBST, CS40L2X_EXPL_MODE_DIS);
 }
 
 static int cs40l2x_boost_config(struct cs40l2x_private *cs40l2x)
@@ -7520,7 +7590,7 @@ static int cs40l2x_boost_config(struct cs40l2x_private *cs40l2x)
 		return -EINVAL;
 	}
 
-	return 0;
+	return cs40l2x_boost_short_test(cs40l2x);
 }
 
 static int cs40l2x_asp_config(struct cs40l2x_private *cs40l2x)
@@ -7679,6 +7749,19 @@ static int cs40l2x_brownout_config(struct cs40l2x_private *cs40l2x)
 	unsigned int vpbr_thld1_scaled, vbbr_thld1_scaled, val;
 	int ret;
 
+#if defined(CONFIG_SEC_FACTORY)
+	ret = regmap_read(regmap, CS40L2X_PWR_CTRL3, &val);
+	if (ret) {
+		dev_err(dev, "Failed to read CS40L2X_PWR_CTRL3 register\n");
+		return ret;
+	}
+	val &= 0xffffffef;
+	ret = regmap_write(regmap, CS40L2X_PWR_CTRL3, val);
+	if (ret) {
+		dev_err(dev, "Failed to write CS40L2X_PWR_CTRL3 register\n");
+		return ret;
+	}
+#endif
 	if (!vpbr_enable && !vbbr_enable)
 		return 0;
 
@@ -7794,18 +7877,14 @@ static const struct reg_sequence cs40l2x_pcm_routing[] = {
 	{CS40L2X_DSP1_RX4_SRC,		CS40L2X_DSP1_RXn_SRC_VPMON},
 };
 
-static const struct reg_sequence cs40l2x_amp_gnd_setup[] = {
-	{CS40L2X_TEST_KEY_CTL,		CS40L2X_TEST_KEY_UNLOCK_CODE1},
-	{CS40L2X_TEST_KEY_CTL,		CS40L2X_TEST_KEY_UNLOCK_CODE2},
-	{CS40L2X_SPK_FORCE_TST_1,	CS40L2X_FORCE_SPK_GND},
-};
-
 static int cs40l2x_init(struct cs40l2x_private *cs40l2x)
 {
 	int ret;
 	struct regmap *regmap = cs40l2x->regmap;
 	struct device *dev = cs40l2x->dev;
 	unsigned int wksrc_en = CS40L2X_WKSRC_EN_SDA;
+	unsigned int wksrc_pol = CS40L2X_WKSRC_POL_SDA;
+	unsigned int wksrc_ctl;
 
 	/* REFCLK configuration is handled by revision B1 ROM */
 	if (cs40l2x->pdata.refclk_gpio2 &&
@@ -7892,30 +7971,36 @@ static int cs40l2x_init(struct cs40l2x_private *cs40l2x)
 
 	/* hibernation is supported by revision B1 firmware only */
 	if (cs40l2x->revid == CS40L2X_REVID_B1) {
+		/* enables */
 		if (cs40l2x->gpio_mask & CS40L2X_GPIO_BTNDETECT_GPIO1)
 			wksrc_en |= CS40L2X_WKSRC_EN_GPIO1;
-
 		if (cs40l2x->gpio_mask & CS40L2X_GPIO_BTNDETECT_GPIO2)
 			wksrc_en |= CS40L2X_WKSRC_EN_GPIO2;
-
 		if (cs40l2x->gpio_mask & CS40L2X_GPIO_BTNDETECT_GPIO4)
 			wksrc_en |= CS40L2X_WKSRC_EN_GPIO4;
 
-		ret = regmap_update_bits(regmap,
-				CS40L2X_WAKESRC_CTL,
-				CS40L2X_WKSRC_EN_MASK,
-				wksrc_en << CS40L2X_WKSRC_EN_SHIFT);
+		/* polarities */
+		if (cs40l2x->pdata.gpio_indv_pol & CS40L2X_GPIO_BTNDETECT_GPIO1)
+			wksrc_pol |= CS40L2X_WKSRC_POL_GPIO1;
+		if (cs40l2x->pdata.gpio_indv_pol & CS40L2X_GPIO_BTNDETECT_GPIO2)
+			wksrc_pol |= CS40L2X_WKSRC_POL_GPIO2;
+		if (cs40l2x->pdata.gpio_indv_pol & CS40L2X_GPIO_BTNDETECT_GPIO4)
+			wksrc_pol |= CS40L2X_WKSRC_POL_GPIO4;
+
+		wksrc_ctl = ((wksrc_en << CS40L2X_WKSRC_EN_SHIFT)
+				& CS40L2X_WKSRC_EN_MASK)
+				| ((wksrc_pol << CS40L2X_WKSRC_POL_SHIFT)
+					& CS40L2X_WKSRC_POL_MASK);
+
+		ret = regmap_write(regmap,
+				CS40L2X_WAKESRC_CTL, wksrc_ctl);
 		if (ret) {
 			dev_err(dev, "Failed to enable wake sources\n");
 			return ret;
 		}
 
-		ret = cs40l2x_wseq_add_reg(cs40l2x, CS40L2X_WAKESRC_CTL,
-				((wksrc_en << CS40L2X_WKSRC_EN_SHIFT)
-					& CS40L2X_WKSRC_EN_MASK) |
-						((CS40L2X_WKSRC_POL_SDA
-						<< CS40L2X_WKSRC_POL_SHIFT)
-						& CS40L2X_WKSRC_POL_MASK));
+		ret = cs40l2x_wseq_add_reg(cs40l2x,
+				CS40L2X_WAKESRC_CTL, wksrc_ctl);
 		if (ret) {
 			dev_err(dev, "Failed to sequence wake sources\n");
 			return ret;
@@ -7937,22 +8022,6 @@ static int cs40l2x_init(struct cs40l2x_private *cs40l2x)
 		ret = cs40l2x_asp_config(cs40l2x);
 		if (ret)
 			return ret;
-	}
-	
-	if (cs40l2x->amp_gnd_stby) {
-		ret = regmap_multi_reg_write(regmap, cs40l2x_amp_gnd_setup,
-				ARRAY_SIZE(cs40l2x_amp_gnd_setup));
-		if (ret) {
-			dev_err(dev, "Failed to ground amplifier outputs\n");
-			return ret;
-		}
-
-		ret = cs40l2x_wseq_add_seq(cs40l2x, cs40l2x_amp_gnd_setup,
-				ARRAY_SIZE(cs40l2x_amp_gnd_setup));
-		if (ret) {
-			dev_err(dev, "Failed to sequence amplifier outputs\n");
-			return ret;
-		}
 	}
 
 	return cs40l2x_brownout_config(cs40l2x);
@@ -8224,9 +8293,21 @@ static int cs40l2x_handle_of_data(struct i2c_client *i2c_client,
 			pdata->gpio_indv_enable = out_val;
 	}
 
+	ret = of_property_read_u32(np, "cirrus,gpio-indv-pol", &out_val);
+	if (!ret) {
+		if (out_val > (CS40L2X_GPIO_BTNDETECT_GPIO1
+				| CS40L2X_GPIO_BTNDETECT_GPIO2
+				| CS40L2X_GPIO_BTNDETECT_GPIO3
+				| CS40L2X_GPIO_BTNDETECT_GPIO4))
+			dev_warn(dev, "Ignored default gpio_indv_pol\n");
+		else
+			pdata->gpio_indv_pol = out_val;
+	}
+
 	pdata->hiber_enable = of_property_read_bool(np, "cirrus,hiber-enable");
-#if defined(CONFIG_SEC_FACTORY)
-	pdata->hiber_enable = 0;
+#if defined(CONFIG_CS40L2X_SAMSUNG_FEATURE)
+	vib_disable = of_property_read_bool(np, "samsung,vib_disable");
+	pr_info("%s: samsung,vib_disable: %d\n", __func__, vib_disable);
 #endif
 	ret = of_property_read_u32(np, "cirrus,asp-bclk-freq-hz", &out_val);
 	if (!ret)
@@ -8297,7 +8378,6 @@ static const struct reg_sequence cs40l2x_basic_mode_revert[] = {
 	{CS40L2X_PWR_CTRL2,		0x00003321},
 	{CS40L2X_LRCK_PAD_CONTROL,	0x00000007},
 	{CS40L2X_SDIN_PAD_CONTROL,	0x00000007},
-	{CS40L2X_GPIO_PAD_CONTROL,	0x00000000},
 	{CS40L2X_AMP_DIG_VOL_CTRL,	0x00008000},
 	{CS40L2X_IRQ2_MASK1,		0xFFFFFFFF},
 	{CS40L2X_IRQ2_MASK2,		0xFFFFFFFF},
@@ -8307,7 +8387,7 @@ static int cs40l2x_basic_mode_exit(struct cs40l2x_private *cs40l2x)
 {
 	struct regmap *regmap = cs40l2x->regmap;
 	struct device *dev = cs40l2x->dev;
-	unsigned int val;
+	unsigned int val, hb_init;
 	int ret, i;
 
 	for (i = 0; i < CS40L2X_BASIC_TIMEOUT_COUNT; i++) {
@@ -8320,11 +8400,35 @@ static int cs40l2x_basic_mode_exit(struct cs40l2x_private *cs40l2x)
 		if (val & CS40L2X_BASIC_BOOT_DONE)
 			break;
 
-		usleep_range(10000, 10100);
+		usleep_range(5000, 5100);
 	}
 
 	if (i == CS40L2X_BASIC_TIMEOUT_COUNT) {
 		dev_err(dev, "Timed out waiting for basic-mode boot\n");
+		return -ETIME;
+	}
+
+	ret = regmap_read(regmap, CS40L2X_BASIC_HALO_HEARTBEAT, &hb_init);
+	if (ret) {
+		dev_err(dev, "Failed to read basic-mode heartbeat\n");
+		return ret;
+	}
+
+	for (i = 0; i < CS40L2X_BASIC_TIMEOUT_COUNT; i++) {
+		usleep_range(5000, 5100);
+
+		ret = regmap_read(regmap, CS40L2X_BASIC_HALO_HEARTBEAT, &val);
+		if (ret) {
+			dev_err(dev, "Failed to read basic-mode heartbeat\n");
+			return ret;
+		}
+
+		if (val > hb_init)
+			break;
+	}
+
+	if (i == CS40L2X_BASIC_TIMEOUT_COUNT) {
+		dev_err(dev, "Timed out waiting for basic-mode heartbeat\n");
 		return -ETIME;
 	}
 
@@ -8404,6 +8508,7 @@ static const struct reg_sequence cs40l2x_rev_b0_errata[] = {
 	{CS40L2X_PLL_MISC_CTRL,		0x03008E0E},
 	{CS40L2X_TEST_KEY_CTL,		CS40L2X_TEST_KEY_UNLOCK_CODE1},
 	{CS40L2X_TEST_KEY_CTL,		CS40L2X_TEST_KEY_UNLOCK_CODE2},
+	{CS40L2X_TEST_LBST,		CS40L2X_EXPL_MODE_EN},
 	{CS40L2X_OTP_TRIM_12,		0x002F0065},
 	{CS40L2X_OTP_TRIM_13,		0x00002B4F},
 	{CS40L2X_SPKMON_RESYNC,		0x00000000},
@@ -8572,10 +8677,24 @@ static irqreturn_t cs40l2x_irq(int irq, void *data)
 	
 	dev_info(dev, "Entering cs40l2x_irq...\n");
 
-	if (!cs40l2x->vibe_init_success)
-		return ret_irq;
-
 	mutex_lock(&cs40l2x->lock);
+
+	ret = regmap_read(regmap, CS40L2X_DSP1_SCRATCH1, &val);
+	if (ret) {
+		dev_err(dev, "Failed to read DSP scratch contents\n");
+		goto err_mutex;
+	}
+
+	if (val) {
+		dev_err(dev, "Fatal runtime error with DSP scratch = %u\n",
+				val);
+
+		ret = cs40l2x_reset_recovery(cs40l2x);
+		if (!ret)
+			ret_irq = IRQ_HANDLED;
+
+		goto err_mutex;
+	}
 
 	for (i = 0; i < ARRAY_SIZE(cs40l2x_event_regs); i++) {
 		/* skip disabled event notifiers */
@@ -8642,6 +8761,11 @@ static irqreturn_t cs40l2x_irq(int irq, void *data)
 			goto err_mutex;
 		}
 
+		/*
+		 * polling for acknowledgment as with other mailbox registers
+		 * is unnecessary in this case and adds latency, so only send
+		 * the wake-up command to complete the notification sequence
+		 */
 		ret = regmap_write(regmap, CS40L2X_MBOX_POWERCONTROL,
 				CS40L2X_POWERCONTROL_WAKEUP);
 		if (ret) {
@@ -8663,18 +8787,6 @@ err_mutex:
 	return ret_irq;
 }
 
-static struct regmap_config cs40l2x_regmap = {
-	.reg_bits = 32,
-	.val_bits = 32,
-	.reg_stride = 4,
-	.reg_format_endian = REGMAP_ENDIAN_BIG,
-	.val_format_endian = REGMAP_ENDIAN_BIG,
-	.max_register = CS40L2X_LASTREG,
-	.precious_reg = cs40l2x_precious_reg,
-	.readable_reg = cs40l2x_readable_reg,
-	.cache_type = REGCACHE_NONE,
-};
-
 static int cs40l2x_i2c_probe(struct i2c_client *i2c_client,
 				const struct i2c_device_id *id)
 {
@@ -8695,6 +8807,30 @@ static int cs40l2x_i2c_probe(struct i2c_client *i2c_client,
 	i2c_set_clientdata(i2c_client, cs40l2x);
 
 	mutex_init(&cs40l2x->lock);
+
+	hrtimer_init(&cs40l2x->pbq_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
+	cs40l2x->pbq_timer.function = cs40l2x_pbq_timer;
+
+	hrtimer_init(&cs40l2x->asp_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
+	cs40l2x->asp_timer.function = cs40l2x_asp_timer;
+
+	cs40l2x->vibe_workqueue =
+		alloc_ordered_workqueue("vibe_workqueue", WQ_HIGHPRI);
+	if (!cs40l2x->vibe_workqueue) {
+		dev_err(dev, "Failed to allocate workqueue\n");
+		return -ENOMEM;
+	}
+
+	INIT_WORK(&cs40l2x->vibe_start_work, cs40l2x_vibe_start_worker);
+	INIT_WORK(&cs40l2x->vibe_pbq_work, cs40l2x_vibe_pbq_worker);
+	INIT_WORK(&cs40l2x->vibe_stop_work, cs40l2x_vibe_stop_worker);
+	INIT_WORK(&cs40l2x->vibe_mode_work, cs40l2x_vibe_mode_worker);
+
+	ret = device_init_wakeup(cs40l2x->dev, true);
+	if (ret) {
+		dev_err(dev, "Failed to initialize wakeup source\n");
+		return ret;
+	}
 
 	INIT_LIST_HEAD(&cs40l2x->coeff_desc_head);
 
@@ -8840,9 +8976,6 @@ static int cs40l2x_i2c_probe(struct i2c_client *i2c_client,
 	} else {
 		cs40l2x->event_control = CS40L2X_EVENT_DISABLED;
 	}
-	
-	if (cs40l2x->event_control != CS40L2X_EVENT_DISABLED)
-		cs40l2x->amp_gnd_stby = pdata->amp_gnd_stby;
 
 	if (!pdata->gpio_indv_enable
 			|| cs40l2x->fw_desc->id == CS40L2X_FW_ID_ORIG) {
@@ -8858,7 +8991,7 @@ static int cs40l2x_i2c_probe(struct i2c_client *i2c_client,
 		if (cs40l2x->devid == CS40L2X_DEVID_L25A)
 			cs40l2x->gpio_mask &= ~CS40L2X_GPIO_BTNDETECT_GPIO2;
 	}
-	
+
 #ifdef CONFIG_CS40L2X_SAMSUNG_FEATURE
 	cs40l2x_dev_node_init(cs40l2x);
 #endif
@@ -8881,7 +9014,6 @@ static int cs40l2x_i2c_probe(struct i2c_client *i2c_client,
 	cs40l2x->save_vib_event.EVENTS.FOLDER_STATE = 1; // init CLOSE
 #endif
 #endif
-
 	return 0;
 
 #ifdef CONFIG_CS40L2X_SAMSUNG_FEATURE
@@ -8934,19 +9066,20 @@ static int cs40l2x_i2c_remove(struct i2c_client *i2c_client)
 		led_classdev_unregister(&cs40l2x->led_dev);
 #endif
 #endif /* CONFIG_ANDROID_TIMED_OUTPUT */
+	}
+	hrtimer_cancel(&cs40l2x->pbq_timer);
+	hrtimer_cancel(&cs40l2x->asp_timer);
 
-		hrtimer_cancel(&cs40l2x->pbq_timer);
-		hrtimer_cancel(&cs40l2x->asp_timer);
-
+	if (cs40l2x->vibe_workqueue) {
 		cancel_work_sync(&cs40l2x->vibe_start_work);
 		cancel_work_sync(&cs40l2x->vibe_pbq_work);
 		cancel_work_sync(&cs40l2x->vibe_stop_work);
 		cancel_work_sync(&cs40l2x->vibe_mode_work);
 
 		destroy_workqueue(cs40l2x->vibe_workqueue);
-
-		device_init_wakeup(cs40l2x->dev, false);
 	}
+
+	device_init_wakeup(cs40l2x->dev, false);
 
 #ifndef CONFIG_MOTOR_DRV_CS40L2X_PMIC_RESET
 	gpiod_set_value_cansleep(cs40l2x->reset_gpio, 0);
@@ -8964,6 +9097,7 @@ static int cs40l2x_i2c_remove(struct i2c_client *i2c_client)
 static int __maybe_unused cs40l2x_suspend(struct device *dev)
 {
 	struct cs40l2x_private *cs40l2x = dev_get_drvdata(dev);
+	struct i2c_client *i2c_client = to_i2c_client(dev);
 	int ret = 0;
 
 	dev_info(dev, "Entering cs40l2x_suspend...\n");
@@ -8974,6 +9108,9 @@ static int __maybe_unused cs40l2x_suspend(struct device *dev)
 		return ret;
 	}
 #endif
+
+	disable_irq(i2c_client->irq);
+
 	mutex_lock(&cs40l2x->lock);
 
 	if (cs40l2x->pdata.gpio1_mode == CS40L2X_GPIO1_MODE_AUTO
@@ -9007,6 +9144,7 @@ err_mutex:
 static int __maybe_unused cs40l2x_resume(struct device *dev)
 {
 	struct cs40l2x_private *cs40l2x = dev_get_drvdata(dev);
+	struct i2c_client *i2c_client = to_i2c_client(dev);
 	int ret = 0;
 
 #ifdef CONFIG_CS40L2X_SAMSUNG_FEATURE
@@ -9041,6 +9179,8 @@ static int __maybe_unused cs40l2x_resume(struct device *dev)
 
 err_mutex:
 	mutex_unlock(&cs40l2x->lock);
+
+	enable_irq(i2c_client->irq);
 
 	return ret;
 }

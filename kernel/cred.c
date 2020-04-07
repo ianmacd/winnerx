@@ -42,7 +42,7 @@ static struct kmem_cache *cred_jar;
 struct group_info init_groups = { .usage = ATOMIC_INIT(2) };
 
 #ifdef CONFIG_RKP_KDP
-RKP_RO_AREA int rkp_cred_enable = 0;
+int rkp_cred_enable __kdp_ro = 0;
 
 static struct kmem_cache *cred_jar_ro;
 struct kmem_cache *tsec_jar;
@@ -86,11 +86,8 @@ void put_cred(const struct cred *_cred)
 /*
  * The initial credentials for the initial task
  */
-#ifdef CONFIG_RKP_KDP
-RKP_RO_AREA struct cred init_cred = {
-#else
-struct cred init_cred = {
-#endif
+// CONFIG_RKP_KDP
+struct cred init_cred __kdp_ro = {
 	.usage			= ATOMIC_INIT(4),
 #ifdef CONFIG_DEBUG_CREDENTIALS
 	.subscribers		= ATOMIC_INIT(2),

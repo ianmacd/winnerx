@@ -31,6 +31,9 @@
 #include "muic_i2c.h"
 #include <linux/ccic/s2mm005.h>
 #include "muic_apis.h"
+#if defined(CONFIG_MUIC_SUPPORT_KEYBOARDDOCK)
+#include "muic_vps.h"
+#endif
 #include "../../battery_v2/include/sec_charging_common.h"
 
 #if defined(CONFIG_MUIC_NOTIFIER)
@@ -323,6 +326,7 @@ int muic_restart_afc(int noti)
 	cancel_delayed_work(&gpmuic->afc_retry_work);
 	schedule_delayed_work(&gpmuic->afc_retry_work, msecs_to_jiffies(5000)); // 5sec
 
+	muic_afc_delay_check_state(0);
 //12085272???
 #ifdef CONFIG_MUIC_SM5705_AFC_18W_TA_SUPPORT
 	pr_info("%s:%s pmuic->is_18w_ta = %d \n",MUIC_DEV_NAME, __func__,gpmuic->is_18w_ta);
@@ -461,7 +465,7 @@ static void muic_afc_delay_check_work(struct work_struct *work)
 	pr_info("%s: attached_dev = %d\n", __func__, gpmuic->attached_dev);
 	pr_info("%s: delay_check_count = %d , is_flash_on=%d\n",
 			__func__, gpmuic->delay_check_count, gpmuic->is_flash_on);
-	if (gpmuic->delay_check_count > 5) {
+	if (gpmuic->delay_check_count > 25) {
 		muic_afc_delay_check_state(0);
 		return;
 	}
@@ -474,7 +478,12 @@ static void muic_afc_delay_check_work(struct work_struct *work)
 
 	val1 = muic_i2c_read_byte(i2c, REG_DEVT1);
 	pr_info("%s:val1 = 0x%x \n", __func__, val1);
+#if defined(CONFIG_MUIC_SUPPORT_KEYBOARDDOCK)
+	if ((gpmuic->attached_dev == ATTACHED_DEV_TA_MUIC) && (val1 == 0x40
+		|| gpmuic->vps.s.chgtyp == CHGTYP_DEDICATED_CHARGER)) {
+#else
 	if ((gpmuic->attached_dev == ATTACHED_DEV_TA_MUIC) && (val1 == 0x40)) {
+#endif
 		pr_info("%s: DP_RESET\n", __func__);
 		afcops->afc_ctrl_reg(gpmuic->regmapdesc, AFCCTRL_DIS_AFC, 1);
 		msleep(60);
@@ -519,6 +528,11 @@ void muic_charger_init(void)
 
 	if (gpmuic->attached_dev == ATTACHED_DEV_TA_MUIC)
 		schedule_work(&muic_afc_init_work);
+}
+
+int muic_is_charger_ready(void)
+{
+	return is_charger_ready;
 }
 
 int sm5705_muic_afc_set_voltage(int voltage)
@@ -677,6 +691,24 @@ int muic_afc_is_18W_TA(void)
 EXPORT_SYMBOL(muic_afc_is_18W_TA);
 #endif
 
+#if defined(CONFIG_MUIC_SUPPORT_KEYBOARDDOCK)
+void muic_ADC_rescan(void)
+{
+	struct i2c_client *i2c = gpmuic->i2c;
+	int rsvdid2;
+
+	pr_info("%s:%s\n",MUIC_DEV_NAME, __func__);
+
+	rsvdid2 = muic_i2c_read_byte(i2c, REG_RSVDID2);
+	rsvdid2 = rsvdid2 | 0x01;
+	
+	muic_i2c_write_byte(i2c, REG_RSVDID2, rsvdid2);
+	rsvdid2 = rsvdid2 & 0xFE;
+	muic_i2c_write_byte(i2c, REG_RSVDID2, rsvdid2);
+}
+EXPORT_SYMBOL(muic_ADC_rescan);
+#endif
+
 #ifdef CONFIG_MUIC_SM5705_SWITCH_CONTROL_GPIO
 int muic_GPIO_control(int gpio)
 {
@@ -684,7 +716,7 @@ int muic_GPIO_control(int gpio)
 	int sm5705_switch_val;
 	int ret;
     
-    pr_info("%s: GPIO = %d \n", __func__,gpio);
+	pr_info("%s: GPIO = %d \n", __func__,gpio);
 
 	ret = gpio_request(sm5705_switch_gpio, "SM5705_SWITCH_GPIO");
 	if (ret) {
@@ -730,23 +762,22 @@ static ssize_t afc_off_store(struct device *dev,
 	unsigned int param_val;
 #ifdef CONFIG_MUIC_HV
 	int ret = 0;
+	union power_supply_propval psy_val;
 #endif
 	if (!strncmp(buf, "1", 1)) {
 		pr_info("%s, Disable AFC\n", __func__);
-		param_val = 1;
 		pdata->afc_disable = true;
 #ifdef CONFIG_SEC_FACTORY
 		muic_disable_afc(1);
 #endif
 	} else {
 		pr_info("%s, Enable AFC\n", __func__);
-		param_val = 0;
 		pdata->afc_disable = false;
 #ifdef CONFIG_SEC_FACTORY
 		muic_disable_afc(0);
 #endif
 	}
-
+	param_val = pdata->afc_disable ? '1' : '0';
 	pr_info("%s: param_val:%d\n", __func__, param_val);
 	#ifdef CONFIG_MUIC_HV
 	ret = sec_set_param(param_index_afc_disable, &param_val);
@@ -759,6 +790,9 @@ static ssize_t afc_off_store(struct device *dev,
 		pr_info("%s:%s afc_disable:%d (AFC %s)\n", MUIC_DEV_NAME,
 		__func__, pdata->afc_disable, pdata->afc_disable ? "Diabled": "Enabled");
 	}
+	psy_val.intval = param_val;
+	psy_do_property("battery", set,
+		POWER_SUPPLY_EXT_PROP_HV_DISABLE, psy_val);
 	#endif
 	return size;
 }

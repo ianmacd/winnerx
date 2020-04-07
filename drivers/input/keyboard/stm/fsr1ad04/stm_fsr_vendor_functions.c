@@ -60,26 +60,25 @@ static ssize_t read_totalcx_show(struct device *dev,
 	struct fsr_sidekey_info *info = container_of(sec, struct fsr_sidekey_info, sec);
 	u16 cxAddr;
 	u8 regAdd[3] = {0xD0, 0x00, 0x00};
-	u8 ch_cx1_loc[6] = {0, 2, 12, 14, 18, 20};
+	u8 ch_cx1_loc[6] = {1, 5, 25, 29, 37, 41};
 	struct channel_cx_data_raw ch_cx_data;
 	struct cx_data_raw *ch_data;
-	short *data = (short *)&ch_cx_data.ch12;
+	u8 *data = (u8 *)&ch_cx_data;
 	int retval = 0;
-	int i =0;
+	int i = 0;
 
 	cxAddr = info->fsr_sys_info.compensationAddr + 12; // Add offset value 12.
 	regAdd[1] = (cxAddr >> 8) & 0xff;
 	regAdd[2] = (cxAddr) & 0xff;
-	retval = fsr_read_reg(info, &regAdd[0], 3, (u8*)&ch_cx_data.dummy, sizeof(struct channel_cx_data_raw));
+	retval = fsr_read_reg(info, &regAdd[0], 3, (u8 *)&ch_cx_data, sizeof(struct channel_cx_data_raw));
 	if (retval < 0) {
 		input_err(true, &info->client->dev, "%s: failed [%d]\n", __func__, retval);
 		return -1;
 	} else {
-		for (i=0; i<6; i++)
-		{
-			ch_data = (struct cx_data_raw *)(data+ch_cx1_loc[i]);
-			info->ch_cx_data[i].cx1 = (ch_data->cx1.sign?(-1*ch_data->cx1.data):ch_data->cx1.data);
-			info->ch_cx_data[i].cx2 = (ch_data->cx2.sign?(-1*ch_data->cx2.data):ch_data->cx2.data);
+		for (i = 0; i < 6; i++) {
+			ch_data = (struct cx_data_raw *)(data + ch_cx1_loc[i]);
+			info->ch_cx_data[i].cx1 = (ch_data->cx1.sign ? (-1 * ch_data->cx1.data) : ch_data->cx1.data);
+			info->ch_cx_data[i].cx2 = (ch_data->cx2.sign ? (-1 * ch_data->cx2.data) : ch_data->cx2.data);
 			info->ch_cx_data[i].total = (info->ch_cx_data[i].cx1 * G1[info->fsr_sys_info.gain1])
 				+ (info->ch_cx_data[i].cx2 * G2[info->fsr_sys_info.gain1][info->fsr_sys_info.gain2]);
 			info->ch_cx_data[i].total = info->ch_cx_data[i].total / 1000;

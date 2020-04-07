@@ -130,9 +130,44 @@ config CAMERA_SSM_I2C_ENV
 	---help---
 	Enables support for SSM I2C test
 
-config EEPROM_FORCE_DOWN
-	tristate "EEPROM power down forcely when EEPROM i2c error"
+config SAMSUNG_FORCE_DISABLE_REGULATOR
+	tristate "Force disable regulator support"
 	depends on SPECTRA_CAMERA
 	default n
 	---help---
-	Enables support for force EEPROM power down
+	Enables support for force regulator disable
+
+config SAMSUNG_ACTUATOR_AK7377
+	tristate "Actuator AK7377"
+	depends on SPECTRA_CAMERA
+	default n
+	---help---
+	Enables support for actuator ak7377
+
+config SAMSUNG_REAR_BOKEH
+	tristate "bokeh camera"
+	depends on SPECTRA_CAMERA
+	default n
+	---help---
+	Enables support for bokeh camera
+
+config LEDS_PMIC_QPNP
+	tristate "flash PMIC"
+	depends on SPECTRA_CAMERA
+	default n
+	---help---
+	Enables support for PMIC flash
+
+config SAMSUNG_ACTUATOR_DW9808
+	tristate "Actuator DW9808"
+	depends on SPECTRA_CAMERA
+	default n
+	---help---
+	Enables support for actuator DW9808
+
+config SAMSUNG_OIS_RUMBA_S4
+        tristate "External RUMBA S4 OIS support"
+	depends on SPECTRA_CAMERA
+	default n
+	---help---
+	Enables support for external ois module.

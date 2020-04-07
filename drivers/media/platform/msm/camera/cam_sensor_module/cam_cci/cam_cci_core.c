@@ -232,16 +232,16 @@ static void cam_cci_dump_registers(struct cci_device *cci_dev,
 
 	/* CCI Master Queue registers */
 	CAM_INFO(CAM_CCI, " **** CCI MASTER%d QUEUE%d Registers ****",
-		master, 0); 
+		master, 0);
 	for (i = 0; i < DEBUG_MASTER_QUEUE_REG_COUNT; i++) {
 		reg_offset = DEBUG_MASTER_QUEUE_REG_START +  master*0x200 +
-			0 * 0x100 + i * 4; 
+			0 * 0x100 + i * 4;
 		read_val = cam_io_r_mb(base + reg_offset);
 		CAM_INFO(CAM_CCI, "offset = 0x%X value = 0x%X",
 			reg_offset, read_val);
 	}
 
-	/* CCI Master Queue registers */ 
+	/* CCI Master Queue registers */
 	CAM_INFO(CAM_CCI, " **** CCI MASTER%d QUEUE%d Registers ****", master, 1);
 	for (i = 0; i < DEBUG_MASTER_QUEUE_REG_COUNT; i++) {
 		reg_offset = DEBUG_MASTER_QUEUE_REG_START + master * 0x200 + 1 * 0x100 + i * 4;
@@ -1776,7 +1776,6 @@ int32_t cam_cci_core_cfg(struct v4l2_subdev *sd,
 		rc = cam_cci_write(sd, cci_ctrl);
 		if (rc)
 			cci_error_status[cci_dev->soc_info.index][master] = TRUE;
-		break;
 	case MSM_CCI_GPIO_WRITE:
 		break;
 	case MSM_CCI_SET_SYNC_CID:

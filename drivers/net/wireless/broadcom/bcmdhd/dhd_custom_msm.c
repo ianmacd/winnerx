@@ -23,7 +23,7 @@
  *
  * <<Broadcom-WL-IPTag/Open:>>
  *
- * $Id: dhd_custom_msm.c 794394 2018-12-13 06:10:24Z $
+ * $Id: dhd_custom_msm.c 816392 2019-04-24 14:39:02Z $
  *
  */
 
@@ -140,8 +140,6 @@ dhd_wifi_init_gpio(void)
 int
 dhd_wlan_power(int onoff)
 {
-	printk(KERN_INFO"------------------------------------------------");
-	printk(KERN_INFO"------------------------------------------------\n");
 	printk(KERN_INFO"%s Enter: power %s\n", __func__, onoff ? "on" : "off");
 
 	if (onoff) {

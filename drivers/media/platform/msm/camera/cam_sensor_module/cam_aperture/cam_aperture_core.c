@@ -152,8 +152,9 @@ int32_t cam_aperture_set_mode(
 		if (ret < 0) {
 			CAM_ERR(CAM_APERTURE, "write aperture power failed ");
 		}
-#if defined(CONFIG_SAMSUNG_APERTURE_MULTI_MODE)
-		msleep(25);
+#if defined(CONFIG_SAMSUNG_APERTURE_MULTI_MODE) || defined(CONFIG_SEC_D2XQ_PROJECT) || defined(CONFIG_SEC_D2Q_PROJECT)\
+	|| defined(CONFIG_SEC_D1Q_PROJECT) || defined(CONFIG_SEC_D2XQ2_PROJECT)
+		usleep_range(20000, 21000);
 #else
 		usleep_range(15000, 16000);
 #endif
@@ -231,8 +232,8 @@ int32_t cam_aperture_get_halltest_mode(struct camera_io_master *client, int32_t 
 			APERTURESTATE = 0xFF;
 			retry = APERTURERETRY;
 			do {
-				//delay 3ms and set next command
-				usleep_range(3000, 4000);
+				//delay 30ms and set next command
+				usleep_range(30000, 40000);
 
 				rc = camera_io_dev_read(client, APERTURECTRL, &APERTURESTATE,
 					CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);

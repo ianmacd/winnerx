@@ -22,6 +22,10 @@
 
 #if defined(CONFIG_SAMSUNG_OIS_MCU_STM32)
 #include "cam_ois_mcu_stm32g.h"
+#elif defined(CONFIG_SAMSUNG_OIS_RUMBA_S4)
+#include "cam_ois_rumba_s4.h"
+#endif
+#if defined(CONFIG_SAMSUNG_OIS_MCU_STM32) || defined(CONFIG_SAMSUNG_OIS_RUMBA_S4)
 #include "cam_ois_thread.h"
 #include <linux/slab.h>
 
@@ -107,6 +111,72 @@ int32_t cam_ois_construct_default_power_setting(
 	power_info->power_down_setting[4].config_val = 0;
 #endif
 
+#if defined(CONFIG_SAMSUNG_OIS_RUMBA_S4)
+	power_info->power_setting_size = 6;
+
+	power_info->power_setting[0].seq_type = SENSOR_VIO;
+	power_info->power_setting[0].seq_val = CAM_VIO;
+	power_info->power_setting[0].config_val = 1;
+	power_info->power_setting[0].delay = 1;
+
+	power_info->power_setting[1].seq_type = SENSOR_CUSTOM_REG1;
+	power_info->power_setting[1].seq_val = CAM_V_CUSTOM1;
+	power_info->power_setting[1].config_val = 1;
+	power_info->power_setting[1].delay = 1;
+
+	power_info->power_setting[2].seq_type = SENSOR_CUSTOM_REG2;
+	power_info->power_setting[2].seq_val = CAM_V_CUSTOM2;
+	power_info->power_setting[2].config_val = 1;
+	power_info->power_setting[2].delay = 1;
+	
+	power_info->power_setting[3].seq_type = SENSOR_CUSTOM_REG3;
+	power_info->power_setting[3].seq_val = CAM_V_CUSTOM3;
+	power_info->power_setting[3].config_val = 1;
+	power_info->power_setting[3].delay = 1;
+	
+	power_info->power_setting[4].seq_type = SENSOR_MCLK;
+	power_info->power_setting[4].seq_val = 0;
+	power_info->power_setting[4].config_val = 19200000;
+	power_info->power_setting[4].delay = 1;
+
+	power_info->power_setting[5].seq_type = SENSOR_RESET;
+	power_info->power_setting[5].config_val = 1;
+	power_info->power_setting[5].delay = 10;
+
+
+	power_info->power_down_setting_size = 6;
+
+	power_info->power_down_setting[0].seq_type = SENSOR_RESET;
+	power_info->power_down_setting[0].config_val = 0;
+	power_info->power_down_setting[0].delay = 2;
+
+	power_info->power_down_setting[1].seq_type = SENSOR_MCLK;
+	power_info->power_down_setting[1].seq_val = 0;
+	power_info->power_down_setting[1].config_val = 0;
+	power_info->power_down_setting[1].delay = 1;
+
+
+	power_info->power_down_setting[2].seq_type = SENSOR_CUSTOM_REG3;
+	power_info->power_down_setting[2].seq_val = CAM_V_CUSTOM3;
+	power_info->power_down_setting[2].config_val = 0;
+	power_info->power_down_setting[2].delay = 1;
+
+	power_info->power_down_setting[3].seq_type = SENSOR_CUSTOM_REG2;
+	power_info->power_down_setting[3].seq_val = CAM_V_CUSTOM2;
+	power_info->power_down_setting[3].config_val = 0;
+	power_info->power_down_setting[3].delay = 1;
+
+	power_info->power_down_setting[4].seq_type = SENSOR_CUSTOM_REG1;
+	power_info->power_down_setting[4].seq_val = CAM_V_CUSTOM1;
+	power_info->power_down_setting[4].config_val = 0;
+	power_info->power_down_setting[4].delay = 1;
+	
+	power_info->power_down_setting[5].seq_type = SENSOR_VIO;
+	power_info->power_down_setting[5].seq_val = CAM_VIO;
+	power_info->power_down_setting[5].config_val = 0;
+	
+#endif
+
 	return rc;
 
 free_power_settings:
@@ -130,7 +200,7 @@ static int cam_ois_get_dev_handle(struct cam_ois_ctrl_t *o_ctrl,
 	struct cam_sensor_acquire_dev    ois_acq_dev;
 	struct cam_create_dev_hdl        bridge_params;
 	struct cam_control              *cmd = (struct cam_control *)arg;
-#if defined(CONFIG_SAMSUNG_OIS_MCU_STM32)
+#if defined(CONFIG_SAMSUNG_OIS_MCU_STM32) || defined(CONFIG_SAMSUNG_OIS_RUMBA_S4)
 	int i = 0, idx = -1;
 
 	if (o_ctrl->bridge_cnt >= MAX_BRIDGE_COUNT) {
@@ -161,7 +231,7 @@ static int cam_ois_get_dev_handle(struct cam_ois_ctrl_t *o_ctrl,
 		return -EFAULT;
 
 	bridge_params.session_hdl = ois_acq_dev.session_handle;
-#if defined(CONFIG_SAMSUNG_OIS_MCU_STM32)
+#if defined(CONFIG_SAMSUNG_OIS_MCU_STM32) || defined(CONFIG_SAMSUNG_OIS_RUMBA_S4)
 	bridge_params.ops = &o_ctrl->bridge_intf[idx].ops;
 #else
 	bridge_params.ops = &o_ctrl->bridge_intf.ops;
@@ -170,9 +240,11 @@ static int cam_ois_get_dev_handle(struct cam_ois_ctrl_t *o_ctrl,
 	bridge_params.media_entity_flag = 0;
 	bridge_params.priv = o_ctrl;
 
+	bridge_params.dev_id = CAM_OIS;
+
 	ois_acq_dev.device_handle =
 		cam_create_device_hdl(&bridge_params);
-#if defined(CONFIG_SAMSUNG_OIS_MCU_STM32)
+#if defined(CONFIG_SAMSUNG_OIS_MCU_STM32) || defined(CONFIG_SAMSUNG_OIS_RUMBA_S4)
 	o_ctrl->bridge_intf[idx].device_hdl = ois_acq_dev.device_handle;
 	o_ctrl->bridge_intf[idx].session_hdl = ois_acq_dev.session_handle;
 	o_ctrl->bridge_cnt++;
@@ -190,7 +262,7 @@ static int cam_ois_get_dev_handle(struct cam_ois_ctrl_t *o_ctrl,
 	return 0;
 }
 
-#if defined(CONFIG_SAMSUNG_OIS_MCU_STM32)
+#if defined(CONFIG_SAMSUNG_OIS_MCU_STM32) || defined(CONFIG_SAMSUNG_OIS_RUMBA_S4)
 /**
  * cam_ois_release_dev_handle - get device handle
  * @o_ctrl:     ctrl structure
@@ -251,7 +323,7 @@ int cam_ois_power_up(struct cam_ois_ctrl_t *o_ctrl)
 		return -EINVAL;
 	}
 
-#if defined(CONFIG_SAMSUNG_OIS_MCU_STM32)
+#if defined(CONFIG_SAMSUNG_OIS_MCU_STM32) || defined(CONFIG_SAMSUNG_OIS_RUMBA_S4)
 	if (o_ctrl->is_power_up)
 		return 0;
 #endif
@@ -307,7 +379,7 @@ int cam_ois_power_up(struct cam_ois_ctrl_t *o_ctrl)
 	if (rc)
 		CAM_ERR(CAM_OIS, "cci_init failed: rc: %d", rc);
 
-#if defined(CONFIG_SAMSUNG_OIS_MCU_STM32)
+#if defined(CONFIG_SAMSUNG_OIS_MCU_STM32) || defined(CONFIG_SAMSUNG_OIS_RUMBA_S4)
 	o_ctrl->is_power_up = true;
 #endif
 
@@ -333,7 +405,7 @@ int cam_ois_power_down(struct cam_ois_ctrl_t *o_ctrl)
 		return -EINVAL;
 	}
 
-#if defined(CONFIG_SAMSUNG_OIS_MCU_STM32)
+#if defined(CONFIG_SAMSUNG_OIS_MCU_STM32) || defined(CONFIG_SAMSUNG_OIS_RUMBA_S4)
 	if (!o_ctrl->is_power_up)
 		return 0;
 	o_ctrl->is_power_up = false;
@@ -352,8 +424,8 @@ int cam_ois_power_down(struct cam_ois_ctrl_t *o_ctrl)
 	}
 
 	CAM_INFO(CAM_OIS, "ABOUT TO POWER DOWN at slot:%d", soc_info->index);
-#if defined(CONFIG_SENSOR_RETENTION)
-	rc = cam_sensor_util_power_down(power_info, soc_info, 0);
+#if defined(CONFIG_SAMSUNG_FORCE_DISABLE_REGULATOR)
+	rc = cam_sensor_util_power_down(power_info, soc_info, FALSE);
 #else
 	rc = cam_sensor_util_power_down(power_info, soc_info);
 #endif
@@ -387,24 +459,30 @@ int cam_ois_apply_settings(struct cam_ois_ctrl_t *o_ctrl,
 	list_for_each_entry(i2c_list,
 		&(i2c_set->list_head), list) {
 		if (i2c_list->op_code ==  CAM_SENSOR_I2C_WRITE_RANDOM) {
-#if defined(CONFIG_SAMSUNG_OIS_MCU_STM32)
+#if defined(CONFIG_SAMSUNG_OIS_MCU_STM32) || defined(CONFIG_SAMSUNG_OIS_RUMBA_S4)
 			if ((i2c_list->i2c_settings.size == 1) &&
 				(i2c_list->i2c_settings.addr_type == CAMERA_SENSOR_I2C_TYPE_INVALID) &&
-				(i2c_list->i2c_settings.data_type == CAMERA_SENSOR_I2C_TYPE_INVALID))
+				(i2c_list->i2c_settings.data_type == CAMERA_SENSOR_I2C_TYPE_INVALID)) {
+                                 CAM_ERR(CAM_OIS,
+                                        "INVALID addr type or data type");
 				continue;
+				}
 #endif
 
-#if defined(CONFIG_SAMSUNG_OIS_MCU_STM32)
+#if defined(CONFIG_SAMSUNG_OIS_MCU_STM32) || defined(CONFIG_SAMSUNG_OIS_RUMBA_S4)
 			size = i2c_list->i2c_settings.size;
 			for (i = 0; i < size; i++) {
 				if (i2c_list->i2c_settings.reg_setting[i].reg_addr == 0x02) {
+                                	CAM_DBG(CAM_OIS,"Writing addr %d data %d", i2c_list->i2c_settings.reg_setting[i].reg_addr,
+                                                 i2c_list->i2c_settings.reg_setting[i].reg_data);
 					rc = cam_ois_set_ois_mode(o_ctrl,
 						i2c_list->i2c_settings.reg_setting[i].reg_data);
 					return rc;
 				}
 			}
 #endif
-
+                        CAM_DBG(CAM_OIS,"Writing addr %d data %d", i2c_list->i2c_settings.reg_setting[0].reg_addr,
+                                i2c_list->i2c_settings.reg_setting[0].reg_data);
 			rc = camera_io_dev_write(&(o_ctrl->io_master_info),
 				&(i2c_list->i2c_settings));
 			if (rc < 0) {
@@ -473,7 +551,7 @@ static int cam_ois_slaveInfo_pkt_parser(struct cam_ois_ctrl_t *o_ctrl,
 	return rc;
 }
 
-#if !defined(CONFIG_SAMSUNG_OIS_MCU_STM32)
+#if !defined(CONFIG_SAMSUNG_OIS_MCU_STM32) && !defined(CONFIG_SAMSUNG_OIS_RUMBA_S4)
 static int cam_ois_fw_download(struct cam_ois_ctrl_t *o_ctrl)
 {
 	uint16_t                           total_bytes = 0;
@@ -621,7 +699,7 @@ static int cam_ois_pkt_parse(struct cam_ois_ctrl_t *o_ctrl, void *arg)
 	struct cam_ois_soc_private     *soc_private =
 		(struct cam_ois_soc_private *)o_ctrl->soc_info.soc_private;
 	struct cam_sensor_power_ctrl_t  *power_info = &soc_private->power_info;
-#if defined(CONFIG_SAMSUNG_OIS_MCU_STM32)
+#if defined(CONFIG_SAMSUNG_OIS_MCU_STM32) || defined(CONFIG_SAMSUNG_OIS_RUMBA_S4)
 	struct cam_ois_thread_msg_t    *msg = NULL;
 #endif
 
@@ -649,7 +727,7 @@ static int cam_ois_pkt_parse(struct cam_ois_ctrl_t *o_ctrl, void *arg)
 		(generic_pkt_addr + (uint32_t)dev_config.offset);
 	switch (csl_packet->header.op_code & 0xFFFFFF) {
 	case CAM_OIS_PACKET_OPCODE_INIT:
-#if defined(CONFIG_SAMSUNG_OIS_MCU_STM32)
+#if defined(CONFIG_SAMSUNG_OIS_MCU_STM32) || defined(CONFIG_SAMSUNG_OIS_RUMBA_S4)
 		if (o_ctrl->is_config)
 			return rc;
 #endif
@@ -706,7 +784,7 @@ static int cam_ois_pkt_parse(struct cam_ois_ctrl_t *o_ctrl, void *arg)
 			if (o_ctrl->i2c_init_data.is_settings_valid == 0) {
 				CAM_DBG(CAM_OIS,
 				"Received init settings");
-#if defined(CONFIG_SAMSUNG_OIS_MCU_STM32)
+#if defined(CONFIG_SAMSUNG_OIS_MCU_STM32) || defined(CONFIG_SAMSUNG_OIS_RUMBA_S4)
 				mutex_lock(&(o_ctrl->i2c_init_data_mutex));
 #endif
 				i2c_reg_settings =
@@ -717,7 +795,7 @@ static int cam_ois_pkt_parse(struct cam_ois_ctrl_t *o_ctrl, void *arg)
 					&o_ctrl->io_master_info,
 					i2c_reg_settings,
 					&cmd_desc[i], 1);
-#if defined(CONFIG_SAMSUNG_OIS_MCU_STM32)
+#if defined(CONFIG_SAMSUNG_OIS_MCU_STM32) || defined(CONFIG_SAMSUNG_OIS_RUMBA_S4)
 				mutex_unlock(&(o_ctrl->i2c_init_data_mutex));
 #endif
 				if (rc < 0) {
@@ -756,7 +834,7 @@ static int cam_ois_pkt_parse(struct cam_ois_ctrl_t *o_ctrl, void *arg)
 			o_ctrl->cam_ois_state = CAM_OIS_CONFIG;
 		}
 
-#if defined(CONFIG_SAMSUNG_OIS_MCU_STM32)
+#if defined(CONFIG_SAMSUNG_OIS_MCU_STM32) || defined(CONFIG_SAMSUNG_OIS_RUMBA_S4)
 		o_ctrl->ois_mode = 0;
 
 		rc = cam_ois_thread_create(o_ctrl);
@@ -828,7 +906,7 @@ static int cam_ois_pkt_parse(struct cam_ois_ctrl_t *o_ctrl, void *arg)
 		offset = (uint32_t *)&csl_packet->payload;
 		offset += (csl_packet->cmd_buf_offset / sizeof(uint32_t));
 		cmd_desc = (struct cam_cmd_buf_desc *)(offset);
-#if defined(CONFIG_SAMSUNG_OIS_MCU_STM32)
+#if defined(CONFIG_SAMSUNG_OIS_MCU_STM32) || defined(CONFIG_SAMSUNG_OIS_RUMBA_S4)
 		mutex_lock(&(o_ctrl->i2c_mode_data_mutex));
 #endif
 		i2c_reg_settings = &(o_ctrl->i2c_mode_data);
@@ -837,7 +915,7 @@ static int cam_ois_pkt_parse(struct cam_ois_ctrl_t *o_ctrl, void *arg)
 		rc = cam_sensor_i2c_command_parser(&o_ctrl->io_master_info,
 			i2c_reg_settings,
 			cmd_desc, 1);
-#if defined(CONFIG_SAMSUNG_OIS_MCU_STM32)
+#if defined(CONFIG_SAMSUNG_OIS_MCU_STM32) || defined(CONFIG_SAMSUNG_OIS_RUMBA_S4)
 		mutex_unlock(&(o_ctrl->i2c_mode_data_mutex));
 #endif
 		if (rc < 0) {
@@ -845,7 +923,7 @@ static int cam_ois_pkt_parse(struct cam_ois_ctrl_t *o_ctrl, void *arg)
 			return rc;
 		}
 
-#if defined(CONFIG_SAMSUNG_OIS_MCU_STM32)
+#if defined(CONFIG_SAMSUNG_OIS_MCU_STM32) || defined(CONFIG_SAMSUNG_OIS_RUMBA_S4)
 		msg = kmalloc(sizeof(struct cam_ois_thread_msg_t), GFP_KERNEL);
 		if (msg == NULL) {
 			CAM_ERR(CAM_OIS, "Failed alloc memory for msg, Out of memory");
@@ -887,7 +965,7 @@ void cam_ois_shutdown(struct cam_ois_ctrl_t *o_ctrl)
 		(struct cam_ois_soc_private *)o_ctrl->soc_info.soc_private;
 	struct cam_sensor_power_ctrl_t *power_info =
 		&soc_private->power_info;
-#if defined(CONFIG_SAMSUNG_OIS_MCU_STM32)
+#if defined(CONFIG_SAMSUNG_OIS_MCU_STM32) || defined(CONFIG_SAMSUNG_OIS_RUMBA_S4)
 	int i = 0;
 #endif
 
@@ -895,7 +973,7 @@ void cam_ois_shutdown(struct cam_ois_ctrl_t *o_ctrl)
 		return;
 
 	if (o_ctrl->cam_ois_state >= CAM_OIS_CONFIG) {
-#if defined(CONFIG_SAMSUNG_OIS_MCU_STM32)
+#if defined(CONFIG_SAMSUNG_OIS_MCU_STM32) || defined(CONFIG_SAMSUNG_OIS_RUMBA_S4)
 		cam_ois_thread_destroy(o_ctrl);
 #if defined(CONFIG_SAMSUNG_APERTURE_MULTI_MODE)
 		o_ctrl->ois_mode = 0;
@@ -998,7 +1076,7 @@ int cam_ois_driver_cmd(struct cam_ois_ctrl_t *o_ctrl, void *arg)
 			goto release_mutex;
 		}
 
-#if defined(CONFIG_SAMSUNG_OIS_MCU_STM32)
+#if defined(CONFIG_SAMSUNG_OIS_MCU_STM32) || defined(CONFIG_SAMSUNG_OIS_RUMBA_S4)
 		rc = cam_ois_check_fw(o_ctrl);
 		if (rc < 0) {
 			CAM_ERR(CAM_OIS, "Failed check fw");
@@ -1016,7 +1094,7 @@ int cam_ois_driver_cmd(struct cam_ois_ctrl_t *o_ctrl, void *arg)
 			goto release_mutex;
 		}
 
-#if defined(CONFIG_SAMSUNG_OIS_MCU_STM32)
+#if defined(CONFIG_SAMSUNG_OIS_MCU_STM32) || defined(CONFIG_SAMSUNG_OIS_RUMBA_S4)
 		if (o_ctrl->bridge_cnt > 1)
 			goto release_mutex;
 #endif
@@ -1025,11 +1103,11 @@ int cam_ois_driver_cmd(struct cam_ois_ctrl_t *o_ctrl, void *arg)
 		break;
 	case CAM_START_DEV:
 		CAM_INFO(CAM_OIS, "CAM_START_DEV");
-#if defined(CONFIG_SAMSUNG_OIS_MCU_STM32)
+#if defined(CONFIG_SAMSUNG_OIS_MCU_STM32) || defined(CONFIG_SAMSUNG_OIS_RUMBA_S4)
 		o_ctrl->start_cnt++;
 #endif
 		if (o_ctrl->cam_ois_state != CAM_OIS_CONFIG) {
-#if defined(CONFIG_SAMSUNG_OIS_MCU_STM32)
+#if defined(CONFIG_SAMSUNG_OIS_MCU_STM32) || defined(CONFIG_SAMSUNG_OIS_RUMBA_S4)
 			rc = 0;
 #else
 			rc = -EINVAL;
@@ -1051,7 +1129,7 @@ int cam_ois_driver_cmd(struct cam_ois_ctrl_t *o_ctrl, void *arg)
 		break;
 	case CAM_RELEASE_DEV:
 		CAM_INFO(CAM_OIS, "CAM_RELEASE_DEV");
-#if defined(CONFIG_SAMSUNG_OIS_MCU_STM32)
+#if defined(CONFIG_SAMSUNG_OIS_MCU_STM32) || defined(CONFIG_SAMSUNG_OIS_RUMBA_S4)
 		rc = cam_ois_release_dev_handle(o_ctrl, arg);
 		if (rc < 0) {
 			CAM_ERR(CAM_OIS, "destroying the device hdl");
@@ -1062,6 +1140,12 @@ int cam_ois_driver_cmd(struct cam_ois_ctrl_t *o_ctrl, void *arg)
 			goto release_mutex;
 
 		cam_ois_thread_destroy(o_ctrl);
+#if defined(CONFIG_SAMSUNG_OIS_RUMBA_S4)
+		rc = cam_ois_i2c_write(o_ctrl, 0x0000, 0x00,CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE); //servo off
+		CAM_DBG(CAM_OIS, "SERVO OFF: Command");
+		if (rc < 0)
+			CAM_ERR(CAM_OIS, "SERVO OFF: I2C write fail");
+#endif
 		o_ctrl->ois_mode = 0;
 #if defined(CONFIG_SAMSUNG_APERTURE_MULTI_MODE)
 		cam_ois_set_ois_mode(o_ctrl, 0x00);
@@ -1126,7 +1210,7 @@ int cam_ois_driver_cmd(struct cam_ois_ctrl_t *o_ctrl, void *arg)
 		break;
 	case CAM_STOP_DEV:
 		CAM_INFO(CAM_OIS, "CAM_STOP_DEV");
-#if defined(CONFIG_SAMSUNG_OIS_MCU_STM32)
+#if defined(CONFIG_SAMSUNG_OIS_MCU_STM32) || defined(CONFIG_SAMSUNG_OIS_RUMBA_S4)
 		if (o_ctrl->start_cnt > 0)
 			o_ctrl->start_cnt--;
 

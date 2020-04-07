@@ -66,9 +66,6 @@
 #include <net/net_namespace.h>
 #include <net/addrconf.h>
 
-
-#include <linux/netlog.h>
-
 static struct ipv4_devconf ipv4_devconf = {
 	.data = {
 		[IPV4_DEVCONF_ACCEPT_REDIRECTS - 1] = 1,
@@ -222,8 +219,8 @@ void in_dev_finish_destroy(struct in_device *idev)
 	WARN_ON(idev->ifa_list);
 	WARN_ON(idev->mc_list);
 	kfree(rcu_dereference_protected(idev->mc_hash, 1));
-#if 1 //def NET_REFCNT_DEBUG
-	net_log("%s: %p=%s\n", __func__, idev, dev ? dev->name : "NIL");
+#ifdef NET_REFCNT_DEBUG
+	pr_debug("%s: %p=%s\n", __func__, idev, dev ? dev->name : "NIL");
 #endif
 	dev_put(dev);
 	if (!idev->dead)

@@ -38,6 +38,7 @@
 #include <linux/vmalloc.h>
 #include <linux/wakelock.h>
 #include <linux/workqueue.h>
+#include <linux/sec_ts_common.h>
 
 #if defined(CONFIG_TRUSTONIC_TRUSTED_UI_QC)
 #include <linux/input/tui_hal_ts.h>
@@ -177,7 +178,6 @@
 #define SEC_TS_CMD_WAKEUP_GESTURE_MODE		0x39
 #define SEC_TS_WRITE_POSITION_FILTER		0x3A
 #define SEC_TS_CMD_WET_MODE			0x3B
-#define SEC_TS_CMD_SET_LOW_POWER_SENSITIVITY	0x40
 #define SEC_TS_CMD_ERASE_FLASH			0x45
 #define SEC_TS_READ_ID				0x52
 #define SEC_TS_READ_BOOT_STATUS			0x55
@@ -388,8 +388,8 @@ static unsigned char hover_data[HOVER_DATA_READ_LENGTH] = { 0 };
 #endif
 
 #define SEC_TS_SPONGE_LP_DUMP_LENGTH			70
+#define SEC_TS_SPONGE_LP_DUMP_DATA_FORMAT_LENGTH	10
 #define SEC_TS_SPONGE_LP_DUMP_DATA_FORMAT_10_LEN	12	/* addr 2, data 10, */
-#define SEC_TS_SPONGE_LP_DUMP_DATA_FORMAT_8_LEN		10	/* addr 2, data 8 */
 
 enum grip_write_mode {
 	G_NONE				= 0,
@@ -864,8 +864,6 @@ struct sec_ts_data {
 
 	int debug_flag;
 	int fix_active_mode;
-
-	u8 lp_sensitivity;
 
 	int proc_cmoffset_size;
 	int proc_cmoffset_all_size;

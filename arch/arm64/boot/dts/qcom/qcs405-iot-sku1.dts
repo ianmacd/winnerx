@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2018-2019, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -29,6 +29,24 @@
 
 &smb1351_otg_supply {
 	status = "ok";
+};
+
+&usb2_phy0 {
+	qcom,snps-hs-phy-init-seq =
+		<0xc0 0x01 0>,
+		<0xe8 0x0d 0>,
+		<0x74 0x12 0>,
+		<0x98 0x63 0>,
+		<0x9c 0x83 0>,
+		<0xa0 0x1d 0>,
+		<0xa4 0x03 0>,
+		<0x8c 0x23 0>,
+		<0x78 0x08 0>,
+		<0x7c 0xdc 0>,
+		<0x90 0xe0 20>,
+		<0x74 0x10 0>,
+		<0x90 0x60 0>,
+		<0xffffffff 0xffffffff 0>;
 };
 
 &usb2s {
@@ -66,4 +84,13 @@
 			};
 		};
 	};
+};
+
+&sdhc_2 {
+	/delete-property/ qcom,nonhotplug;
+
+	pinctrl-0 = <&sdc2_clk_on &sdc2_cmd_on &sdc2_data_on
+			&sdc2_wlan_on>;
+	pinctrl-1 = <&sdc2_clk_off &sdc2_cmd_off &sdc2_data_off
+			&sdc2_wlan_off>;
 };

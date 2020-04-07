@@ -27,7 +27,7 @@
  *
  * <<Broadcom-WL-IPTag/Open:>>
  *
- * $Id: wlioctl_defs.h 810810 2019-03-21 06:57:03Z $
+ * $Id: wlioctl_defs.h 814720 2019-04-12 21:28:21Z $
  */
 
 #ifndef wlioctl_defs_h
@@ -38,6 +38,12 @@
 #define D11AC_IOTYPES
 
 #ifndef USE_NEW_RSPEC_DEFS
+/* Remove when no referencing branches exist.
+ * These macros will be used only in older branches (prior to K branch).
+ * Wl layer in newer branches and trunk use those defined in bcmwifi_rspec.h.
+ * Non-wl layer in newer branches and trunk may use these as well
+ * until they are removed.
+ */
 /* WL_RSPEC defines for rate information */
 #define WL_RSPEC_RATE_MASK		0x000000FF      /* rate or HT MCS value */
 #define WL_RSPEC_VHT_MCS_MASK		0x0000000F      /* VHT MCS value */
@@ -214,6 +220,12 @@
 #define WL_SCANFLAGS_CLIENT_SHIFT   8
 
 /* Bitmask for scan_type */
+/* Reserved flag precludes the use of 0xff for scan_type which is
+ * interpreted as default for backward compatibility.
+ * Low priority scan uses currently reserved bit,
+ * this should be changed as scan_type extended.
+ * So, reserved flag definition removed.
+ */
 /* Use lower 16 bit for scan flags, the upper 16 bits are for internal use */
 #define WL_SCANFLAGS_PASSIVE	0x01	/* force passive scan */
 #define WL_SCANFLAGS_LOW_PRIO	0x02	/* Low priority scan */
@@ -544,7 +556,7 @@
 #define BRCM_AUTH_PSK			0x0100  /* BRCM specific PSK */
 #define BRCM_AUTH_DPT			0x0200	/* DPT PSK without group keys */
 #if defined(BCMWAPI_WAI) || defined(BCMWAPI_WPI)
-#define WPA_AUTH_WAPI			0x0400
+#define WPA_AUTH_WAPI			0x0400 /* why it is same as WAPI_AUTH_UNSPECIFIED */
 #define WAPI_AUTH_NONE			WPA_AUTH_NONE	/* none (IBSS) */
 #define WAPI_AUTH_UNSPECIFIED		0x0400	/* over AS */
 #define WAPI_AUTH_PSK			0x0800	/* Pre-shared key */
@@ -569,7 +581,7 @@
 #define WPA_AUTH_PFN_ANY		0xffffffff	/* for PFN, match only ssid */
 
 /* pmkid */
-#define	MAXPMKID		16
+#define	MAXPMKID		16	/* max # PMKID cache entries NDIS */
 
 /* SROM12 changes */
 #define	WLC_IOCTL_MAXLEN		8192	/* max length ioctl buffer required */
@@ -916,7 +928,16 @@
 #define WLC_GET_RSSI_QDB			321 /* qdB portion of the RSSI */
 #define WLC_DUMP_RATESET			322
 #define WLC_ECHO				323
-#define WLC_LAST				324
+#define WLC_LAST				324	/* The last ioctl. Also push this
+							 * number when adding new ioctls
+							 */
+/*
+ * Alert:
+ * Duplicate a few definitions that irelay requires from epiioctl.h here
+ * so caller doesn't have to include this file and epiioctl.h .
+ * If this grows any more, it would be time to move these irelay-specific
+ * definitions out of the epiioctl.h and into a separate driver common file.
+ */
 #ifndef EPICTRL_COOKIE
 #define EPICTRL_COOKIE		0xABADCEDE
 #endif // endif
@@ -1274,6 +1295,7 @@
 #define WL_TX_POWER_F_UNIT_QDBM		0x100
 #define WL_TX_POWER_F_TXCAP		0x200
 #define WL_TX_POWER_F_HE		0x400
+#define WL_TX_POWER_F_RU_RATE		0x800
 
 /* Message levels */
 #define WL_ERROR_VAL		0x00000001
@@ -1384,25 +1406,25 @@
 #define	WL_LED_ARADIO		4		/* 5  Ghz radio enabled */
 #define	WL_LED_BRADIO		5		/* 2.4Ghz radio enabled */
 #define	WL_LED_BGMODE		6		/* on if gmode, off if bmode */
-#define	WL_LED_WI1		7
-#define	WL_LED_WI2		8
-#define	WL_LED_WI3		9
+#define	WL_LED_WI1		7		/* wlan indicator 1 mode (legacy cust) */
+#define	WL_LED_WI2		8		/* wlan indicator 2 mode (legacy cust) */
+#define	WL_LED_WI3		9		/* wlan indicator 3 mode (legacy cust) */
 #define	WL_LED_ASSOC		10		/* associated state indicator */
 #define	WL_LED_INACTIVE		11		/* null behavior (clears default behavior) */
-#define	WL_LED_ASSOCACT		12		/* on when associated; blink fast for activity */
-#define WL_LED_WI4		13
-#define WL_LED_WI5		14
+#define	WL_LED_ASSOCACT		12		/* on associated; blink fast for activity */
+#define WL_LED_WI4		13		/* wlan indicator 4 mode (legacy cust 5G) */
+#define WL_LED_WI5		14		/* wlan indicator 5 mode (legacy cust 2.4) */
 #define	WL_LED_BLINKSLOW	15		/* blink slow */
 #define	WL_LED_BLINKMED		16		/* blink med */
 #define	WL_LED_BLINKFAST	17		/* blink fast */
 #define	WL_LED_BLINKCUSTOM	18		/* blink custom */
-#define	WL_LED_BLINKPERIODIC	19		/* blink periodic (custom 1000ms / off 400ms) */
+#define	WL_LED_BLINKPERIODIC	19		/* blink period (custom 1000ms / off 400ms) */
 #define WL_LED_ASSOC_WITH_SEC	20		/* when connected with security */
 						/* keep on for 300 sec */
 #define WL_LED_START_OFF	21		/* off upon boot, could be turned on later */
-#define WL_LED_WI6		22
-#define WL_LED_WI7		23
-#define WL_LED_WI8		24
+#define WL_LED_WI6		22		/* wlan indicator 6 mode legacy rtr 43526 5 */
+#define WL_LED_WI7		23		/* wlan indicator 7 mode legacy rtr 43526 2.4 */
+#define WL_LED_WI8		24		/* wlan indicator 8 mode legacy rtr 43526 */
 #define	WL_LED_NUMBEHAVIOR	25
 
 /* led behavior numeric value format */
@@ -1413,7 +1435,7 @@
 /* number of bytes needed to define a proper bit mask for MAC event reporting */
 #define BCMIO_ROUNDUP(x, y)	((((x) + ((y) - 1)) / (y)) * (y))
 #define BCMIO_NBBY		8
-#define WL_EVENTING_MASK_LEN	16
+#define WL_EVENTING_MASK_LEN	16		/* Don't increase this without wl review */
 
 #define WL_EVENTING_MASK_EXT_LEN \
     MAX(WL_EVENTING_MASK_LEN, (ROUNDUP(WLC_E_LAST, NBBY)/NBBY))
@@ -1867,6 +1889,7 @@
 #define WL_P2P_SCHED_TYPE_ABS		0	/* Scheduled Absence */
 #define WL_P2P_SCHED_TYPE_REQ_ABS	1	/* Requested Absence */
 
+/* at some point we may need bitvec here (combination of actions) */
 /* schedule action during absence periods (for WL_P2P_SCHED_ABS type) */
 #define WL_P2P_SCHED_ACTION_NONE	0	/* no action */
 #define WL_P2P_SCHED_ACTION_DOZE	1	/* doze */
@@ -1875,6 +1898,7 @@
 /* schedule option - WL_P2P_SCHED_TYPE_XXX */
 #define WL_P2P_SCHED_ACTION_RESET	255	/* reset */
 
+/* at some point we may need bitvec here (combination of options) */
 /* schedule option - WL_P2P_SCHED_TYPE_ABS */
 #define WL_P2P_SCHED_OPTION_NORMAL	0	/* normal start/interval/duration/count */
 #define WL_P2P_SCHED_OPTION_BCNPCT	1	/* percentage of beacon interval */
@@ -2047,7 +2071,7 @@
 #define WL_SWFL_ABBFL       0x0001 /* Allow Afterburner on systems w/o hardware BFL */
 #define WL_SWFL_ABENCORE    0x0002 /* Allow AB on non-4318E chips */
 #endif /* WLAFTERBURNER */
-#define WL_SWFL_NOHWRADIO	0x0004
+#define WL_SWFL_NOHWRADIO	0x0004 /* Disable HW Radio monitor (e.g., Cust Spec) */
 #define WL_SWFL_FLOWCONTROL     0x0008 /* Enable backpressure to OS stack */
 #define WL_SWFL_WLBSSSORT	0x0010 /* Per-port supports sorting of BSS */
 
@@ -2403,6 +2427,12 @@
 #define ETD_DATA_VERSION_V1	1
 
 /* CTMODE DBG */
+/* input param: [31:16] => MPDU_THRESHOLD
+ *	        [15:03] => RESERVED
+ *	        [02]    => enable UFP
+ *	        [01]    => enable UFC
+ *	        [00]    => enalbe CTMODE
+ */
 #define	CTMODE_DBG_CTMODE_EN	(0x1u)
 #define	CTMODE_DBG_UFC_EN	(0x2u)
 #define CTMODE_DBG_UFP_EN	(0x4u)

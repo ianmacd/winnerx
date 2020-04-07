@@ -298,6 +298,65 @@
 		samsung,support_self_display;
 		ss,self_display = <&self_display_FA7_AMB458WJ01_dtsi>;
 
+		/*
+		*************************************************************************************************************************
+		* Self mask check debug (SELF MASK CHECK)
+		*************************************************************************************************************************
+		*/
+
+		samsung,mask_crc_pass_data = [36 bc 61 b6 a7 f6 45 f9];
+
+		samsung,self_mask_check_tx_pre1 = [
+			29 01 00 00 00 00 03 9F A5 A5	/* TEST KEY Enable */
+			29 01 00 00 00 00 03 F0 5A 5A	/* TEST KEY Enable */
+			29 01 00 00 00 00 03 FC 5A 5A	/* TEST KEY Enable */
+			29 01 00 00 00 00 02 B0 1B		/* CRC ON */
+			29 01 00 00 00 00 02 FE 80
+			29 01 00 00 00 00 02 B0 2F
+			29 01 00 00 00 00 02 FE 25
+			29 01 00 00 00 00 07 BF 01 07 00 00 00 10	/* DBIST On */
+			29 01 00 00 14 00 02 7A 00		/* self mask off */
+
+			/* delay 1frame */
+
+			/* side memory write */			
+			29 01 00 00 00 00 02 75 10
+
+			/* write self mask data (4C, 5C) */
+		
+			29 01 00 00 00 00 03 FC A5 A5	/* TEST KEY Disable */
+			29 01 00 00 00 00 03 F0 A5 A5	/* TEST KEY Disable */
+			29 01 00 00 00 00 03 9F 5A 5A	/* TEST KEY Enable */
+		];
+
+		samsung,self_mask_check_tx_pre2 = [
+			29 01 00 00 00 00 03 9F A5 A5	/* TEST KEY Enable */
+			29 01 00 00 00 00 03 F0 5A 5A	/* TEST KEY Enable */
+			29 01 00 00 00 00 03 FC 5A 5A	/* TEST KEY Enable */
+			29 01 00 00 22 00 10 7A			/* self mask enable */
+								01 00 00 00 95 01 F4 02
+								89 08 0C FF FF FF FF
+			/* delay 2frame */
+			29 01 00 00 00 00 03 FC A5 A5	/* TEST KEY Disable */
+			29 01 00 00 00 00 03 F0 A5 A5	/* TEST KEY Disable */
+			29 01 00 00 00 00 03 9F 5A 5A	/* TEST KEY Enable */
+		];
+		
+		samsung,self_mask_check_rx_cmds = [ 06 01 00 00 00 00 01 FB 08 0C];	/* read CRC - FB 13th ~ 20th */
+
+		samsung,self_mask_check_tx_post = [
+			29 01 00 00 00 00 03 9F A5 A5	/* TEST KEY Enable */
+			29 01 00 00 00 00 03 F0 5A 5A	/* TEST KEY Enable */
+			29 01 00 00 00 00 03 FC 5A 5A	/* TEST KEY Enable */
+			29 01 00 00 00 00 10 7A				/* self mask restore */
+								01 06 90 07 25 07 26 07 BB 08 0C
+								00 00 00 00
+			29 01 00 00 00 00 07 BF 00 07 FF 00 00 10	/* Exit DBIST */
+			29 01 00 00 00 00 03 FC A5 A5	/* TEST KEY Disable */
+			29 01 00 00 00 00 03 F0 A5 A5	/* TEST KEY Disable */
+			29 01 00 00 00 00 03 9F 5A 5A	/* TEST KEY Enable */
+		];
+
 		/* *************************************************************
 		 *  POC CONTROL
 		 * *************************************************************

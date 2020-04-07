@@ -174,6 +174,17 @@ void fsr_interrupt_set(struct fsr_sidekey_info *info, int enable)
 	fsr_write_reg(info, &regAdd[0], 4);
 }
 
+static bool fsr_vol_dn_gpio_check(void)
+{
+#if defined(CONFIG_ARCH_EXYNOS9)
+	return get_voldn_press();
+#elif defined(CONFIG_SEC_PM)
+	return get_resinkey_press();
+#else
+	return 0;
+#endif
+}
+
 static int fsr_set_temp(struct fsr_sidekey_info *info)
 {
 	u8 regAdd[2] = {0xAE, 0};
@@ -209,13 +220,52 @@ static int fsr_set_temp(struct fsr_sidekey_info *info)
 	return ret;
 }
 
-static void fsr_set_temp_work(struct work_struct *work)
+static void fsr_check_state_work(struct work_struct *work)
 {
 	struct fsr_sidekey_info *info = container_of(work, struct fsr_sidekey_info,
-			temp_work.work);
+			state_work.work);
+
+	if (info->fwup_is_on_going) {
+		input_info(true, &info->client->dev, "%s: fw_update is on going, skip\n", __func__);
+		goto out;
+	}
 
 	fsr_set_temp(info);
-	schedule_delayed_work(&info->temp_work, msecs_to_jiffies(30000));
+
+	if (fsr_vol_dn_gpio_check())
+		info->vol_dn_count++;
+
+	if (info->vol_dn_count > 3) {
+		input_err(true, &info->client->dev, "%s: vol_dn gpio is pressed for 15 seconds\n", __func__);
+		fsr_systemreset_gpio(info, 50, false);
+	}
+
+	if (!(info->event_state & FSR_EVENT_VOLUME_DOWN) && fsr_vol_dn_gpio_check()) {
+		input_err(true, &info->client->dev, "%s: vol_dn gpio is pressed, but event is not occurred\n", __func__);
+		fsr_systemreset_gpio(info, 50, false);
+	}
+
+out:
+	schedule_delayed_work(&info->state_work, msecs_to_jiffies(FSR_STATE_WORK_TIMER));
+}
+
+static void fsr_read_info_work(struct work_struct *work)
+{
+	struct fsr_sidekey_info *info = container_of(work, struct fsr_sidekey_info,
+			read_info_work.work);
+
+	input_raw_info(true, &info->client->dev, "%s: fw%04X\n", __func__, info->fw_main_version_of_ic);
+
+	fsr_read_cx(info);
+	fsr_read_frame(info, TYPE_STRENGTH_DATA, &info->fsr_frame_data_delta, true);
+	fsr_read_frame(info, TYPE_BASELINE_DATA, &info->fsr_frame_data_reference, true);
+	fsr_read_frame(info, TYPE_RAW_DATA, &info->fsr_frame_data_raw, true);
+
+	fsr_get_calibration_strength(info);
+
+	fsr_get_threshold(info);
+	input_raw_info(true, &info->client->dev, "%s: threshold:%d, hysteresis:%d\n", __func__,
+		info->thd_of_ic[0], info->thd_of_ic[1]);
 }
 
 static int fsr_check_chip_id(struct fsr_sidekey_info *info) {
@@ -302,7 +352,8 @@ int fsr_wait_for_ready(struct fsr_sidekey_info *info)
 
 int fsr_systemreset(struct fsr_sidekey_info *info, unsigned int delay)
 {
-	unsigned char regAdd[4] = { 0xB6, 0x00, 0x28, 0x80 };
+	unsigned char WarmBootCRC[4] = { 0xB6, 0x00, 0x1E, 0x38 };
+	unsigned char ICReset[4] = { 0xB6, 0x00, 0x28, 0x80 };
 	int rc;
 
 	input_info(true, &info->client->dev, "%s: FSR System Reset by I2C.\n",
@@ -310,7 +361,10 @@ int fsr_systemreset(struct fsr_sidekey_info *info, unsigned int delay)
 
 	fsr_interrupt_set(info, INT_DISABLE);
 
-	fsr_write_reg(info, &regAdd[0], 4);
+	fsr_write_reg(info, &WarmBootCRC[0], 4);
+	fsr_delay(10);
+
+	fsr_write_reg(info, &ICReset[0], 4);
 	fsr_delay(delay);
 	rc = fsr_wait_for_ready(info);
 
@@ -318,10 +372,12 @@ int fsr_systemreset(struct fsr_sidekey_info *info, unsigned int delay)
 	fsr_command(info, CMD_NOTI_AP_BOOTUP);
 	fsr_interrupt_set(info, INT_ENABLE);
 
+	info->vol_dn_count = 0;
+
 	return rc;
 }
 
-int fsr_systemreset_gpio(struct fsr_sidekey_info *info, unsigned int delay)
+int fsr_systemreset_gpio(struct fsr_sidekey_info *info, unsigned int delay, bool retune)
 {
 	int rc;
 
@@ -349,9 +405,16 @@ int fsr_systemreset_gpio(struct fsr_sidekey_info *info, unsigned int delay)
 		fsr_delay(delay);
 		rc = fsr_wait_for_ready(info);
 
+		if (retune) {
+			fsr_command(info, CMD_PERFORM_AUTOTUNE);
+			fsr_fw_wait_for_event_D3(info, STATUS_EVENT_CAL_DONE, 0x01);
+		}
+
 		fsr_command(info, CMD_SENSEON);
 		fsr_command(info, CMD_NOTI_AP_BOOTUP);
 		fsr_interrupt_set(info, INT_ENABLE);
+
+		info->vol_dn_count = 0;
 
 		return rc;
 	} else {
@@ -371,7 +434,7 @@ static void fsr_reset_work(struct work_struct *work)
 
 	info->reset_is_on_going = true;
 
-	fsr_systemreset_gpio(info, 50);
+	fsr_systemreset_gpio(info, 50, true);
 
 	info->reset_is_on_going = false;
 }
@@ -446,7 +509,7 @@ void fsr_data_dump(struct fsr_sidekey_info *info, u8 *data, int len)
 			snprintf(tmp, sizeof(tmp), " %02X", data[i * 8 + j]);
 			strlcat(buf, tmp, sizeof(buf));
 		}
-		input_info(true, &info->client->dev, "%s[%02d]:%s\n", __func__, i * 8, buf);
+		input_info(true, &info->client->dev, "%s[%02X]:%s\n", __func__, i * 8, buf);
 		memset(buf, 0, sizeof(buf));
 	}
 
@@ -454,7 +517,7 @@ void fsr_data_dump(struct fsr_sidekey_info *info, u8 *data, int len)
 		snprintf(tmp, sizeof(tmp), " %02X", data[i * 8 + j]);
 		strlcat(buf, tmp, sizeof(buf));
 	}
-	input_info(true, &info->client->dev, "%s[%02d]:%s\n", __func__, i * 8, buf);
+	input_info(true, &info->client->dev, "%s[%02X]:%s\n", __func__, i * 8, buf);
 }
 
 int fsr_read_system_info(struct fsr_sidekey_info *info)
@@ -467,13 +530,13 @@ int fsr_read_system_info(struct fsr_sidekey_info *info)
 	// Read system info from IC
 	regAdd[1] = (info->board->system_info_addr >> 8) & 0xff;
 	regAdd[2] = (info->board->system_info_addr) & 0xff;
-	retval = fsr_read_reg(info, &regAdd[0], 3, (u8*)&info->fsr_sys_info.dummy, sizeof(struct fsr_system_info));
+	retval = fsr_read_reg(info, &regAdd[0], 3, (u8 *)&info->fsr_sys_info, sizeof(struct fsr_system_info));
 	if (retval < 0) {
 		input_err(true, &info->client->dev,
 				"%s: Failed to read system info from IC\n", __func__);
 		goto exit;
 	}
-	fsr_data_dump(info, &info->fsr_sys_info.dummy, sizeof(struct fsr_system_info));
+	fsr_data_dump(info, (u8 *)&info->fsr_sys_info, sizeof(struct fsr_system_info));
 
 	return 0;
 
@@ -553,29 +616,39 @@ static int fsr_parse_dt(struct i2c_client *client)
 	struct device *dev = &client->dev;
 	struct fsr_sidekey_plat_data *pdata = dev->platform_data;
 	struct device_node *np = dev->of_node;
+	int lcdtype = 0xFFFFFFFF;
 
 #ifdef ENABLE_IRQ_HANDLER
-	pdata->irq_gpio = of_get_named_gpio(np, "stm,irq_gpio", 0);
-	if (gpio_is_valid(pdata->irq_gpio)) {
-		retval = gpio_request_one(pdata->irq_gpio, GPIOF_DIR_IN, "stm,sidekey_int");
-		if (retval) {
-			input_err(true, dev, "Unable to request tsp_int [%d]\n", pdata->irq_gpio);
+	pdata->irq_invalid = of_property_read_bool(np, "stm,irq_invalid");
+
+	if (pdata->irq_invalid) {
+		pdata->irq_gpio = -EINVAL;
+		client->irq = -EINVAL;
+	} else {
+		pdata->irq_gpio = of_get_named_gpio(np, "stm,irq_gpio", 0);
+		if (gpio_is_valid(pdata->irq_gpio)) {
+			retval = gpio_request_one(pdata->irq_gpio, GPIOF_DIR_IN, "stm,sidekey_int");
+			if (retval) {
+				input_err(true, dev, "Unable to request tsp_int [%d]\n", pdata->irq_gpio);
+				return -EINVAL;
+			}
+		} else {
+			input_err(true, dev, "Failed to get irq gpio\n");
 			return -EINVAL;
 		}
-	} else {
-		input_err(true, dev, "Failed to get irq gpio\n");
-		return -EINVAL;
-	}
-	client->irq = gpio_to_irq(pdata->irq_gpio);
-	input_err(true, dev, "%s: irq_gpio:%d, irq:%d\n", __func__, pdata->irq_gpio, client->irq);
+		client->irq = gpio_to_irq(pdata->irq_gpio);
+		input_err(true, dev, "%s: irq_gpio:%d, irq:%d\n", __func__, pdata->irq_gpio, client->irq);
 
-	if (of_property_read_u32(np, "stm,irq_type", &pdata->irq_type)) {
-		input_err(true, dev, "%s: Failed to get irq_type property\n", __func__);
-		return -EINVAL;
+		if (of_property_read_u32(np, "stm,irq_type", &pdata->irq_type)) {
+			input_err(true, dev, "%s: Failed to get irq_type property\n", __func__);
+			return -EINVAL;
+		}
 	}
 #endif
 
 #ifdef ENABLE_RESET_GPIO
+	pdata->rst_invalid = of_property_read_bool(np, "stm,rst_invalid");
+
 	pdata->rst_gpio = of_get_named_gpio_flags(np, "stm,rst_gpio", 0, (enum of_gpio_flags *)&pdata->rst_active_low);
 	if (gpio_is_valid(pdata->rst_gpio)) {
 		retval = gpio_request(pdata->rst_gpio, "fsr_reset");
@@ -607,9 +680,28 @@ static int fsr_parse_dt(struct i2c_client *client)
 	pdata->power = fsr_power_ctrl;
 #endif
 
-	if (of_property_read_string_index(np, "stm,firmware_name", 0, &pdata->firmware_name))
-		input_err(true, dev, "%s: skipped to get firmware_name property\n", __func__);
-	input_err(true, dev, "%s: firmware_name: %s\n", __func__, pdata->firmware_name);
+#if defined(CONFIG_DISPLAY_SAMSUNG)
+	lcdtype = get_lcd_attached("GET");
+#endif
+#if defined(CONFIG_EXYNOS_DPU20)
+	lcdtype = get_lcd_info("id");
+#endif
+	pdata->firmware_utype = of_property_read_bool(np, "stm,firmware_utype");
+
+	input_info(true, dev, "%s: lcdtype %06X, firmware_utype:%d\n", __func__, lcdtype, pdata->firmware_utype);
+
+	if (pdata->firmware_utype && ((lcdtype & 0x000F0000) == 0)) { /* 0: u type */
+		if (of_property_read_string_index(np, "stm,firmware_name", 1, &pdata->firmware_name))
+			input_err(true, dev, "%s: skipped to get firmware_name property\n", __func__);
+	} else {
+		if (of_property_read_string_index(np, "stm,firmware_name", 0, &pdata->firmware_name))
+			input_err(true, dev, "%s: skipped to get firmware_name property\n", __func__);
+	}
+	if (of_property_read_u32(np, "stm,bringup", &pdata->bringup))
+		pdata->bringup = 0;
+
+	input_err(true, dev, "%s: firmware_name: %s, bringup:%d\n", __func__, pdata->firmware_name, pdata->bringup);
+
 	if (of_property_read_string_index(np, "stm,project_name", 0, &pdata->project_name))
 		input_err(true, dev, "%s: skipped to get project_name property\n", __func__);
 	if (of_property_read_string_index(np, "stm,project_name", 1, &pdata->model_name))
@@ -665,7 +757,8 @@ static int fsr_setup_drv_data(struct i2c_client *client)
 	i2c_set_clientdata(client, info);
 
 	INIT_DELAYED_WORK(&info->reset_work, fsr_reset_work);
-	INIT_DELAYED_WORK(&info->temp_work, fsr_set_temp_work);
+	INIT_DELAYED_WORK(&info->state_work, fsr_check_state_work);
+	INIT_DELAYED_WORK(&info->read_info_work, fsr_read_info_work);
 
 	return retval;
 }
@@ -675,7 +768,7 @@ static u8 fsr_event_handler(struct fsr_sidekey_info *info) {
 	int left_event_count = 0;
 	int EventNum = 0;
 	u8 data[FSR_FIFO_MAX * FSR_EVENT_SIZE] = {0};
-
+	struct fsr_frame_data_info delta;
 	u8 *event_buff;
 	u8 event_id = 0;
 	u8 status_id;
@@ -698,6 +791,11 @@ static u8 fsr_event_handler(struct fsr_sidekey_info *info) {
 
 		switch (event_id) {
 		case EID_STATUS_EVENT:
+			input_info(true, &info->client->dev,
+					"%s: STATUS %02X %02X %02X %02X %02X %02X %02X %02X\n", __func__,
+					event_buff[0], event_buff[1], event_buff[2], event_buff[3],
+					event_buff[4], event_buff[5], event_buff[6], event_buff[7]);
+
 			status_id = event_buff[1];
 			switch (status_id) {
 			case STATUS_EVENT_ESD_FAILURE:
@@ -706,15 +804,17 @@ static u8 fsr_event_handler(struct fsr_sidekey_info *info) {
 				if (!info->reset_is_on_going)
 					schedule_delayed_work(&info->reset_work, msecs_to_jiffies(10));
 				break;
-			default:
-				input_info(true, &info->client->dev,
-						"%s: STATUS %02X %02X %02X %02X %02X %02X %02X %02X\n", __func__,
-						event_buff[0], event_buff[1], event_buff[2], event_buff[3],
-						event_buff[4], event_buff[5], event_buff[6], event_buff[7]);
-				break;
 			}
 			break;
 		case EID_EVENT:
+			input_info(true, &info->client->dev,
+					"%s: EVENT %02X %02X %02X %02X %02X %02X %02X %02X\n", __func__,
+					event_buff[0], event_buff[1], event_buff[2], event_buff[3],
+					event_buff[4], event_buff[5], event_buff[6], event_buff[7]);
+			info->event_state = event_buff[1];
+			fsr_read_frame(info, TYPE_STRENGTH_DATA, &delta, false);
+			if ((info->event_state & FSR_EVENT_VOLUME_DOWN) == 0)
+				info->vol_dn_count = 0;
 			break;
 		default:
 			input_info(true, &info->client->dev,
@@ -753,6 +853,12 @@ int fsr_irq_enable(struct fsr_sidekey_info *info,
 	if (enable) {
 		if (info->irq_enabled)
 			return retval;
+		if (info->board->irq_invalid) {
+			input_err(true, &info->client->dev,
+					"%s: irq number is not defined %d\n",
+					__func__, info->irq);
+			return 0;
+		}
 
 		retval = request_threaded_irq(info->irq, NULL,
 				fsr_interrupt_handler, info->irq_type,
@@ -776,6 +882,67 @@ int fsr_irq_enable(struct fsr_sidekey_info *info,
 	return retval;
 }
 
+int fsr_crc_check(struct fsr_sidekey_info *info)
+{
+	int rc;
+	unsigned char regAdd;
+	unsigned char data[FSR_EVENT_SIZE];
+	int err_cnt = 0;
+
+	memset(data, 0x0, FSR_EVENT_SIZE);
+
+	fsr_interrupt_set(info, INT_DISABLE);
+
+	regAdd = CMD_READ_EVENT;
+	rc = -1;
+	while (fsr_read_reg(info, &regAdd, 1, (unsigned char *)data, FSR_EVENT_SIZE)) {
+		input_err(true, &info->client->dev, "%s: %02X %02X %02X %02X %02X %02X %02X %02X\n", __func__,
+			data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7]);
+
+		if (data[0] == 0x00) {
+			rc = 0;
+			break;
+		}
+
+		if (data[0] == EID_ERROR) {
+			if (data[1] == EID_ERROR_FLASH_CORRUPTION) {
+				switch (data[2]) {
+				case 0: // Invalid Firmware (Config Signature)
+				case 1: // Invalid Firmware (Config Checksum)
+					// in this case, firmware download is required to recovery firmware.
+				case 2: // Invalid CX Checksum or Autotune was not performed.
+					info->product_id_of_ic = 0;
+					info->fw_version_of_ic = 0;
+					info->config_version_of_ic = 0;
+					info->fw_main_version_of_ic = 0;
+
+					rc = -FSR_ERROR_FW_CORRUPTION;
+					input_err(true, &info->client->dev, "%s: Invalid Firmware: %02X,%02X,%02X\n",
+						__func__, data[0], data[1], data[2]);
+					goto out;
+
+			/*	case 2: // Invalid CX Checksum or Autotune was not performed.
+					// it can be solved by performing Autotune.
+					fsr_execute_autotune(info);
+					break;*/
+				}
+			}
+		} else if (data[0] == EID_EVENT) {
+			info->event_state = data[1];
+		}
+
+		if (err_cnt++ > 32) {
+			rc = -FSR_ERROR_TIMEOUT;
+			break;
+		}
+		fsr_delay(5);
+	}
+
+out:
+	fsr_interrupt_set(info, INT_ENABLE);
+
+	return rc;
+}
 
 static int fsr_init(struct fsr_sidekey_info *info)
 {
@@ -786,9 +953,8 @@ static int fsr_init(struct fsr_sidekey_info *info)
 	fsr_interrupt_set(info, INT_ENABLE);
 
 	rc = fsr_check_chip_id(info);
-	if (rc < 0)
-	{
-		input_err(true, &info->client->dev, "Please check the IC for sidekey!!!");
+	if (rc < 0) {
+		input_err(true, &info->client->dev, "%s: Please check the IC for sidekey!!!\n", __func__);
 		return FSR_ERROR_INVALID_CHIP_ID;
 	}
 
@@ -799,12 +965,23 @@ static int fsr_init(struct fsr_sidekey_info *info)
 
 	rc = fsr_get_version_info(info);
 	if (rc < 0)
-		input_err(true, &info->client->dev, "Fail to get version information!!!");
+		input_err(true, &info->client->dev, "%s: Fail to get version information!!!\n", __func__);
+
+	rc = fsr_crc_check(info);
+	if (rc < 0)
+		input_err(true, &info->client->dev, "%s: Flash memory crack is detected!!!\n", __func__);
+
+	if (!(info->event_state & FSR_EVENT_VOLUME_DOWN) && fsr_vol_dn_gpio_check()) {
+		input_err(true, &info->client->dev, "%s: vol_dn gpio is pressed, but event is not occurred\n", __func__);
+		fsr_systemreset_gpio(info, 50, false);
+	}
+
+	if (info->board->irq_invalid)
+		info->event_state = FSR_EVENT_VOLUME_DOWN;
 
 	rc  = fsr_fw_update_on_probe(info);
-	if (rc  < 0)
-		input_err(true, &info->client->dev, "%s: Failed to firmware update\n",
-				__func__);
+	if (rc < 0)
+		input_err(true, &info->client->dev, "%s: Failed to firmware update\n", __func__);
 
 	return FSR_NOT_ERROR;
 }
@@ -813,7 +990,7 @@ static void fsr_set_input_prop(struct fsr_sidekey_info *info, struct input_dev *
 {
 	static char fsr_ts_phys[64] = { 0 };
 
-	info->input_dev->name = "sec_sidekey";
+	dev->name = "sec_sidekey";
 
 	dev->dev.parent = &info->client->dev;
 
@@ -830,8 +1007,8 @@ static void fsr_set_input_prop(struct fsr_sidekey_info *info, struct input_dev *
 	input_set_drvdata(dev, info);
 
 #ifdef USE_OPEN_CLOSE
-	info->input_dev->open = fsr_input_open;
-	info->input_dev->close = fsr_input_close;
+	dev->open = fsr_input_open;
+	dev->close = fsr_input_close;
 #endif
 }
 
@@ -873,13 +1050,6 @@ static int fsr_probe(struct i2c_client *client, const struct i2c_device_id *idp)
 	if (IS_ERR(info->board->pinctrl))
 		input_err(true, &client->dev, "%s: could not get pinctrl\n", __func__);*/
 
-	info->input_dev = input_allocate_device();
-	if (!info->input_dev) {
-		dev_err(&client->dev, "%s: Failed to alloc input_dev\n", __func__);
-		retval = -ENOMEM;
-		goto err_input_allocate_device;
-	}
-
 	mutex_init(&info->i2c_mutex);
 	mutex_init(&info->eventlock);
 
@@ -889,10 +1059,17 @@ static int fsr_probe(struct i2c_client *client, const struct i2c_device_id *idp)
 		goto err_fsr_init;
 	}
 
+	info->input_dev = input_allocate_device();
+	if (!info->input_dev) {
+		input_err(true, &info->client->dev, "%s: Failed to alloc input_dev\n", __func__);
+		retval = -ENOMEM;
+		goto err_input_allocate_device;
+	}
+
 	fsr_set_input_prop(info, info->input_dev);
 	retval = input_register_device(info->input_dev);
 	if (retval) {
-		dev_err(&info->client->dev, "%s: input_register_device fail!\n", __func__);
+		input_err(true, &info->client->dev, "%s: input_register_device fail!\n", __func__);
 		goto err_register_input;
 	}
 
@@ -911,7 +1088,8 @@ static int fsr_probe(struct i2c_client *client, const struct i2c_device_id *idp)
 
 	info->probe_done = true;
 
-	schedule_delayed_work(&info->temp_work, msecs_to_jiffies(30000));
+	schedule_delayed_work(&info->read_info_work, msecs_to_jiffies(5000));
+	schedule_delayed_work(&info->state_work, msecs_to_jiffies(FSR_STATE_WORK_TIMER));
 
 	input_err(true, &info->client->dev, "%s: done\n", __func__);
 	input_log_fix();
@@ -924,23 +1102,21 @@ err_enable_irq:
 	input_unregister_device(info->input_dev);
 	info->input_dev = NULL;
 err_register_input:
-
+	input_free_device(info->input_dev);
+err_input_allocate_device:
 err_fsr_init:
 	mutex_destroy(&info->eventlock);
 	mutex_destroy(&info->i2c_mutex);
-	if (!info->input_dev)
-		input_free_device(info->input_dev);
-err_input_allocate_device:
 #ifdef ENABLE_POWER_CONTROL
 	if (info->board->power)
 		info->board->power(info, false);
 #endif
-
 	kfree(info);
 err_get_drv_data:
 err_setup_drv_data:
 	input_err(true, &client->dev, "%s: failed(%d)\n", __func__, retval);
 	input_log_fix();
+
 	return retval;
 }
 
@@ -948,9 +1124,9 @@ static int fsr_stop_device(struct fsr_sidekey_info *info, bool lpmode)
 {
 	input_info(true, &info->client->dev, "%s\n", __func__);
 
-	fsr_command(info, CMD_NOTI_SCREEN_OFF);
-
 	cancel_delayed_work_sync(&info->reset_work);
+
+	fsr_command(info, CMD_NOTI_SCREEN_OFF);
 
 	return 0;
 }
@@ -970,11 +1146,17 @@ static int fsr_input_open(struct input_dev *dev)
 	struct fsr_sidekey_info *info = input_get_drvdata(dev);
 	int retval = 0;
 
-	input_info(true, &info->client->dev, "%s\n", __func__);
+	input_info(true, &info->client->dev, "%s: fw%04X, thd:%d/%d\n", __func__, info->fw_main_version_of_ic,
+		info->thd_of_bin[0], info->thd_of_ic[0]);
+
+	if (!(info->event_state & FSR_EVENT_VOLUME_DOWN) && fsr_vol_dn_gpio_check()) {
+		input_err(true, &info->client->dev, "%s: vol_dn gpio is pressed, but event is not occurred\n", __func__);
+		fsr_systemreset_gpio(info, 50, false);
+	}
 
 	retval = fsr_start_device(info);
 	if (retval < 0) {
-		dev_err(&info->client->dev,
+		input_err(true, &info->client->dev,
 				"%s: Failed to start device\n", __func__);
 		goto out;
 	}
@@ -987,6 +1169,11 @@ static void fsr_input_close(struct input_dev *dev)
 	struct fsr_sidekey_info *info = input_get_drvdata(dev);
 
 	input_info(true, &info->client->dev, "%s\n", __func__);
+
+	if (!(info->event_state & FSR_EVENT_VOLUME_DOWN) && fsr_vol_dn_gpio_check()) {
+		input_err(true, &info->client->dev, "%s: vol_dn gpio is pressed, but event is not occurred\n", __func__);
+		fsr_systemreset_gpio(info, 50, false);
+	}
 
 	fsr_stop_device(info, 0);
 }
@@ -1001,7 +1188,8 @@ static int fsr_remove(struct i2c_client *client)
 
 	input_info(true, &info->client->dev, "%s\n", __func__);
 
-	cancel_delayed_work_sync(&info->temp_work);
+	cancel_delayed_work_sync(&info->read_info_work);
+	cancel_delayed_work_sync(&info->state_work);
 
 	fsr_command(info, CMD_ENTER_LPM);
 	fsr_interrupt_set(info, INT_DISABLE);
@@ -1041,11 +1229,12 @@ static int fsr_pm_suspend(struct device *dev)
 {
 	struct fsr_sidekey_info *info = dev_get_drvdata(dev);
 
-	input_dbg(true, &info->client->dev, "%s\n", __func__);
+	input_dbg(false, &info->client->dev, "%s\n", __func__);
 
-	cancel_delayed_work_sync(&info->temp_work);
+	cancel_delayed_work_sync(&info->state_work);
 #ifdef ENABLE_IRQ_HANDLER
-	disable_irq(info->irq);
+	if (info->irq >= 0)
+		disable_irq(info->irq);
 #endif
 
 	return 0;
@@ -1055,12 +1244,13 @@ static int fsr_pm_resume(struct device *dev)
 {
 	struct fsr_sidekey_info *info = dev_get_drvdata(dev);
 
-	input_dbg(true, &info->client->dev, "%s\n", __func__);
+	input_dbg(false, &info->client->dev, "%s\n", __func__);
 
 #ifdef ENABLE_IRQ_HANDLER
-	enable_irq(info->irq);
+	if (info->irq >= 0)
+		enable_irq(info->irq);
 #endif
-	schedule_work(&info->temp_work.work);
+	schedule_work(&info->state_work.work);
 
 	return 0;
 }

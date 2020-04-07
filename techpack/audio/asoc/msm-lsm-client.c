@@ -286,7 +286,7 @@ static void lsm_event_handler(uint32_t opcode, uint32_t token,
 	}
 
 	case LSM_SESSION_EVENT_DETECTION_STATUS:
-		if (client_size < 3 * sizeof(uint8_t)) {
+                if (client_size < 3 * sizeof(uint8_t)) {
 			dev_err(rtd->dev,
 					"%s: client_size has invalid size[%d]\n",
 					__func__, client_size);
@@ -420,12 +420,10 @@ static void lsm_event_handler(uint32_t opcode, uint32_t token,
 					&((uint8_t *)payload)[index],
 					payload_size);
 				prtd->event_avail = 1;
-				spin_unlock_irqrestore(&prtd->event_lock,
-								flags);
+				spin_unlock_irqrestore(&prtd->event_lock, flags);
 				wake_up(&prtd->event_wait);
 			} else {
-				spin_unlock_irqrestore(&prtd->event_lock,
-								flags);
+				spin_unlock_irqrestore(&prtd->event_lock, flags);
 				dev_err(rtd->dev,
 						"%s: Failed to copy memory with invalid size = %d\n",
 						__func__, payload_size);

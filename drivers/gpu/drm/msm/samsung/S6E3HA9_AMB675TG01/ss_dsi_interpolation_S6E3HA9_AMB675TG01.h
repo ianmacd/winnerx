@@ -35,9 +35,6 @@ Copyright (C) 2018, Samsung Electronics. All rights reserved.
 #define ELVSS_SIZE 3
 #define IRC_SIZE 28
 
-#define BIT_SHIFT 20
-#define BIT_SHFIT_MUL 1048576 // pow(2,BIT_SHIFT)
-
 #define IRC_START_OFFSET 2
 
 enum IRC_MTP {

@@ -891,13 +891,6 @@ config RBIN
 	help
 	  This provides RBIN functionality in memory management.
 
-config KZEROD
-	bool "Support kzerod"
-	default n
-	depends on !NEED_MULTIPLE_NODES
-	help
-	  Support kzerod kernel thread which does prezeroing of free pages.
-
 config PAGE_BOOST
 	bool "PAGE_BOOST feature"
 	depends on MMU
@@ -913,3 +906,11 @@ config PAGE_BOOST_RECORDING
 	  Record Everything for the chosen process.
 	  As Android executes an app one by one, only allow 1 recording
 	  at a time.
+
+config KZEROD
+	bool "Support kzerod"
+	default n
+	depends on !NEED_MULTIPLE_NODES
+	help
+	  Support kzerod kernel thread which does prezeroing of free pages.
+
