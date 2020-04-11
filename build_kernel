@@ -5,11 +5,11 @@ export ARCH=arm64
 # The path to Broadcom wi-fi firmware won't be defined correctly without this.
 # See drivers/net/wireless/broadcom/bcmdhd/dhd.h.
 #
-export ANDROID_VERSION=9.0.0
+export ANDROID_VERSION=10.0.0
 
 BUILD_CROSS_COMPILE=~/src/toolchains/aarch64-linux-android-4.9/bin/aarch64-linux-android-
 
-KERNEL_LLVM_BIN=../toolchains/samsung/6.0-cfp/bin/clang
+KERNEL_LLVM_BIN=../toolchains/clang+llvm-8.0.6/prebuilt/linux-x86_64/bin/clang
 CLANG_TRIPLE=aarch64-linux-gnu-
 
 KERNEL_MAKE_ENV="DTC_EXT=$(pwd)/tools/dtc CONFIG_BUILD_ARM64_DT_OVERLAY=y"
