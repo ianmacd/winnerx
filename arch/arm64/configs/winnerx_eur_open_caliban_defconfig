@@ -5867,7 +5867,7 @@ CONFIG_SENSORS_ET5XX=y
 # CONFIG_SENSORS_ET7XX is not set
 # CONFIG_SENSORS_QBT2000 is not set
 # CONFIG_GATOR is not set
-CONFIG_KPERFMON=y
+# CONFIG_KPERFMON is not set
 
 #
 # Firmware Drivers
