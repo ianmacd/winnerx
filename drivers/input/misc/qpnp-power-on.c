@@ -171,6 +171,9 @@ extern struct class *sec_class;
 #define QPNP_PON_CBLPWR_ON				BIT(2)
 #endif
 
+static struct delayed_work smpl_monitor_work;
+static bool is_smpl;
+
 enum qpnp_pon_version {
 	QPNP_PON_GEN1_V1,
 	QPNP_PON_GEN1_V2,
@@ -2573,6 +2576,18 @@ static int qpnp_pon_configure_s3_reset(struct qpnp_pon *pon)
 	return 0;
 }
 
+static void __ref smpl_panic(struct work_struct *work)
+{
+	if (is_smpl) {
+		char buf[1024];
+		int offset;
+
+		offset = scnprintf(buf, sizeof(buf), "SMPL Occurred ");
+		sec_get_pwrsrc(buf + offset);
+		panic("%s", buf);
+	}
+}
+
 static int qpnp_pon_read_hardware_info(struct qpnp_pon *pon, bool sys_reset)
 {
 	struct device *dev = pon->dev;
@@ -2643,6 +2658,10 @@ static int qpnp_pon_read_hardware_info(struct qpnp_pon *pon, bool sys_reset)
 			 to_spmi_device(dev->parent)->usid,
 			 qpnp_pon_reason[index],
 			 cold_boot ? "cold" : "warm");
+#ifndef CONFIG_SEC_FACTORY
+		if ((index == 1) && cold_boot)
+			is_smpl = true;
+#endif
 	}
 
 	/* POFF reason */
@@ -2861,6 +2880,8 @@ static int qpnp_pon_probe(struct platform_device *pdev)
 #ifdef CONFIG_SEC_PM_DEBUG
 		pon->is_mpon = true;
 #endif
+		INIT_DELAYED_WORK(&smpl_monitor_work, smpl_panic);
+		schedule_delayed_work(&smpl_monitor_work, 5 * HZ);
 	}
 
 	/* Get the total number of pon configurations and regulators */

@@ -348,6 +348,7 @@
 									\
 	.rkp_ro          : AT(ADDR(.rkp_ro) - LOAD_OFFSET) {		\
 		*(.rkp_ro)						\
+		*(.kdp_ro)						\
 		RKP_RO_DATA	/* Read only after init */		\
 	}								\
 									\
