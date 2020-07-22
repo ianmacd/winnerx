@@ -1,5 +1,10 @@
 ################################################################################
-1. How to Build
+
+1. Download and unzip the kernel source of F907BXXU3BTDD.
+
+2. Unzip and update the kernel source of F907BXXS4BTF2.
+
+3. How to Build
         - get Toolchain
                 From android git serveru, codesourcery and etc ..
                 - gcc-cfp/gcc-cfp-single/aarch64-linux-android-4.9/bin/aarch64-linux-android-
@@ -21,15 +26,15 @@
 
         - to Build
                 $ export ARCH=arm64
-                $ make -C $(pwd) O=$(pwd)/out DTC_EXT=$(pwd)/tools/dtc CONFIG_BUILD_ARM64_DT_OVERLAY=y CLANG_TRIPLE=aarch64-linux-gnu- winnerx_eur_open_defconfig
+                $ make -C $(pwd) O=$(pwd)/out DTC_EXT=$(pwd)/tools/dtc CONFIG_BUILD_ARM64_DT_OVERLAY=y CLANG_TRIPLE=aarch64-linux-gnu- winnerlte_eur_open_defconfig
                 $ make -C $(pwd) O=$(pwd)/out DTC_EXT=$(pwd)/tools/dtc CONFIG_BUILD_ARM64_DT_OVERLAY=y CLANG_TRIPLE=aarch64-linux-gnu-
 
 
-2. Output files
+4. Output files
         - Kernel : arch/arm64/boot/Image
         - module : drivers/*/*.ko
 
-3. How to Clean
+5. How to Clean
         Change to OUTPUT_DIR folder
         EX) /home/dpi/qb5_8814/workspace/P4_1716/android/out/target/product/winnerx/out
         $ make clean
