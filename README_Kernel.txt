@@ -2,7 +2,7 @@
 
 1. Download and unzip the kernel source of F907BXXU3BTDD.
 
-2. Unzip and update the kernel source of F907BXXS4BTF2.
+2. Unzip and update the kernel source of F907BXXS4BTG1.
 
 3. How to Build
         - get Toolchain
